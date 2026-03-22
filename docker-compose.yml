@@ -1,0 +1,42 @@
+version: "3.8"
+
+services:
+  # ─── MongoDB ───
+  mongo:
+    image: mongo:7
+    container_name: nemark_mongo
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - "27017:27017"
+    networks:
+      - nemark_net
+
+  # ─── Application (Next.js + Express + Socket.IO) ───
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nemark_app
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    ports:
+      - "3010:3010"
+      - "4010:4010"
+    volumes:
+      - ./data:/app/data
+      - ./public/uploads:/app/public/uploads
+    depends_on:
+      - mongo
+    networks:
+      - nemark_net
+
+volumes:
+  mongo_data:
+    driver: local
+
+networks:
+  nemark_net:
+    driver: bridge

@@ -8,6 +8,8 @@
     "dev": "concurrently \"npm run dev:next\" \"npm run dev:server\"",
     "build": "next build",
     "start": "next start",
+    "start:server": "node --import tsx src/bootstrap/index.ts",
+    "start:prod": "concurrently \"next start -p 3010\" \"npm run start:server\"",
     "lint": "eslint"
   },
   "dependencies": {
