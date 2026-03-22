@@ -3,10 +3,10 @@ import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
 import {
     Button, Modal, Form, Input, Select, Switch, ColorPicker, Tabs, message,
-    Empty, Spin, Tag, Drawer, Divider, Typography, Card, Space, Badge
+    Empty, Spin, Tag, Drawer, Divider, Typography, Card, Space, Badge, Upload
 } from 'antd';
 import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
-import { Plus, Copy, Code, Settings, Trash2, ArrowLeft, Eye, Globe, MessageSquare } from 'lucide-react';
+import { Plus, Copy, Code, Settings, Trash2, ArrowLeft, Eye, Globe, MessageSquare, Upload as UploadIcon } from 'lucide-react';
 import { useGetMe } from '../../../domains/auth/auth.hooks';
 import { useWorkspace } from '../../../domains/workspace/workspace.hooks';
 import { useTotalUnreadCount } from '../../../domains/conversation';
@@ -14,6 +14,7 @@ import {
     useWidgetsByWorkspace, useCreateWidget, useUpdateWidget, useDeleteWidget
 } from '../../../domains/workspace/widget.hooks';
 import AppLayout from '../../../components/layout/AppLayout';
+import { uploadService } from '../../../services/upload.service';
 
 const { Text } = Typography;
 
@@ -26,6 +27,11 @@ function buildLiveConfig(values: any) {
     return {
         name: values?.name || '',
         primaryColor: color || '#6366f1',
+        gradient: values?.gradient || '',
+        launcherStyle: values?.launcherStyle || 'bubble',
+        launcherText: values?.launcherText || '',
+        launcherIcon: values?.launcherIcon || '',
+        tooltipText: values?.tooltipText || '',
         greeting: values?.greeting || 'Xin chào!',
         placeholder: values?.placeholder || 'Nhập tin nhắn...',
         position: values?.position || 'bottom-right',
@@ -62,59 +68,182 @@ function LivePreview({ form }: { form: any }) {
 }
 
 function WidgetPreview({ config }: { config: any }) {
-    return (
-        <div style={{
-            width: 320, borderRadius: 16, overflow: 'hidden',
-            boxShadow: '0 8px 40px rgba(0,0,0,0.12)', fontFamily: 'inherit',
-            border: '1px solid var(--color-border)'
-        }}>
-            {/* Header */}
-            <div style={{
-                background: config?.primaryColor || '#6366f1',
-                padding: '20px 20px 16px', color: 'white'
-            }}>
-                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{config?.name || 'Chat hỗ trợ'}</div>
-                <div style={{ fontSize: 13, opacity: 0.85 }}>{config?.greeting || 'Xin chào!'}</div>
-            </div>
-            {/* Pre-chat form preview */}
-            {config?.preChatForm?.enabled && (
-                <div style={{ padding: 16, background: '#fafafa' }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: '#333' }}>
-                        {config.preChatForm.title || 'Nhập thông tin'}
-                    </div>
-                    {(config.preChatForm.fields || []).filter((f: any) => f.enabled).map((f: any) => (
-                        <div key={f.key} style={{ marginBottom: 8 }}>
-                            <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>
-                                {f.label} {f.required && <span style={{ color: 'red' }}>*</span>}
-                            </div>
-                            <div style={{
-                                height: 32, borderRadius: 6, border: '1px solid #ddd',
-                                background: 'white', padding: '0 8px', fontSize: 12,
-                                display: 'flex', alignItems: 'center', color: '#bbb'
-                            }}>
-                                {f.label}...
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            )}
-            {/* Input */}
-            <div style={{
-                padding: '12px 16px', borderTop: '1px solid #eee',
-                display: 'flex', alignItems: 'center', gap: 8, background: 'white'
-            }}>
+    const bgStyle = config?.gradient
+        ? { background: config.gradient }
+        : { background: config?.primaryColor || '#6366f1' };
+
+    const launcherStyle = config?.launcherStyle || 'bubble';
+
+    const renderLauncherIcon = () => {
+        if (config?.launcherIcon) {
+            if (config.launcherStyle !== 'image' && config.launcherIcon.includes('.svg')) {
+                return (
+                    <div style={{
+                        width: 28, height: 28, backgroundColor: 'currentColor',
+                        WebkitMaskImage: `url(${config.launcherIcon})`, WebkitMaskSize: 'contain',
+                        WebkitMaskPosition: 'center', WebkitMaskRepeat: 'no-repeat',
+                        maskImage: `url(${config.launcherIcon})`, maskSize: 'contain',
+                        maskPosition: 'center', maskRepeat: 'no-repeat'
+                    }} />
+                );
+            }
+            return (
+                <img
+                    src={config.launcherIcon}
+                    alt="icon"
+                    style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover' }}
+                />
+            );
+        }
+        return (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+            </svg>
+        );
+    };
+
+    const renderBubble = () => {
+        if (launcherStyle === 'tab') {
+            return (
                 <div style={{
-                    flex: 1, height: 36, borderRadius: 18, border: '1px solid #ddd',
-                    background: '#f8f8f8', padding: '0 14px', fontSize: 13,
-                    display: 'flex', alignItems: 'center', color: '#aaa'
+                    ...bgStyle,
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '10px 20px', borderRadius: '20px 20px 0 0',
+                    color: 'white', fontWeight: 600, fontSize: 14,
+                    cursor: 'pointer', boxShadow: '0 -4px 12px rgba(0,0,0,0.15)',
+                    width: 'fit-content'
                 }}>
-                    {config?.placeholder || 'Nhập tin nhắn...'}
+                    {renderLauncherIcon()}
+                    <span>{config?.launcherText || 'Chat'}</span>
                 </div>
+            );
+        }
+        if (launcherStyle === 'pill') {
+            return (
                 <div style={{
-                    width: 36, height: 36, borderRadius: '50%',
-                    background: config?.primaryColor || '#6366f1',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 16
-                }}>→</div>
+                    ...bgStyle,
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '12px 24px', borderRadius: 50,
+                    color: 'white', fontWeight: 600, fontSize: 14,
+                    cursor: 'pointer', boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+                    width: 'fit-content'
+                }}>
+                    {renderLauncherIcon()}
+                    <span>{config?.launcherText || 'Hỗ trợ'}</span>
+                </div>
+            );
+        }
+        if (launcherStyle === 'image') {
+            return (
+                <div style={{
+                    width: 60, height: 60, borderRadius: '50%', overflow: 'hidden',
+                    cursor: 'pointer', boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+                    ...bgStyle,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}>
+                    {config?.launcherIcon ? (
+                        <img
+                            src={config.launcherIcon}
+                            alt="launcher"
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        />
+                    ) : (
+                        renderLauncherIcon()
+                    )}
+                </div>
+            );
+        }
+        // Default: bubble
+        return (
+            <div style={{
+                width: 56, height: 56, borderRadius: '50%',
+                ...bgStyle,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer', boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+            }}>
+                {renderLauncherIcon()}
+            </div>
+        );
+    };
+
+    return (
+        <div>
+            {/* Chat window preview */}
+            <div style={{
+                width: 320, borderRadius: 16, overflow: 'hidden',
+                boxShadow: '0 8px 40px rgba(0,0,0,0.12)', fontFamily: 'inherit',
+                border: '1px solid var(--color-border)'
+            }}>
+                {/* Header */}
+                <div style={{
+                    ...bgStyle,
+                    padding: '20px 20px 16px', color: 'white'
+                }}>
+                    <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{config?.name || 'Chat hỗ trợ'}</div>
+                    <div style={{ fontSize: 13, opacity: 0.85 }}>{config?.greeting || 'Xin chào!'}</div>
+                </div>
+                {/* Pre-chat form preview */}
+                {config?.preChatForm?.enabled && (
+                    <div style={{ padding: 16, background: '#fafafa' }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: '#333' }}>
+                            {config.preChatForm.title || 'Nhập thông tin'}
+                        </div>
+                        {(config.preChatForm.fields || []).filter((f: any) => f.enabled).map((f: any) => (
+                            <div key={f.key} style={{ marginBottom: 8 }}>
+                                <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>
+                                    {f.label} {f.required && <span style={{ color: 'red' }}>*</span>}
+                                </div>
+                                <div style={{
+                                    height: 32, borderRadius: 6, border: '1px solid #ddd',
+                                    background: 'white', padding: '0 8px', fontSize: 12,
+                                    display: 'flex', alignItems: 'center', color: '#bbb'
+                                }}>
+                                    {f.label}...
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+                {/* Input */}
+                <div style={{
+                    padding: '12px 16px', borderTop: '1px solid #eee',
+                    display: 'flex', alignItems: 'center', gap: 8, background: 'white'
+                }}>
+                    <div style={{
+                        flex: 1, height: 36, borderRadius: 18, border: '1px solid #ddd',
+                        background: '#f8f8f8', padding: '0 14px', fontSize: 13,
+                        display: 'flex', alignItems: 'center', color: '#aaa'
+                    }}>
+                        {config?.placeholder || 'Nhập tin nhắn...'}
+                    </div>
+                    <div style={{
+                        width: 36, height: 36, borderRadius: '50%',
+                        ...bgStyle,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 16
+                    }}>→</div>
+                </div>
+            </div>
+
+            {/* Launcher bubble preview */}
+            <div style={{
+                marginTop: 20, padding: 16, background: '#f0f0f5', borderRadius: 12,
+                border: '1px solid var(--color-border)'
+            }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#666', marginBottom: 12 }}>
+                    Nút bấm (Launcher)
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                    {renderBubble()}
+                    {config?.tooltipText && (
+                        <div style={{
+                            background: '#333', color: 'white', padding: '6px 12px',
+                            borderRadius: 8, fontSize: 12, whiteSpace: 'nowrap',
+                            boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+                        }}>
+                            {config.tooltipText}
+                        </div>
+                    )}
+                </div>
             </div>
         </div>
     );
@@ -213,6 +342,11 @@ export default function WorkspaceDetailPage() {
         configForm.setFieldsValue({
             name: widget.name,
             primaryColor: color,
+            gradient: widget.config?.gradient || '',
+            launcherStyle: widget.config?.launcherStyle || 'bubble',
+            launcherText: widget.config?.launcherText || '',
+            launcherIcon: widget.config?.launcherIcon || '',
+            tooltipText: widget.config?.tooltipText || '',
             greeting: widget.config?.greeting,
             placeholder: widget.config?.placeholder,
             position: widget.config?.position || 'bottom-right',
@@ -250,11 +384,21 @@ export default function WorkspaceDetailPage() {
             if (typeof colorVal === 'object' && colorVal?.toHexString) colorVal = colorVal.toHexString();
 
             const domainList = (values.domains || []).map((d: any) => d.value).filter(Boolean);
+            // Handle gradient: if user selected __custom__ but didn't pick colors, apply default gradient
+            let gradientVal = values.gradient || '';
+            if (gradientVal === '__custom__') {
+                gradientVal = 'linear-gradient(135deg, #6366f1, #a855f7)';
+            }
             const payload = {
                 widgetId: editingWidget._id,
                 name: values.name,
                 config: {
                     primaryColor: colorVal,
+                    gradient: gradientVal,
+                    launcherStyle: values.launcherStyle,
+                    launcherText: values.launcherText,
+                    launcherIcon: values.launcherIcon,
+                    tooltipText: values.tooltipText,
                     greeting: values.greeting,
                     placeholder: values.placeholder,
                     position: values.position,
@@ -456,10 +600,12 @@ export default function WorkspaceDetailPage() {
                                                 <Form.Item label="Placeholder" name="placeholder">
                                                     <Input />
                                                 </Form.Item>
-                                                <Form.Item label="Vị trí" name="position">
+                                                <Form.Item label="Vị trí hiển thị" name="position">
                                                     <Select options={[
-                                                        { value: 'bottom-right', label: 'Dưới phải' },
+                                                        { value: 'bottom-right', label: 'Dưới phải (Mặc định)' },
                                                         { value: 'bottom-left', label: 'Dưới trái' },
+                                                        { value: 'side-right', label: 'Gắn cạnh phải (Middle Right)' },
+                                                        { value: 'side-left', label: 'Gắn cạnh trái (Middle Left)' },
                                                     ]} />
                                                 </Form.Item>
                                                 <Form.Item label="Ngôn ngữ" name="language">
@@ -476,6 +622,158 @@ export default function WorkspaceDetailPage() {
                                                 </Form.Item>
                                                 <Form.Item label="Hiện thương hiệu NemarChat" name="showBranding" valuePropName="checked">
                                                     <Switch />
+                                                </Form.Item>
+                                            </>
+                                        ),
+                                    },
+                                    {
+                                        key: 'appearance', label: 'Giao diện',
+                                        children: (
+                                            <>
+                                                <Form.Item label="Kiểu nút bấm (Style)" name="launcherStyle">
+                                                    <Select options={[
+                                                        { value: 'bubble', label: 'Bong bóng tròn (Bubble)' },
+                                                        { value: 'tab', label: 'Thẻ cạnh viền (Tab)' },
+                                                        { value: 'pill', label: 'Hình viên thuốc (Pill)' },
+                                                        { value: 'image', label: 'Ảnh tùy chỉnh (Image)' },
+                                                    ]} />
+                                                </Form.Item>
+                                                
+                                                <Form.Item noStyle shouldUpdate={(prev, cur) => prev.launcherStyle !== cur.launcherStyle}>
+                                                    {({ getFieldValue }) => {
+                                                        const style = getFieldValue('launcherStyle') || 'bubble';
+                                                        if (style === 'tab' || style === 'pill') {
+                                                            return (
+                                                                <Form.Item label="Văn bản trên nút" name="launcherText" extra="VD: Hỗ trợ, Text us...">
+                                                                    <Input placeholder="Nhập chữ..." />
+                                                                </Form.Item>
+                                                            );
+                                                        }
+                                                        return null;
+                                                    }}
+                                                </Form.Item>
+
+                                                <Form.Item label="Icon / Ảnh đại diện nút" extra="Nhập URL ảnh hoặc tải ảnh lên để thay thế icon SVG mặc định.">
+                                                    <Space.Compact style={{ width: '100%' }}>
+                                                        <Form.Item name="launcherIcon" noStyle>
+                                                            <Input placeholder="https://..." style={{ flex: 1 }} />
+                                                        </Form.Item>
+                                                        <Upload
+                                                            showUploadList={false}
+                                                            accept="image/*"
+                                                            customRequest={async (options) => {
+                                                                try {
+                                                                    const res = await uploadService.uploadImage(options.file as File);
+                                                                    if (res && res.url) {
+                                                                        // The uploaded file is served from the backend (port 4010)
+                                                                        const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:4010';
+                                                                        const fullUrl = apiBase + res.url;
+                                                                        configForm.setFieldValue('launcherIcon', fullUrl);
+                                                                        message.success('Tải ảnh thành công!');
+                                                                        options.onSuccess?.(res);
+                                                                    }
+                                                                } catch (error) {
+                                                                    message.error('Tải ảnh thất bại');
+                                                                    options.onError?.(error as any);
+                                                                }
+                                                            }}
+                                                        >
+                                                            <Button icon={<UploadIcon size={16} />} title="Tải ảnh lên" />
+                                                        </Upload>
+                                                    </Space.Compact>
+                                                    {configForm.getFieldValue('launcherIcon') && (
+                                                        <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                            <img src={configForm.getFieldValue('launcherIcon')} alt="preview" style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover', border: '1px solid #eee' }} />
+                                                            <Button size="small" danger type="text" onClick={() => configForm.setFieldValue('launcherIcon', '')}>Xoá icon</Button>
+                                                        </div>
+                                                    )}
+                                                </Form.Item>
+
+                                                <Form.Item label="Tooltip (Trỏ chuột)" name="tooltipText" extra="VD: Liên hệ với chúng tôi">
+                                                    <Input placeholder="Nhập chữ hiển thị khi hover..." />
+                                                </Form.Item>
+
+                                                <Form.Item label="Dải màu nền (Gradient)" extra="Ghi đè màu chủ đạo. Chọn mẫu có sẵn hoặc tự chọn 2 màu.">
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                                        {/* Preset gradient selector */}
+                                                        <Form.Item name="gradient" noStyle>
+                                                            <Select allowClear placeholder="Chọn dải màu có sẵn..." onChange={(val) => {
+                                                                if (val) configForm.setFieldValue('gradient', val);
+                                                            }} options={[
+                                                                { value: 'linear-gradient(135deg, #6366f1, #a855f7)', label: '💜 Indigo Purple' },
+                                                                { value: 'linear-gradient(135deg, #3b82f6, #06b6d4)', label: '🌊 Ocean Blue' },
+                                                                { value: 'linear-gradient(135deg, #ec4899, #f43f5e)', label: '💖 Love Pink' },
+                                                                { value: 'linear-gradient(135deg, #f59e0b, #ed8936)', label: '🌅 Sunset Orange' },
+                                                                { value: 'linear-gradient(135deg, #10b981, #3b82f6)', label: '🌿 Emerald Sea' },
+                                                                { value: 'linear-gradient(135deg, #111827, #374151)', label: '🌑 Midnight Dark' },
+                                                                { value: '__custom__', label: '🎨 Tuỳ chỉnh (chọn 2 màu)' },
+                                                            ]} />
+                                                        </Form.Item>
+                                                        {/* Custom dual-color picker */}
+                                                        <Form.Item noStyle shouldUpdate={(prev, cur) => prev.gradient !== cur.gradient}>
+                                                            {({ getFieldValue }) => {
+                                                                const g = getFieldValue('gradient') || '';
+                                                                if (g === '__custom__' || (g && !g.startsWith('linear-gradient(135deg, #') || g === '__custom__')) {
+                                                                    return null; // show below
+                                                                }
+                                                                return null;
+                                                            }}
+                                                        </Form.Item>
+                                                        <Form.Item noStyle shouldUpdate>
+                                                            {({ getFieldValue, setFieldValue }) => {
+                                                                const g = getFieldValue('gradient') || '';
+                                                                const isCustom = g === '__custom__' || (g && g.startsWith('linear-gradient') && ![
+                                                                    'linear-gradient(135deg, #6366f1, #a855f7)',
+                                                                    'linear-gradient(135deg, #3b82f6, #06b6d4)',
+                                                                    'linear-gradient(135deg, #ec4899, #f43f5e)',
+                                                                    'linear-gradient(135deg, #f59e0b, #ed8936)',
+                                                                    'linear-gradient(135deg, #10b981, #3b82f6)',
+                                                                    'linear-gradient(135deg, #111827, #374151)',
+                                                                ].includes(g));
+                                                                if (!isCustom && g !== '__custom__') return null;
+
+                                                                // Parse existing gradient colors or use defaults
+                                                                let c1 = '#6366f1', c2 = '#a855f7';
+                                                                if (g && g !== '__custom__') {
+                                                                    const match = g.match(/#[0-9a-fA-F]{6}/g);
+                                                                    if (match && match.length >= 2) { c1 = match[0]; c2 = match[1]; }
+                                                                }
+
+                                                                return (
+                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: '#fafafa', borderRadius: 10, border: '1px solid #f0f0f0' }}>
+                                                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                                                                            <span style={{ fontSize: 11, color: '#888' }}>Màu 1</span>
+                                                                            <ColorPicker value={c1} showText size="small" onChange={(color) => {
+                                                                                const hex1 = color.toHexString();
+                                                                                setFieldValue('gradient', `linear-gradient(135deg, ${hex1}, ${c2})`);
+                                                                            }} />
+                                                                        </div>
+                                                                        <div style={{ flex: 1, height: 32, borderRadius: 8, background: `linear-gradient(90deg, ${c1}, ${c2})` }} />
+                                                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                                                                            <span style={{ fontSize: 11, color: '#888' }}>Màu 2</span>
+                                                                            <ColorPicker value={c2} showText size="small" onChange={(color) => {
+                                                                                const hex2 = color.toHexString();
+                                                                                setFieldValue('gradient', `linear-gradient(135deg, ${c1}, ${hex2})`);
+                                                                            }} />
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            }}
+                                                        </Form.Item>
+                                                        {/* Preview swatch */}
+                                                        <Form.Item noStyle shouldUpdate>
+                                                            {({ getFieldValue }) => {
+                                                                const g = getFieldValue('gradient');
+                                                                if (!g || g === '__custom__') return null;
+                                                                return (
+                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                                        <div style={{ width: 120, height: 28, borderRadius: 6, background: g, border: '1px solid #e0e0e0' }} />
+                                                                        <span style={{ fontSize: 11, color: '#999' }}>Xem trước</span>
+                                                                    </div>
+                                                                );
+                                                            }}
+                                                        </Form.Item>
+                                                    </div>
                                                 </Form.Item>
                                             </>
                                         ),

@@ -4,6 +4,7 @@ import Head from 'next/head';
 import { Spin } from 'antd';
 import AppLayout from '../../../components/layout/AppLayout';
 import WorkspaceSettingsForm from '../../../features/workspace/components/WorkspaceSettingsForm';
+import ZaloIntegrationSettings from '../../../features/workspace/components/ZaloIntegrationSettings';
 
 export default function WorkspaceSettingsPage() {
     const router = useRouter();
@@ -29,6 +30,7 @@ export default function WorkspaceSettingsPage() {
             <Head><title>Cài đặt Workspace | NemarChat</title></Head>
             <main style={{ maxWidth: 800, margin: '0 auto', padding: '40px 24px' }}>
                 <WorkspaceSettingsForm workspaceId={workspaceId as string} />
+                <ZaloIntegrationSettings workspaceId={workspaceId as string} />
             </main>
         </AppLayout>
     );

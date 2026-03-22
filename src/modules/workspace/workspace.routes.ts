@@ -4,6 +4,7 @@ import { workspaceValidate, widgetValidate, offlineMessageValidate } from './wor
 import { validateRequest } from '../../middlewares/validateRequest';
 import { requireAuth } from '../../middlewares/auth.middleware';
 import { requirePermission } from '../../middlewares/permission.middleware';
+import { zaloRoutes } from '../zalo/zalo.routes';
 import { scopeCheck } from '../../middlewares/scopeCheck';
 import { PERMISSIONS } from '../../config/permissions';
 
@@ -197,6 +198,9 @@ router.get(
     scopeCheck,
     workspaceController.getAgentPerformance
 );
+
+// Mount sub-routers
+router.use('/:workspaceId/zalo', zaloRoutes); // Tích hợp API Zalo
 
 // ────────── Presence ──────────
 router.get(

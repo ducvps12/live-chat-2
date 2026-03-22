@@ -67,6 +67,51 @@ router.get(
     conversationController.getUnreadCount
 );
 
+router.delete(
+    '/workspace/:workspaceId/reset-messages',
+    requireAuth,
+    scopeCheck,
+    conversationController.resetMessages
+);
+
+// ────────── Visitors (must be before generic /:conversationId) ──────────
+router.get(
+    '/workspace/:workspaceId/visitors',
+    requireAuth,
+    scopeCheck,
+    conversationController.getVisitors
+);
+
+router.get(
+    '/workspace/:workspaceId/visitors/export',
+    requireAuth,
+    scopeCheck,
+    conversationController.exportVisitors
+);
+
+router.get(
+    '/workspace/:workspaceId/visitors/:visitorId',
+    requireAuth,
+    scopeCheck,
+    conversationController.getVisitor
+);
+
+router.patch(
+    '/workspace/:workspaceId/visitors/:visitorId',
+    requireAuth,
+    scopeCheck,
+    conversationController.updateVisitor
+);
+
+// ────────── SLA (must be before generic /:conversationId) ──────────
+router.get(
+    '/workspace/:workspaceId/sla/check',
+    requireAuth,
+    scopeCheck,
+    conversationController.checkSLA
+);
+
+// ────────── Conversation-specific routes ──────────
 router.get(
     '/workspace/:workspaceId/:conversationId',
     requireAuth,
@@ -153,13 +198,6 @@ router.patch(
 );
 
 router.get(
-    '/workspace/:workspaceId/sla/check',
-    requireAuth,
-    scopeCheck,
-    conversationController.checkSLA
-);
-
-router.get(
     '/workspace/:workspaceId/:conversationId/messages/:messageId/context',
     requireAuth,
     scopeCheck,
@@ -187,28 +225,6 @@ router.delete(
     scopeCheck,
     conversationController.recallMessage
 );
-
-router.get(
-    '/workspace/:workspaceId/visitors',
-    requireAuth,
-    scopeCheck,
-    conversationController.getVisitors
-);
-
-router.get(
-    '/workspace/:workspaceId/visitors/:visitorId',
-    requireAuth,
-    scopeCheck,
-    conversationController.getVisitor
-);
-
-router.patch(
-    '/workspace/:workspaceId/visitors/:visitorId',
-    requireAuth,
-    scopeCheck,
-    conversationController.updateVisitor
-);
-
 // ────────── Tags on conversation ──────────
 router.post(
     '/workspace/:workspaceId/:conversationId/tags',

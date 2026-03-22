@@ -3,6 +3,7 @@ import { SenderType, MessageType } from './common';
 // ── Attachment ──
 export interface Attachment {
     data: string;       // base64 data URI
+    url?: string;       // URL (for Zalo/external images)
     filename: string;
     mimeType: string;
     size: number;

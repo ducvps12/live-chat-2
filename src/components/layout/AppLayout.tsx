@@ -2,12 +2,16 @@ import React, { useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import { Layout, Menu, Dropdown, Avatar, Spin, Badge } from 'antd';
 import { 
-    MessageSquare, Settings, Users, Box, User, LogOut, Code, ChevronDown, CheckCircle, ChevronLeft, ChevronRight, LayoutDashboard 
+    MessageSquare, Settings, Users, Box, User, LogOut, Code, ChevronDown, CheckCircle, ChevronLeft, ChevronRight, LayoutDashboard, Contact2 
 } from 'lucide-react';
 import Link from 'next/link';
 import { useGetMe, useLogout } from '../../domains/auth/auth.hooks';
 import { useTotalUnreadCount } from '../../domains/conversation';
 import { useMyWorkspaces } from '../../domains/workspace/workspace.hooks';
+import { playNotificationSound } from '../../utils/audio';
+import { useQueryClient } from '@tanstack/react-query';
+import io, { Socket } from 'socket.io-client';
+import { useEffect, useRef } from 'react';
 
 const { Header, Sider, Content } = Layout;
 
@@ -26,8 +30,62 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
 
     const { data: meData, isLoading: meLoading } = useGetMe(true);
     const { mutateAsync: logout } = useLogout();
-    const { data: unreadCount = 0 } = useTotalUnreadCount(workspaceId || '', !!workspaceId && !!meData);
+    const { data: unreadCounts } = useTotalUnreadCount(workspaceId || '', !!workspaceId && !!meData);
+    const unreadCount = unreadCounts?.totalUnread || 0;
     const { data: wsData } = useMyWorkspaces();
+
+    const queryClient = useQueryClient();
+    const socketRef = useRef<Socket | null>(null);
+
+    // Global Socket for unread counts and generic notification sounds outside chat pages
+    useEffect(() => {
+        if (!workspaceId) return;
+
+        const token = localStorage.getItem('token');
+        if (!token) return;
+
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4010';
+        const baseUrl = apiUrl.replace(/\/api$/, '');
+
+        const socket = io(baseUrl, {
+            auth: { token },
+            transports: ['websocket'],
+        });
+        socketRef.current = socket;
+
+        socket.on('connect', () => {
+            socket.emit('agent:join', { workspaceId });
+        });
+
+        socket.on('conversation:updated', (data: any) => {
+            const isFromVisitor = data.lastMessage?.sender?.type === 'visitor';
+            if (isFromVisitor) {
+                // If the user is actively on a chat page (inbox or Zalo), those pages handle sounds
+                // and read status independently, so we just ignore it here to avoid double ringing.
+                const p = window.location.pathname;
+                const isChatPage = p.includes('/inbox') || p.includes('/remote-session');
+                
+                if (!isChatPage) {
+                    playNotificationSound();
+                    queryClient.invalidateQueries({ queryKey: ['conversations', workspaceId, 'unread-count'] });
+                }
+            }
+        });
+
+        socket.on('conversation:new', (data: any) => {
+            const p = window.location.pathname;
+            const isChatPage = p.includes('/inbox') || p.includes('/remote-session');
+            if (!isChatPage) {
+                playNotificationSound();
+                queryClient.invalidateQueries({ queryKey: ['conversations', workspaceId, 'unread-count'] });
+            }
+        });
+
+        return () => {
+            socket.disconnect();
+            socketRef.current = null;
+        };
+    }, [workspaceId, queryClient]);
 
     const user = meData?.data?.user;
     const workspaces = wsData?.data || [];
@@ -68,6 +126,11 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                 label: <Link href={`/workspace/${workspaceId}/inbox`}>Hộp thư</Link>,
             },
             {
+                key: `/workspace/${workspaceId}/contacts`,
+                icon: <Contact2 size={20} />,
+                label: <Link href={`/workspace/${workspaceId}/contacts`}>Người dùng</Link>,
+            },
+            {
                 key: `/workspace/${workspaceId}/widgets`,
                 icon: <Code size={20} />,
                 label: <Link href={`/workspace/${workspaceId}/widgets`}>Widgets</Link>,
@@ -98,6 +161,7 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
     let selectedKey = router.pathname;
     if (workspaceId) {
         if (router.pathname.includes('/inbox')) selectedKey = `/workspace/${workspaceId}/inbox`;
+        else if (router.pathname.includes('/contacts')) selectedKey = `/workspace/${workspaceId}/contacts`;
         else if (router.pathname.includes('/teams')) selectedKey = `/workspace/${workspaceId}/teams`;
         else if (router.pathname.includes('/settings')) selectedKey = `/workspace/${workspaceId}/settings`;
         else if (router.pathname.includes('/widgets')) selectedKey = `/workspace/${workspaceId}/widgets`;

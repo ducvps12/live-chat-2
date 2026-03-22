@@ -10,6 +10,7 @@ import { initSocketGateway } from '../infra/socket';
 import rootRouter from '../routes';
 import { errorHandler, AppError } from '../middlewares/errorHandler';
 import { requestIdMiddleware } from '../middlewares/requestId';
+import { zaloService } from '../modules/zalo/zalo.service';
 
 const bootstrap = async () => {
     // 1. Connect to Database
@@ -53,6 +54,11 @@ const bootstrap = async () => {
     const port = env.PORT || 4000;
     server.listen(port, () => {
         console.log(`[Server] Backend process running on http://localhost:${port}`);
+        
+        // Boot up active Zalo sessions
+        zaloService.bootActiveAccounts().catch(err => {
+            console.error('[Server] Failed to boot Zalo accounts:', err);
+        });
     });
 };
 

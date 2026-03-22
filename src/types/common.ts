@@ -16,6 +16,6 @@ export interface PaginatedResponse<T> {
 export type SenderType = 'visitor' | 'agent' | 'system';
 export type MessageType = 'text' | 'image' | 'file' | 'system';
 export type ConversationStatus = 'open' | 'pending' | 'closed' | 'resolved';
-export type WidgetPosition = 'bottom-right' | 'bottom-left';
+export type WidgetPosition = 'bottom-right' | 'bottom-left' | 'side-right' | 'side-left';
 export type WorkspacePlan = 'free' | 'starter' | 'pro' | 'enterprise';
 export type MemberRole = 'owner' | 'admin' | 'agent' | 'member';

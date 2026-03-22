@@ -14,6 +14,11 @@ export interface PreChatField {
 // ── Widget configuration ──
 export interface WidgetConfig {
     primaryColor: string;
+    gradient?: string;
+    launcherStyle?: 'bubble' | 'tab' | 'pill' | 'image';
+    launcherText?: string;
+    launcherIcon?: string;
+    tooltipText?: string;
     greeting: string;
     placeholder: string;
     position: WidgetPosition;

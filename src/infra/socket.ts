@@ -8,10 +8,52 @@ import { conversationRepo } from '../modules/conversation/repos/conversation.rep
 import { presenceStore } from './presence';
 import { browserPool } from './browserPool';
 import { startScreencast, stopScreencast, dispatchMouse, dispatchKeyboard, dispatchScroll, detectLoginState } from './sessionStream';
-import { createZaloSession, restoreZaloSession, getZaloConversations, getZaloMessages, sendZaloMsg, destroyZaloSession, isZaloSessionConnected, hasStoredCredentials, logoutZaloSession } from './zaloService';
+import { createZaloSession, restoreZaloSession, getZaloConversations, getZaloMessages, sendZaloMsg, sendZaloImage, destroyZaloSession, isZaloSessionConnected, hasStoredCredentials, logoutZaloSession } from './zaloService';
 import { externalSessionRepo } from '../modules/external-session/repos/externalSession.repo';
+import { zaloMessageRepo } from '../modules/zalo/repos/zalo-message.repo';
+import type { ZaloIncomingMessage } from './zaloService';
 
 let io: Server;
+
+// ── Workspace ID cache for Zalo sessions (avoid repeated DB queries) ──
+const sessionWorkspaceCache = new Map<string, string>();
+
+async function getWorkspaceIdForSession(sessionId: string): Promise<string | null> {
+    if (sessionWorkspaceCache.has(sessionId)) return sessionWorkspaceCache.get(sessionId)!;
+    try {
+        const session = await externalSessionRepo.findById(sessionId);
+        const wsId = session?.workspaceId?.toString() || null;
+        if (wsId) sessionWorkspaceCache.set(sessionId, wsId);
+        return wsId;
+    } catch { return null; }
+}
+
+async function saveZaloMessageToDB(sessionId: string, msg: ZaloIncomingMessage): Promise<void> {
+    try {
+        const workspaceId = await getWorkspaceIdForSession(sessionId);
+        if (!workspaceId) {
+            console.warn(`[ZaloDB] Cannot save message — no workspaceId for session ${sessionId}`);
+            return;
+        }
+        await zaloMessageRepo.saveMessage({
+            workspaceId,
+            threadId: msg.threadId,
+            threadType: msg.threadType,
+            msgId: msg.msgId,
+            senderId: msg.senderId,
+            senderName: msg.senderName,
+            content: msg.content,
+            msgType: msg.msgType,
+            attachmentUrl: msg.attachmentUrl,
+            thumbUrl: msg.thumbUrl,
+            isSelf: msg.isSelf,
+            timestamp: new Date(msg.timestamp),
+        });
+        console.log(`[ZaloDB] Message ${msg.msgId} saved (thread: ${msg.threadId}, self: ${msg.isSelf})`);
+    } catch (err) {
+        console.error(`[ZaloDB] Failed to save message ${msg.msgId}:`, err);
+    }
+}
 
 // ── Room naming conventions ──
 export const rooms = {
@@ -585,7 +627,7 @@ export function initSocketGateway(server: http.Server): Server {
                     },
                     // onLogin: session connected
                     async (session) => {
-                        console.log(`[ZaloZCA] Session ${sessionId} logged in via zca-js!`);
+                        console.log(`[ZaloZCA] Session ${sessionId} logged in via thành công`);
                         await externalSessionRepo.updateStatus(sessionId, 'connected', { connectedAt: new Date() });
                         socket.emit('session:status', { status: 'connected' });
                         socket.emit('session:loginDetected', {});
@@ -593,6 +635,8 @@ export function initSocketGateway(server: http.Server): Server {
                     },
                     // onMessage: realtime incoming message
                     (msg) => {
+                        // Persist to DB (fire-and-forget, non-blocking)
+                        saveZaloMessageToDB(sessionId, msg).catch(() => {});
                         remoteNs.to(`remote:${sessionId}`).emit('zalo:newMessage', {
                             msgId: msg.msgId,
                             content: msg.content,
@@ -604,6 +648,8 @@ export function initSocketGateway(server: http.Server): Server {
                             timestamp: msg.timestamp,
                             msgType: msg.msgType,
                             threadType: msg.threadType,
+                            attachmentUrl: msg.attachmentUrl,
+                            thumbUrl: msg.thumbUrl,
                         });
                     },
                     // onError
@@ -615,6 +661,15 @@ export function initSocketGateway(server: http.Server): Server {
                 console.error(`[ZaloZCA] connectZCA error:`, err);
                 socket.emit('zalo:zcaError', { sessionId, error: err.message });
             }
+        });
+
+        // ── Join Zalo session room for realtime events (zca-js) ──
+        socket.on('zalo:join', ({ sessionId }: { sessionId: string }) => {
+            const room = `remote:${sessionId}`;
+            const roomsToLeave = Array.from(socket.rooms).filter(r => r.startsWith('remote:') && r !== room);
+            for (const r of roomsToLeave) socket.leave(r);
+            socket.join(room);
+            console.log(`[ZaloZCA] Socket ${socket.id} joined room ${room} for realtime events`);
         });
 
         // ── Restore zca-js session from saved credentials (no QR needed) ──
@@ -632,6 +687,8 @@ export function initSocketGateway(server: http.Server): Server {
                     sessionId,
                     // onMessage
                     (msg) => {
+                        // Persist to DB (fire-and-forget, non-blocking)
+                        saveZaloMessageToDB(sessionId, msg).catch(() => {});
                         remoteNs.to(`remote:${sessionId}`).emit('zalo:newMessage', {
                             msgId: msg.msgId,
                             content: msg.content,
@@ -643,6 +700,8 @@ export function initSocketGateway(server: http.Server): Server {
                             timestamp: msg.timestamp,
                             msgType: msg.msgType,
                             threadType: msg.threadType,
+                            attachmentUrl: msg.attachmentUrl,
+                            thumbUrl: msg.thumbUrl,
                         });
                     },
                     // onError
@@ -707,6 +766,30 @@ export function initSocketGateway(server: http.Server): Server {
                 console.log(`[Zalo] Getting messages via zca-js for thread ${threadId}...`);
                 const messages = await getZaloMessages(sessionId, threadId, threadType || 'user');
                 console.log(`[Zalo] zca-js returned ${messages.length} messages`);
+
+                // SAVE HISTORY TO DB (fire-and-forget)
+                getWorkspaceIdForSession(sessionId).then(workspaceId => {
+                    if (workspaceId && messages.length > 0) {
+                        const toSave = messages.map((m: any) => ({
+                            workspaceId,
+                            threadId,
+                            threadType: threadType || 'user',
+                            msgId: m.id,
+                            senderId: String(m.senderId),
+                            senderName: m.senderName || (m.senderType === 'me' ? 'Agent' : 'Khách'),
+                            content: m.content || '',
+                            msgType: m.type || 'text',
+                            attachmentUrl: m.attachmentUrl,
+                            thumbUrl: m.thumbUrl,
+                            isSelf: m.senderType === 'me',
+                            timestamp: new Date(m.createdAt),
+                        }));
+                        zaloMessageRepo.saveMany(toSave).catch(err => {
+                            console.error('[ZaloDB] Failed to save scraped history messages:', err);
+                        });
+                    }
+                }).catch(() => {});
+
                 socket.emit('zalo:messages', { messages });
             } catch (err: any) {
                 console.error(`[Zalo] getMessages error:`, err);
@@ -715,8 +798,8 @@ export function initSocketGateway(server: http.Server): Server {
         });
 
         // ── Send message (pure zca-js) ──
-        socket.on('zalo:sendMessage', async ({ sessionId, text, threadId, threadType }: {
-            sessionId: string; text: string; contactName?: string; threadId?: string; threadType?: 'user' | 'group';
+        socket.on('zalo:sendMessage', async ({ sessionId, text, threadId, threadType, imageUrl }: {
+            sessionId: string; text: string; contactName?: string; threadId?: string; threadType?: 'user' | 'group'; imageUrl?: string;
         }) => {
             try {
                 if (!isZaloSessionConnected(sessionId) || !threadId) {
@@ -724,11 +807,34 @@ export function initSocketGateway(server: http.Server): Server {
                     return;
                 }
 
-                console.log(`[Zalo] Sending via zca-js to ${threadType} ${threadId}: "${text.substring(0, 50)}"...`);
-                const result = await sendZaloMsg(sessionId, threadId, threadType || 'user', text);
+                let result;
+                if (imageUrl) {
+                    console.log(`[Zalo] Sending image via zca-js to ${threadType} ${threadId}: "${imageUrl.substring(0, 60)}"...`);
+                    result = await sendZaloImage(sessionId, threadId, threadType || 'user', imageUrl, text);
+                } else {
+                    console.log(`[Zalo] Sending via zca-js to ${threadType} ${threadId}: "${text.substring(0, 50)}"...`);
+                    result = await sendZaloMsg(sessionId, threadId, threadType || 'user', text);
+                }
                 socket.emit('zalo:messageSent', result);
 
                 if (result.success) {
+                    // Lưu tin nhắn ĐÃ GỬI vào DB
+                    const workspaceId = await getWorkspaceIdForSession(sessionId);
+                    if (workspaceId && text) {
+                        zaloMessageRepo.saveMessage({
+                            workspaceId,
+                            threadId: threadId!,
+                            threadType: threadType || 'user',
+                            msgId: result.msgId || `sent_${Date.now()}`,
+                            senderId: data.id,
+                            senderName: data.name || 'Agent',
+                            content: text,
+                            msgType: imageUrl ? 'image' : 'text',
+                            attachmentUrl: imageUrl,
+                            isSelf: true,
+                            timestamp: new Date(),
+                        }).catch((err: any) => console.error('[ZaloDB] Failed to save sent message:', err));
+                    }
                     // Re-fetch messages after send for updated list
                     await new Promise(r => setTimeout(r, 300));
                     const messages = await getZaloMessages(sessionId, threadId, threadType || 'user');

@@ -12,9 +12,14 @@ const preChatFieldSchema = Joi.object({
 
 const configSchema = Joi.object({
     primaryColor: Joi.string(),
+    gradient: Joi.string().allow(''),
+    launcherStyle: Joi.string().valid('bubble', 'tab', 'pill', 'image').allow(''),
+    launcherText: Joi.string().allow(''),
+    launcherIcon: Joi.string().allow(''),
+    tooltipText: Joi.string().allow(''),
     greeting: Joi.string(),
     placeholder: Joi.string(),
-    position: Joi.string().valid('bottom-right', 'bottom-left'),
+    position: Joi.string().valid('bottom-right', 'bottom-left', 'side-right', 'side-left'),
     language: Joi.string(),
     avatarUrl: Joi.string().uri().allow(''),
     showBranding: Joi.boolean(),

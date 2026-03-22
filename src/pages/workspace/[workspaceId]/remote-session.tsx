@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react'; // force reload
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import {
@@ -16,6 +16,10 @@ import {
 } from 'lucide-react';
 import { httpClient } from '../../../lib/http/client';
 import { useGetMe } from '../../../domains/auth/auth.hooks';
+import { useTotalUnreadCount } from '../../../domains/conversation/conversation.hooks';
+import { useQueryClient } from '@tanstack/react-query';
+import { playNotificationSound } from '../../../utils/audio';
+import { uploadService } from '../../../services/upload.service';
 import io, { Socket } from 'socket.io-client';
 import { useRef } from 'react';
 
@@ -52,9 +56,88 @@ interface ZaloMessage {
     sender: { type: 'agent' | 'customer' | 'system'; name?: string };
     content: string;
     type: 'text' | 'image' | 'file';
-    attachments?: Array<{ data: string; filename: string; mimeType: string; size: number }>;
+    attachments?: Array<{ data: string; url?: string; filename: string; mimeType: string; size: number }>;
+    attachmentUrl?: string;
+    thumbUrl?: string;
     status?: 'sent' | 'delivered' | 'read' | 'error';
     createdAt: string;
+}
+
+// ── Zalo image URL detection & rendering ──
+function isImageUrl(url: string): boolean {
+    return /\.(jpg|jpeg|png|gif|webp|bmp)(\?.*)?$/i.test(url) || /photo-stal[\w-]*\.zdn\.vn\//i.test(url);
+}
+
+function renderZaloContent(content: string, isAgent: boolean) {
+    if (!content) return null;
+
+    const IMAGE_URL_RE = /https?:\/\/[^\s]+\.(?:jpg|jpeg|png|gif|webp|bmp)(\?[^\s]*)?/gi;
+    const ZALO_CDN_RE = /https?:\/\/photo-stal[\w-]*\.zdn\.vn\/[^\s]+/gi;
+    const combinedRegex = new RegExp(`(${IMAGE_URL_RE.source}|${ZALO_CDN_RE.source})`, 'gi');
+    const parts: Array<{ type: 'text' | 'image'; value: string }> = [];
+    let lastIndex = 0;
+    let match;
+
+    combinedRegex.lastIndex = 0;
+    while ((match = combinedRegex.exec(content)) !== null) {
+        const url = match[0];
+        if (!isImageUrl(url)) continue;
+
+        if (match.index > lastIndex) {
+            const text = content.slice(lastIndex, match.index).trim();
+            if (text) parts.push({ type: 'text', value: text });
+        }
+        parts.push({ type: 'image', value: url });
+        lastIndex = match.index + url.length;
+    }
+
+    if (lastIndex < content.length) {
+        const text = content.slice(lastIndex).trim();
+        if (text) parts.push({ type: 'text', value: text });
+    }
+
+    // No images found → plain text
+    if (parts.every(p => p.type === 'text')) {
+        return <div>{content}</div>;
+    }
+
+    return (
+        <div>
+            {parts.map((part, i) =>
+                part.type === 'image' ? (
+                    <img
+                        key={i}
+                        src={part.value}
+                        alt="Zalo Image"
+                        style={{
+                            maxWidth: '100%',
+                            maxHeight: 280,
+                            borderRadius: 8,
+                            cursor: 'pointer',
+                            display: 'block',
+                            marginTop: i > 0 ? 6 : 0,
+                            marginBottom: 4,
+                        }}
+                        onClick={() => window.open(part.value, '_blank')}
+                        onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            target.style.display = 'none';
+                            const link = document.createElement('a');
+                            link.href = part.value;
+                            link.target = '_blank';
+                            link.textContent = '🔗 ' + part.value;
+                            link.style.color = isAgent ? '#e0e7ff' : '#6366f1';
+                            link.style.fontSize = '12px';
+                            link.style.wordBreak = 'break-all';
+                            target.parentElement?.insertBefore(link, target);
+                        }}
+                    />
+                ) : (
+                    <div key={i}>{part.value}</div>
+                )
+            )}
+        </div>
+    );
 }
 
 // ── Constants ──
@@ -127,11 +210,17 @@ export default function ZaloPersonalPage() {
 
     // ── Message state ──
     const [messages, setMessages] = useState<ZaloMessage[]>([]);
-    const [inputText, setInputText] = useState('');
     const [sending, setSending] = useState(false);
 
     // ── Scanning state ──
     const [scanningConvs, setScanningConvs] = useState(false);
+    const scanningConvsRef = useRef(false);
+
+    // Helper to keep ref in sync with state
+    const setScanning = (val: boolean) => {
+        scanningConvsRef.current = val;
+        setScanningConvs(val);
+    };
     const scanIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     // ── Message loading state ──
@@ -149,7 +238,10 @@ export default function ZaloPersonalPage() {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // ── Fetch accounts ──
+    const queryClient = useQueryClient();
+    const { data: unreadCounts } = useTotalUnreadCount(workspaceId as string, !!workspaceId && !!meData);
+    const inboxUnreadCount = unreadCounts?.inboxUnread || 0;
+
     const fetchAccounts = useCallback(async () => {
         if (!workspaceId) return;
         try {
@@ -174,6 +266,23 @@ export default function ZaloPersonalPage() {
         });
         socketRef.current = socket;
 
+        // ── Main namespace socket for general notification sounds ──
+        const mainSocket = io(baseUrl, {
+            auth: { token },
+            transports: ['websocket'],
+        });
+        mainSocket.on('connect', () => {
+            mainSocket.emit('agent:join', { workspaceId });
+        });
+        mainSocket.on('conversation:updated', (data: any) => {
+            const isFromVisitor = data.lastMessage?.sender?.type === 'visitor';
+            // Play sound if a message arrives in the generic Inbox from a visitor while we are in Zalo page
+            if (isFromVisitor) {
+                playNotificationSound();
+                queryClient.invalidateQueries({ queryKey: ['conversations', workspaceId as string, 'unread-count'] });
+            }
+        });
+
         socket.on('session:status', () => fetchAccounts());
         socket.on('session:loginDetected', () => {
             message.success('Đăng nhập Zalo thành công!');
@@ -186,8 +295,8 @@ export default function ZaloPersonalPage() {
 
         // Listen for scraped Zalo conversations
         socket.on('zalo:conversations', (data: { conversations: any[]; error?: string; debug?: string; screenshot?: string }) => {
-            const wasManualScan = scanningConvs;
-            setScanningConvs(false);
+            const wasManualScan = scanningConvsRef.current;
+            setScanning(false);
             if (data.error) {
                 console.warn('[Zalo] Conversation scrape error:', data.error);
                 if (data.debug) {
@@ -243,30 +352,81 @@ export default function ZaloPersonalPage() {
             }
         });
 
-        // Listen for scraped Zalo messages
+        // Listen for scraped Zalo messages (live from zca-js)
         socket.on('zalo:messages', (data: { messages: any[]; error?: string }) => {
             setLoadingMessages(false);
             if (data.error) {
-                console.warn('[Zalo] Message scrape error:', data.error);
+                console.warn('[Zalo] Message load error:', data.error);
                 return;
             }
-            if (data.messages.length > 0) {
-                const mapped: ZaloMessage[] = data.messages.map((m: any) => ({
+            if (!data.messages || data.messages.length === 0) return;
+
+            const liveMessages: ZaloMessage[] = data.messages.map((m: any) => {
+                const attachments: ZaloMessage['attachments'] = [];
+                const imgUrl = m.attachmentUrl || m.thumbUrl;
+                if (imgUrl) {
+                    attachments.push({
+                        data: imgUrl,
+                        url: imgUrl,
+                        filename: 'Zalo Image',
+                        mimeType: 'image/jpeg',
+                        size: 0,
+                    });
+                }
+                return {
                     _id: m.id,
                     conversationId: 'active',
                     sender: { type: m.senderType === 'me' ? 'agent' as const : 'customer' as const, name: m.senderName },
                     content: m.content,
                     type: m.type || 'text',
+                    attachments: attachments.length > 0 ? attachments : undefined,
+                    attachmentUrl: m.attachmentUrl,
+                    thumbUrl: m.thumbUrl,
                     status: 'read' as const,
                     createdAt: m.createdAt,
-                }));
-                setMessages(mapped);
-            }
+                };
+            });
+
+            // Merge live messages with existing DB-loaded messages (no duplicates)
+            setMessages(prev => {
+                const liveContentsForAgent = new Set(liveMessages.filter(m => m.sender.type === 'agent').map(m => m.content));
+                
+                // Clean prev from optimistic duplicates
+                const cleanPrev = prev.filter(m => {
+                    if ((m._id.startsWith('tmp_') || m._id.startsWith('real_') || m._id.startsWith('sent_')) && m.sender.type === 'agent') {
+                        // If live messages already contain this content, drop the optimistic one
+                        return !liveContentsForAgent.has(m.content);
+                    }
+                    return true;
+                });
+
+                const existingIds = new Set(cleanPrev.map(m => m._id));
+                const newOnes = liveMessages.filter(m => !existingIds.has(m._id));
+                if (newOnes.length === 0 && cleanPrev.length === prev.length) return prev; // nothing new
+                
+                // Merge + sort by createdAt
+                const merged = [...cleanPrev, ...newOnes].sort(
+                    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+                );
+                return merged;
+            });
         });
 
         // ── Realtime: listen for new Zalo messages pushed via WebSocket intercept ──
         socket.on('zalo:newMessage', (msg: any) => {
             console.log('[ZaloRT] New realtime message:', msg);
+            const attachments: ZaloMessage['attachments'] = [];
+            const imgUrl = msg.attachmentUrl || msg.thumbUrl;
+            if (imgUrl) {
+                attachments.push({
+                    data: imgUrl,
+                    url: imgUrl,
+                    filename: 'Zalo Image',
+                    mimeType: 'image/jpeg',
+                    size: 0,
+                });
+            }
+
             const newMsg: ZaloMessage = {
                 _id: msg.msgId || `rt_${Date.now()}`,
                 conversationId: msg.conversationId || 'active',
@@ -276,6 +436,9 @@ export default function ZaloPersonalPage() {
                 },
                 content: msg.content || '',
                 type: msg.msgType || 'text',
+                attachments: attachments.length > 0 ? attachments : undefined,
+                attachmentUrl: msg.attachmentUrl,
+                thumbUrl: msg.thumbUrl,
                 status: 'delivered' as const,
                 createdAt: msg.timestamp ? new Date(msg.timestamp).toISOString() : new Date().toISOString(),
             };
@@ -283,7 +446,21 @@ export default function ZaloPersonalPage() {
             setMessages(prev => {
                 const exists = prev.some(m => m._id === newMsg._id);
                 if (exists) return prev;
-                return [...prev, newMsg];
+                
+                // Deduplicate optimistic message
+                let cleanPrev = prev;
+                if (newMsg.sender.type === 'agent') {
+                    const optIdx = prev.findIndex(m => 
+                        (m._id.startsWith('tmp_') || m._id.startsWith('real_') || m._id.startsWith('sent_')) 
+                        && m.content === newMsg.content
+                    );
+                    if (optIdx !== -1) {
+                        cleanPrev = [...prev];
+                        cleanPrev.splice(optIdx, 1);
+                    }
+                }
+                
+                return [...cleanPrev, newMsg];
             });
 
             // Move conversation to top + update lastMessage/lastMessageAt
@@ -318,21 +495,23 @@ export default function ZaloPersonalPage() {
 
             // Show notification for incoming messages
             if (newMsg.sender.type === 'customer') {
-                message.info(`${newMsg.sender.name}: ${newMsg.content.substring(0, 50)}`, 3);
+                playNotificationSound();
+                message.info(`Tin nhắn mới từ ${newMsg.sender.name}: ${newMsg.content.substring(0, 30)}...`);
             }
         });
 
         // ── zca-js events (native Zalo API) ──
         socket.on('zalo:zcaConnected', ({ sessionId: sid }: { sessionId: string }) => {
-            console.log(`[ZaloZCA] Session ${sid} connected via zca-js!`);
-            message.success('Đã kết nối Zalo qua zca-js!');
+            console.log(`[ZaloZCA] Session ${sid} connected via thành công`);
+            // message.success('Đã kết nối Zalo!'); // Removed to prevent spamming on page load
             // Don't call fetchAccounts() here — it triggers accounts state change
             // which re-runs the auto-restore effect and causes infinite loop.
             // Conversations are fetched below instead.
             setShowQr(false);
             setQrFrameUrl(null);
             setQrLoading(false);
-            setScanningConvs(true);
+            setScanning(true);
+            socket.emit('zalo:join', { sessionId: sid });
             setTimeout(() => {
                 socket.emit('zalo:getConversations', { sessionId: sid });
             }, 1000);
@@ -358,6 +537,7 @@ export default function ZaloPersonalPage() {
         // (already handled by zalo:qrCode listener above)
 
         return () => {
+            mainSocket.disconnect();
             socket.disconnect();
             socketRef.current = null;
             if (checkLoginRef.current) clearInterval(checkLoginRef.current);
@@ -370,7 +550,7 @@ export default function ZaloPersonalPage() {
         if (!selectedAccountId || !socketRef.current) return;
         const account = accounts.find(a => a._id === selectedAccountId);
         if (account?.status !== 'connected') return;
-        setScanningConvs(true);
+        setScanning(true);
         socketRef.current.emit('zalo:getConversations', { sessionId: selectedAccountId });
     }, [selectedAccountId, accounts]);
 
@@ -393,15 +573,18 @@ export default function ZaloPersonalPage() {
         }
         const account = accounts.find(a => a._id === selectedAccountId);
         if (account?.status === 'connected' && socketRef.current) {
+            // Join the remote session room to receive real-time push events (e.g. zalo:newMessage)
+            socketRef.current.emit('zalo:join', { sessionId: selectedAccountId });
+            
             // Auto-restore zca-js session (only once per account selection)
             socketRef.current.emit('zalo:restoreSession', { sessionId: selectedAccountId });
-            setScanningConvs(true);
+            setScanning(true);
             socketRef.current.emit('zalo:getConversations', { sessionId: selectedAccountId });
         } else {
             setConversations([]);
         }
         setSelectedConvId(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selectedAccountId]); // Only run when selectedAccountId changes, NOT on accounts change
 
     // ── Auto-poll conversations every 30s when account is connected ──
@@ -429,28 +612,76 @@ export default function ZaloPersonalPage() {
         };
     }, [selectedAccountId, accounts]);
 
-    // ── Load messages when conversation changes (ONE-TIME, no polling) ──
+    // ── Load messages when conversation changes ──
     useEffect(() => {
-        if (!selectedConvId) {
+        if (!selectedConvId || !selectedAccountId) {
             setMessages([]);
             setLoadingMessages(false);
             return;
         }
 
-        // Find the conversation and load messages once
         const conv = conversations.find(c => c._id === selectedConvId);
-        if (conv && selectedAccountId && socketRef.current) {
-            setLoadingMessages(true);
-            setMessages([]);
+        if (!conv) return;
+
+        const threadId = conv.threadId || '';
+        const threadType = conv.threadType || 'user';
+
+        setLoadingMessages(true);
+        setMessages([]);
+
+        // Step 1: Load from DB first (fast, reliable history)
+        const loadFromDB = async () => {
+            if (!threadId || !workspaceId) return;
+            try {
+                const res = await httpClient.get(
+                    `/workspaces/${workspaceId}/zalo/history?threadId=${encodeURIComponent(threadId)}&limit=50`
+                );
+                const dbMessages: any[] = res.data?.data?.items || res.data?.items || [];
+                if (dbMessages.length > 0) {
+                    const mapped: ZaloMessage[] = dbMessages.map((m: any) => {
+                        const imgUrl = m.attachmentUrl || m.thumbUrl;
+                        const attachments: ZaloMessage['attachments'] = imgUrl ? [{
+                            data: imgUrl, url: imgUrl, filename: 'Zalo Image', mimeType: 'image/jpeg', size: 0
+                        }] : undefined;
+                        return {
+                            _id: m.msgId || m._id,
+                            conversationId: 'active',
+                            sender: {
+                                type: m.isSelf ? 'agent' as const : 'customer' as const,
+                                name: m.senderName || (m.isSelf ? 'Bạn' : 'Khách'),
+                            },
+                            content: m.content || '',
+                            type: m.msgType || 'text',
+                            attachments,
+                            attachmentUrl: m.attachmentUrl,
+                            thumbUrl: m.thumbUrl,
+                            status: 'read' as const,
+                            createdAt: m.timestamp ? new Date(m.timestamp).toISOString() : new Date().toISOString(),
+                        };
+                    });
+                    // Sort oldest first
+                    mapped.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+                    setMessages(mapped);
+                    setLoadingMessages(false);
+                }
+            } catch (err) {
+                console.warn('[ZaloHistory] DB load failed:', err);
+            }
+        };
+
+        loadFromDB();
+
+        // Step 2: Also fetch live from zca-js to get newest messages (will merge in listener)
+        if (socketRef.current) {
             socketRef.current.emit('zalo:getMessages', {
                 sessionId: selectedAccountId,
                 contactName: conv.contactName,
-                threadId: conv.threadId || '',
-                threadType: conv.threadType || 'user',
+                threadId,
+                threadType,
             });
-            // No polling — realtime listener (zalo:newMessage) handles new messages
         }
-    }, [selectedConvId, selectedAccountId, conversations]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedConvId, selectedAccountId]);
 
     // ── Auto-scroll only on new messages (not on initial load or poll) ──
     const prevMsgCountRef = useRef(0);
@@ -529,10 +760,8 @@ export default function ZaloPersonalPage() {
     };
 
     // ── Send message ──
-    const handleSend = async () => {
-        if (!inputText.trim() || !selectedConvId || sending) return;
-        const text = inputText.trim();
-        setInputText('');
+    const handleSend = async (text: string) => {
+        if (!text.trim() || !selectedConvId || sending) return;
         setSending(true);
 
         // Optimistic: add temp message immediately for UX
@@ -583,13 +812,45 @@ export default function ZaloPersonalPage() {
         }
     };
 
-    // ── File upload placeholder ──
-    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file || !selectedConvId) return;
-        message.info(`Đã chọn file: ${file.name} (chức năng gửi file đang phát triển)`);
-        e.target.value = '';
+    // ── Image upload and sending ──
+    const handleImageSend = async (file: File) => {
+        if (!selectedConvId || !socketRef.current || !selectedAccountId) return;
+        const selectedConv = conversations.find(c => c._id === selectedConvId);
+
+        try {
+            setSending(true);
+            const { url } = await uploadService.uploadImage(file);
+            
+            // Convert relative /uploads/... to absolute URL for Zalo backend to download
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4010/api';
+            const baseUrl = apiUrl.replace(/\/api$/, '');
+            const absoluteImageUrl = url.startsWith('http') ? url : `${baseUrl}${url}`;
+            
+            socketRef.current.emit('zalo:sendMessage', {
+                sessionId: selectedAccountId,
+                threadId: selectedConvId,
+                threadType: selectedConv?.threadType || 'user',
+                text: '',
+                imageUrl: absoluteImageUrl,
+            });
+            
+            // Re-fetch messages after sending
+            setTimeout(() => {
+                socketRef.current?.emit('zalo:getMessages', {
+                    sessionId: selectedAccountId,
+                    threadId: selectedConvId,
+                    threadType: selectedConv?.threadType || 'user',
+                });
+            }, 500);
+            
+            setSending(false);
+        } catch (error) {
+            message.error('Gửi ảnh thất bại');
+            setSending(false);
+        }
     };
+
+    // (File upload and input change handlers moved to MessageComposer)
 
     // ── Derived state ──
     const selectedAccount = accounts.find(a => a._id === selectedAccountId);
@@ -605,7 +866,7 @@ export default function ZaloPersonalPage() {
         return true;
     });
 
-    const filteredConvs = conversations.filter(c => {
+    const filteredConvs = conversations.filter(c => {       
         if (convStatusFilter !== 'all' && c.status !== convStatusFilter) return false;
         if (convSearch) {
             return c.contactName.toLowerCase().includes(convSearch.toLowerCase());
@@ -662,6 +923,7 @@ export default function ZaloPersonalPage() {
                                     Inbox
                                 </Button>
                             </Tooltip>
+                            <Badge count={inboxUnreadCount} overflowCount={99} />
                             <Tooltip title="Thêm tài khoản">
                                 <Button
                                     type="primary"
@@ -843,29 +1105,40 @@ export default function ZaloPersonalPage() {
                                 <div style={styles.convList}>
                                     {scanningConvs && filteredConvs.length === 0 ? (
                                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', marginTop: 80, gap: 12 }}>
-                                            <Spin size="default" />
-                                            <span style={{ color: '#666', fontSize: 13 }}>Đang quét hội thoại từ Zalo...</span>
-                                        </div>
-                                    ) : filteredConvs.length === 0 ? (
-                                        <div style={{ textAlign: 'center', marginTop: 60 }}>
-                                            <Empty
-                                                description={
-                                                    <div>
-                                                        <p style={{ color: '#999', fontSize: 13, margin: '0 0 12px' }}>Không có hội thoại</p>
-                                                        <Button
-                                                            type="primary"
-                                                            icon={<ReloadOutlined />}
-                                                            onClick={handleScanConversations}
-                                                            loading={scanningConvs}
-                                                            style={{ background: '#0068ff', borderColor: '#0068ff', borderRadius: 8 }}
-                                                        >
-                                                            Quét hội thoại
-                                                        </Button>
-                                                    </div>
-                                                }
-                                            />
+                                            <div className="zalo-scanner-pulse">
+                                                <div className="zalo-dot"></div>
+                                                <div className="zalo-dot"></div>
+                                                <div className="zalo-dot"></div>
+                                            </div>
+                                            <span style={{ color: '#666', fontSize: 13 }}>Đang tải hội thoại từ Zalo...</span>
                                         </div>
                                     ) : (
+                                        <>
+                                            {scanningConvs && (
+                                                <div style={{ padding: '8px 12px', fontSize: 12, color: '#6366f1', display: 'flex', alignItems: 'center', gap: 6, background: '#eef2ff', borderBottom: '1px solid #e0e7ff' }}>
+                                                    <Spin size="small" /> Đang đồng bộ...
+                                                </div>
+                                            )}
+                                            {filteredConvs.length === 0 ? (
+                                                <div style={{ textAlign: 'center', marginTop: 60 }}>
+                                                    <Empty
+                                                        description={
+                                                            <div>
+                                                                <p style={{ color: '#999', fontSize: 13, margin: '0 0 12px' }}>Không có hội thoại</p>
+                                                                <Button
+                                                                    type="primary"
+                                                                    icon={<ReloadOutlined />}
+                                                                    onClick={handleScanConversations}
+                                                                    loading={scanningConvs}
+                                                                    style={{ background: '#0068ff', borderColor: '#0068ff', borderRadius: 8 }}
+                                                                >
+                                                                    Quét hội thoại
+                                                                </Button>
+                                                            </div>
+                                                        }
+                                                    />
+                                                </div>
+                                            ) : (
                                         filteredConvs.map(conv => {
                                             const isSelected = selectedConvId === conv._id;
                                             const isHighlighted = highlightedConvIds.has(conv._id);
@@ -875,7 +1148,7 @@ export default function ZaloPersonalPage() {
                                                     onClick={() => {
                                                         setSelectedConvId(conv._id);
                                                         // Clear unread count when selected
-                                                        setConversations(prev => prev.map(c => 
+                                                        setConversations(prev => prev.map(c =>
                                                             c._id === conv._id ? { ...c, unreadCount: 0 } : c
                                                         ));
                                                         // Remove highlight
@@ -941,6 +1214,8 @@ export default function ZaloPersonalPage() {
                                                 </div>
                                             );
                                         })
+                                    )}
+                                        </>
                                     )}
                                 </div>
                             </>
@@ -1134,20 +1409,23 @@ export default function ZaloPersonalPage() {
                                                         }}
                                                     >
                                                         {/* Attachments */}
-                                                        {msg.attachments?.map((att, i) => (
-                                                            <div key={i} style={{ marginBottom: msg.content ? 6 : 0 }}>
-                                                                {att.mimeType?.startsWith('image/') ? (
-                                                                    <img src={att.data} alt={att.filename} style={styles.msgImage}
-                                                                        onClick={() => window.open(att.data, '_blank')} />
-                                                                ) : (
-                                                                    <a href={att.data} download={att.filename} style={styles.fileLink}>
-                                                                        📎 {att.filename}
-                                                                    </a>
-                                                                )}
-                                                            </div>
-                                                        ))}
-                                                        {/* Text */}
-                                                        {msg.content && <div>{msg.content}</div>}
+                                                        {msg.attachments?.map((att, i) => {
+                                                            const src = att.url || att.data;
+                                                            return (
+                                                                <div key={i} style={{ marginBottom: msg.content ? 6 : 0 }}>
+                                                                    {att.mimeType?.startsWith('image/') || isImageUrl(src || '') ? (
+                                                                        <img src={src} alt={att.filename || 'Image'} style={styles.msgImage}
+                                                                            onClick={() => window.open(src, '_blank')} />
+                                                                    ) : (
+                                                                        <a href={src} download={att.filename} style={styles.fileLink}>
+                                                                            📎 {att.filename}
+                                                                        </a>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                        {/* Text — auto-detect and render image URLs inline */}
+                                                        {msg.content && renderZaloContent(msg.content, isAgent)}
                                                         {/* Time + Status */}
                                                         <div style={styles.msgTime}>
                                                             {new Date(msg.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
@@ -1178,35 +1456,7 @@ export default function ZaloPersonalPage() {
                             </div>
 
                             {/* Composer */}
-                            <div style={styles.inputArea}>
-                                <input
-                                    type="file"
-                                    ref={fileInputRef}
-                                    onChange={handleFileUpload}
-                                    style={{ display: 'none' }}
-                                    accept="image/*,.pdf,.doc,.docx,.txt"
-                                />
-                                <Button
-                                    type="text"
-                                    icon={<Paperclip size={18} color="#666" />}
-                                    onClick={() => fileInputRef.current?.click()}
-                                    style={{ padding: '4px 8px' }}
-                                />
-                                <input
-                                    style={styles.textInput}
-                                    placeholder="Nhập tin nhắn..."
-                                    value={inputText}
-                                    onChange={e => setInputText(e.target.value)}
-                                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-                                />
-                                <Button
-                                    type="primary"
-                                    icon={<Send size={16} />}
-                                    onClick={handleSend}
-                                    loading={sending}
-                                    style={{ borderRadius: 20, background: '#6366f1', border: 'none' }}
-                                />
-                            </div>
+                            <MessageComposer sending={sending} onSend={handleSend} onImageSend={handleImageSend} />
                         </>
                     ) : (
                         <div style={styles.emptyColumn}>
@@ -1621,4 +1871,73 @@ const styles: Record<string, React.CSSProperties> = {
         fontWeight: 700,
         flexShrink: 0,
     },
+};
+
+// ── Subcomponents ──
+
+const MessageComposer = ({ sending, onSend, onImageSend }: { sending: boolean, onSend: (text: string) => void, onImageSend: (file: File) => void }) => {
+    const [inputText, setInputText] = useState('');
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const handleSendClick = () => {
+        if (!inputText.trim() || sending) return;
+        onSend(inputText.trim());
+        setInputText(''); // optimistic clear
+    };
+
+    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        
+        if (file.type.startsWith('image/')) {
+            onImageSend(file);
+        } else {
+            message.info(`Gửi file khác ảnh: ${file.name} (chức năng đang phát triển)`);
+        }
+        e.target.value = '';
+    };
+
+    return (
+        <div style={styles.inputArea}>
+            <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                style={{ display: 'none' }}
+                accept="image/*,.pdf,.doc,.docx,.txt"
+            />
+            <Button
+                type="text"
+                icon={<Paperclip size={18} color="#666" />}
+                onClick={() => fileInputRef.current?.click()}
+                style={{ padding: '4px 8px' }}
+            />
+            <input
+                style={styles.textInput}
+                placeholder="Nhập tin nhắn..."
+                value={inputText}
+                onChange={e => setInputText(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendClick(); } }}
+                onPaste={(e) => {
+                    const items = e.clipboardData?.items;
+                    if (!items) return;
+                    for (let i = 0; i < items.length; i++) {
+                        if (items[i].type.indexOf('image') !== -1) {
+                            const file = items[i].getAsFile();
+                            if (file) onImageSend(file);
+                            e.preventDefault();
+                            break;
+                        }
+                    }
+                }}
+            />
+            <Button
+                type="primary"
+                icon={<Send size={16} />}
+                onClick={handleSendClick}
+                loading={sending}
+                style={{ borderRadius: 20, background: '#6366f1', border: 'none' }}
+            />
+        </div>
+    );
 };

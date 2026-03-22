@@ -12,9 +12,14 @@ export interface IPreChatField {
 
 export interface IWidgetConfig {
     primaryColor: string;
+    gradient?: string;
+    launcherStyle?: 'bubble' | 'tab' | 'pill' | 'image';
+    launcherText?: string;
+    launcherIcon?: string;
+    tooltipText?: string;
     greeting: string;
     placeholder: string;
-    position: 'bottom-right' | 'bottom-left';
+    position: 'bottom-right' | 'bottom-left' | 'side-right' | 'side-left';
     language: string;
     avatarUrl?: string;
     showBranding: boolean;
@@ -59,9 +64,14 @@ const widgetSchema = new Schema<IWidget>(
         name: { type: String, required: true },
         config: {
             primaryColor: { type: String, default: '#6366f1' },
+            gradient: { type: String },
+            launcherStyle: { type: String, enum: ['bubble', 'tab', 'pill', 'image'], default: 'bubble' },
+            launcherText: { type: String },
+            launcherIcon: { type: String },
+            tooltipText: { type: String },
             greeting: { type: String, default: 'Xin chào! Chúng tôi có thể giúp gì cho bạn?' },
             placeholder: { type: String, default: 'Nhập tin nhắn...' },
-            position: { type: String, enum: ['bottom-right', 'bottom-left'], default: 'bottom-right' },
+            position: { type: String, enum: ['bottom-right', 'bottom-left', 'side-right', 'side-left'], default: 'bottom-right' },
             language: { type: String, default: 'vi' },
             avatarUrl: { type: String },
             showBranding: { type: Boolean, default: true },

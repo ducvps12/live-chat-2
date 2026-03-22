@@ -311,28 +311,76 @@
         }
 
         var online = isOnline();
-        var isRight = pos === 'bottom-right';
+        var isRight = pos === 'bottom-right' || pos === 'side-right';
+        var isSide = pos === 'side-right' || pos === 'side-left';
+        var isLeft = pos === 'bottom-left' || pos === 'side-left';
         var greeting = cfg.greeting || 'Xin chào! Chúng tôi có thể giúp gì?';
         var placeholder = cfg.placeholder || 'Nhập tin nhắn...';
         var pcf = cfg.preChatForm || {};
         var preChatEnabled = pcf.enabled || false;
         var lang = cfg.language || 'vi';
 
+        // Advanced styling
+        var bgVal = cfg.gradient || color;
+        var launcherStyle = cfg.launcherStyle || 'bubble';
+        var launcherText = cfg.launcherText || '';
+        var launcherIcon = cfg.launcherIcon || '';
+        var tooltipText = cfg.tooltipText || '';
+
         // ── Inject CSS ──
         var css = document.createElement('style');
         css.id = 'nchat-styles';
+
+        // Launcher Button rules based on style
+        var bubbleCss = '';
+        var bubblePos = '';
+        if (isSide) {
+            bubblePos = 'top:50%;transform:translateY(-50%);' + (pos === 'side-right' ? 'right:0;' : 'left:0;');
+            if (launcherStyle === 'tab') {
+                bubbleCss = 'width:auto;height:48px;padding:0 16px;border-radius:' + (pos === 'side-right' ? '8px 0 0 8px' : '0 8px 8px 0') + ';display:flex;align-items:center;gap:8px;font-weight:600;font-size:15px;';
+            } else if (launcherStyle === 'image') {
+                bubbleCss = 'width:64px;height:64px;background:transparent;box-shadow:none;border-radius:0;padding:0;';
+            } else {
+                bubbleCss = 'width:60px;height:60px;border-radius:' + (pos === 'side-right' ? '30px 0 0 30px' : '0 30px 30px 0') + ';display:flex;align-items:center;justify-content:center;';
+            }
+        } else {
+            bubblePos = 'bottom:24px;' + (isRight ? 'right:24px;' : 'left:24px;');
+            if (launcherStyle === 'pill') {
+                bubbleCss = 'width:auto;height:52px;border-radius:26px;padding:0 24px;display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px;';
+            } else if (launcherStyle === 'image') {
+                bubbleCss = 'width:64px;height:64px;background:transparent;box-shadow:none;border-radius:0;padding:0;';
+            } else { // default bubble
+                bubbleCss = 'width:60px;height:60px;border-radius:50%;display:flex;align-items:center;justify-content:center;';
+            }
+        }
+
+        // Window Pos
+        var winPos = '';
+        if (isSide) {
+            winPos = (pos === 'side-right' ? 'right:80px;' : 'left:80px;') + 'top:50%;transform:translateY(calc(-50% + 16px)) scale(0.95);';
+        } else {
+            winPos = (isRight ? 'right:24px;' : 'left:24px;') + 'bottom:96px;transform:translateY(16px) scale(0.95);';
+        }
+
         css.textContent = [
-            // Bubble
-            '#nchat-bubble{position:fixed;' + (isRight ? 'right:24px' : 'left:24px') + ';bottom:24px;width:60px;height:60px;border-radius:50%;background:' + color + ';color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2147483647;box-shadow:0 4px 24px rgba(0,0,0,0.18);transition:all .3s cubic-bezier(.4,0,.2,1);font-size:26px;border:none;outline:none}',
-            '#nchat-bubble:hover{transform:scale(1.08);box-shadow:0 6px 32px rgba(0,0,0,0.22)}',
+            // Bubble Launcher
+            '#nchat-bubble{position:fixed;' + bubblePos + bubbleCss + 'background:' + bgVal + ';color:#fff;cursor:pointer;z-index:2147483647;box-shadow:' + (launcherStyle === 'image' ? 'none' : '0 4px 24px rgba(0,0,0,0.18)') + ';transition:all .3s cubic-bezier(.4,0,.2,1);border:none;outline:none}',
+            '#nchat-bubble:hover{transform:' + (isSide ? 'translateY(-50%)' : 'translateY(0)') + ' scale(1.05);box-shadow:' + (launcherStyle === 'image' ? 'none' : '0 6px 32px rgba(0,0,0,0.22)') + ';}',
             '#nchat-bubble svg{width:28px;height:28px;fill:currentColor}',
+            '#nchat-bubble img.nchat-custom-img{width:100%;height:100%;object-fit:cover;border-radius:50%;box-shadow:0 4px 16px rgba(0,0,0,0.15)}',
+            '#nchat-bubble.nchat-opened-bubble{width:60px !important;height:60px !important;padding:0 !important;border-radius:' + (isSide ? (pos === 'side-right' ? '30px 0 0 30px' : '0 30px 30px 0') : '50%') + ' !important}',
+
+            // Tooltip
+            '#nchat-tooltip{position:fixed;z-index:2147483647;background:#333;color:#fff;padding:8px 14px;border-radius:10px;font-size:12px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,0.2);opacity:0;pointer-events:none;transition:opacity .25s ease,transform .25s ease;transform:translateY(6px)}',
+            '#nchat-tooltip.nchat-tip-visible{opacity:1;pointer-events:auto;transform:translateY(0)}',
+            '#nchat-tooltip::after{content:"";position:absolute;bottom:-6px;right:24px;border-left:6px solid transparent;border-right:6px solid transparent;border-top:6px solid #333}',
 
             // Window
-            '#nchat-window{position:fixed;' + (isRight ? 'right:24px' : 'left:24px') + ';bottom:96px;width:380px;max-width:calc(100vw - 32px);max-height:min(560px, calc(100vh - 120px));border-radius:16px;overflow:hidden;box-shadow:0 12px 60px rgba(0,0,0,0.16);z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;background:#fff;transform:translateY(16px) scale(0.95);opacity:0;pointer-events:none;transition:all .25s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column}',
-            '#nchat-window.nchat-open{transform:translateY(0) scale(1);opacity:1;pointer-events:auto}',
+            '#nchat-window{position:fixed;' + winPos + 'width:380px;max-width:calc(100vw - 32px);max-height:min(560px, calc(100vh - 120px));border-radius:16px;overflow:hidden;box-shadow:0 12px 60px rgba(0,0,0,0.16);z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;background:#fff;opacity:0;pointer-events:none;transition:all .25s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column}',
+            '#nchat-window.nchat-open{transform:' + (isSide ? 'translateY(-50%)' : 'translateY(0)') + ' scale(1);opacity:1;pointer-events:auto}',
 
             // Header
-            '#nchat-hdr{background:' + color + ';padding:20px 20px 16px;color:#fff;position:relative}',
+            '#nchat-hdr{background:' + bgVal + ';padding:20px 20px 16px;color:#fff;position:relative}',
             '#nchat-hdr h4{margin:0;font-size:16px;font-weight:700;line-height:1.3}',
             '#nchat-hdr p{margin:6px 0 0;font-size:13px;opacity:.85;line-height:1.4}',
             '#nchat-hdr-close{position:absolute;top:14px;right:14px;background:rgba(255,255,255,.15);border:none;color:#fff;width:28px;height:28px;border-radius:50%;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;transition:background .2s}',
@@ -348,13 +396,13 @@
             '.nchat-list-items{flex:1;overflow-y:auto;padding:12px}',
             '.nchat-list-item{background:#fff;border-radius:12px;padding:12px;margin-bottom:10px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.04);border:1px solid #f0f0f0;transition:all 0.2s;display:flex;align-items:center;gap:12px}',
             '.nchat-list-item:hover{border-color:' + color + ';box-shadow:0 4px 12px rgba(0,0,0,0.08)}',
-            '.nchat-list-avatar{width:40px;height:40px;border-radius:50%;background:' + color + '20;color:' + color + ';display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:16px;flex-shrink:0}',
+            '.nchat-list-avatar{width:40px;height:40px;border-radius:50%;background:' + bgVal + ';color:#fff;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:16px;flex-shrink:0}',
             '.nchat-list-info{flex:1;min-width:0}',
             '.nchat-list-name{font-size:14px;font-weight:600;color:#333;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
             '.nchat-list-msg{font-size:12px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
             '.nchat-list-time{font-size:11px;color:#999}',
             '.nchat-list-footer{padding:16px;background:#fff;border-top:1px solid #f0f0f0}',
-            '#nchat-new-conv{width:100%;padding:12px;background:' + color + ';color:#fff;border:none;border-radius:8px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;font-size:14px;transition:opacity 0.2s}',
+            '#nchat-new-conv{width:100%;padding:12px;background:' + bgVal + ';color:#fff;border:none;border-radius:8px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;font-size:14px;transition:opacity 0.2s}',
             '#nchat-new-conv:hover{opacity:0.9}',
             '#nchat-new-conv svg{width:16px;height:16px;fill:currentColor}',
             '#nchat-chat-view{flex:1;display:none;flex-direction:column;overflow:hidden}',
@@ -374,7 +422,7 @@
             '#nchat-pcf label .nchat-req{color:#ef4444;margin-left:2px}',
             '#nchat-pcf input{width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;margin-bottom:12px;box-sizing:border-box;outline:none;transition:border-color .2s}',
             '#nchat-pcf input:focus{border-color:' + color + '}',
-            '#nchat-pcf button{width:100%;padding:11px;border:none;border-radius:10px;background:' + color + ';color:#fff;font-weight:600;cursor:pointer;font-size:14px;transition:opacity .2s;margin-top:4px}',
+            '#nchat-pcf button{width:100%;padding:11px;border:none;border-radius:10px;background:' + bgVal + ';color:#fff;font-weight:600;cursor:pointer;font-size:14px;transition:opacity .2s;margin-top:4px}',
             '#nchat-pcf button:hover{opacity:.9}',
             '#nchat-pcf textarea{width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;margin-bottom:12px;box-sizing:border-box;outline:none;transition:border-color .2s;font-family:inherit;resize:vertical;min-height:60px;max-height:120px}',
             '#nchat-pcf textarea:focus{border-color:' + color + '}',
@@ -390,7 +438,7 @@
             '.nchat-msg-user{justify-content:flex-end}',
             '.nchat-msg-bubble{max-width:80%;padding:10px 14px;border-radius:14px;font-size:13px;line-height:1.5;word-wrap:break-word;overflow-wrap:break-word}',
             '.nchat-msg-bot .nchat-msg-bubble{background:#fff;border:1px solid #e5e5e5;border-bottom-left-radius:4px;color:#333}',
-            '.nchat-msg-user .nchat-msg-bubble{background:' + color + ';color:#fff;border-bottom-right-radius:4px}',
+            '.nchat-msg-user .nchat-msg-bubble{background:' + bgVal + ';color:#fff;border-bottom-right-radius:4px}',
 
             // Message states (sending / error / retry)
             '.nchat-msg-sending{opacity:.6}',
@@ -411,7 +459,7 @@
             '#nchat-ftr{padding:12px 16px;border-top:1px solid #eee;display:flex;gap:8px;align-items:center;background:#fff}',
             '#nchat-ftr input{flex:1;padding:10px 16px;border:1.5px solid #e0e0e0;border-radius:22px;font-size:13px;outline:none;transition:border-color .2s}',
             '#nchat-ftr input:focus{border-color:' + color + '}',
-            '#nchat-ftr button{width:38px;height:38px;border-radius:50%;border:none;background:' + color + ';color:#fff;cursor:pointer;font-size:17px;display:flex;align-items:center;justify-content:center;transition:opacity .2s;flex-shrink:0}',
+            '#nchat-ftr button{width:38px;height:38px;border-radius:50%;border:none;background:' + bgVal + ';color:#fff;cursor:pointer;font-size:17px;display:flex;align-items:center;justify-content:center;transition:opacity .2s;flex-shrink:0}',
             '#nchat-ftr button:hover{opacity:.85}',
 
             // Branding
@@ -426,7 +474,7 @@
             '#nchat-offline-form input,#nchat-offline-form textarea{width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;margin-bottom:12px;box-sizing:border-box;outline:none;transition:border-color .2s;font-family:inherit}',
             '#nchat-offline-form input:focus,#nchat-offline-form textarea:focus{border-color:' + color + '}',
             '#nchat-offline-form textarea{resize:vertical;min-height:60px}',
-            '#nchat-offline-form button{width:100%;padding:11px;border:none;border-radius:10px;background:' + color + ';color:#fff;font-weight:600;cursor:pointer;font-size:14px;transition:opacity .2s;margin-top:4px}',
+            '#nchat-offline-form button{width:100%;padding:11px;border:none;border-radius:10px;background:' + bgVal + ';color:#fff;font-weight:600;cursor:pointer;font-size:14px;transition:opacity .2s;margin-top:4px}',
             '#nchat-offline-form button:hover{opacity:.9}',
 
             // Upload button
@@ -441,16 +489,65 @@
             '.nchat-img-preview img{max-width:90%;max-height:90%;border-radius:8px}',
 
             // Mobile
-            '@media(max-width:440px){#nchat-window{width:calc(100vw - 16px);' + (isRight ? 'right:8px' : 'left:8px') + ';bottom:80px;max-height:calc(100vh - 100px)}#nchat-bubble{' + (isRight ? 'right:16px' : 'left:16px') + ';bottom:16px;width:54px;height:54px}}'
+            '@media(max-width:440px){#nchat-window{width:calc(100vw - 16px);' + (isRight ? 'right:8px' : 'left:8px') + ';' + (isSide ? 'top:50%;transform:translateY(-50%) scale(0.95);' : 'bottom:80px;') + 'max-height:calc(100vh - 100px)}#nchat-bubble{' + (isSide ? '' : (isRight ? 'right:16px;' : 'left:16px;') + 'bottom:16px;width:54px;height:54px;') + '}}'
         ].join('\n');
         document.head.appendChild(css);
 
         // ── Bubble ──
         var bubble = document.createElement('button');
         bubble.id = 'nchat-bubble';
+
+        var iconHtml = '<svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.2L4 17.2V4h16v12z"/></svg>';
+        if (launcherIcon) {
+            if (launcherIcon.indexOf('<svg') === 0) {
+                iconHtml = launcherIcon;
+            } else if (launcherStyle === 'image') {
+                iconHtml = '<img src="' + launcherIcon + '" alt="Chat Icon" class="nchat-custom-img" />';
+            } else if (launcherIcon.indexOf('.svg') !== -1) {
+                iconHtml = '<div style="width:28px;height:28px;background-color:currentColor;-webkit-mask-image:url(' + launcherIcon + ');mask-image:url(' + launcherIcon + ');-webkit-mask-size:contain;mask-size:contain;-webkit-mask-position:center;mask-position:center;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;"></div>';
+            } else {
+                iconHtml = '<img src="' + launcherIcon + '" style="width:24px;height:24px;border-radius:2px;" alt="Chat Icon" />';
+            }
+        }
+
+        if (launcherStyle === 'tab' || launcherStyle === 'pill') {
+            bubble.innerHTML = iconHtml + (launcherText ? '<span>' + launcherText + '</span>' : '');
+        } else {
+            bubble.innerHTML = iconHtml;
+        }
         bubble.setAttribute('aria-label', 'Open chat');
-        bubble.innerHTML = '<svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.2L4 17.2V4h16v12z"/></svg>';
         document.body.appendChild(bubble);
+
+        // ── Tooltip (floating popup on hover) ──
+        var tipEl = null;
+        if (tooltipText) {
+            tipEl = document.createElement('div');
+            tipEl.id = 'nchat-tooltip';
+            tipEl.textContent = tooltipText;
+            document.body.appendChild(tipEl);
+
+            function positionTooltip() {
+                var rect = bubble.getBoundingClientRect();
+                tipEl.style.bottom = (window.innerHeight - rect.top + 10) + 'px';
+                if (isRight) {
+                    tipEl.style.right = (window.innerWidth - rect.right) + 'px';
+                    tipEl.style.left = 'auto';
+                } else {
+                    tipEl.style.left = rect.left + 'px';
+                    tipEl.style.right = 'auto';
+                }
+            }
+
+            bubble.addEventListener('mouseenter', function () {
+                if (!win.classList.contains('nchat-open')) {
+                    positionTooltip();
+                    tipEl.classList.add('nchat-tip-visible');
+                }
+            });
+            bubble.addEventListener('mouseleave', function () {
+                tipEl.classList.remove('nchat-tip-visible');
+            });
+        }
 
         // ── Chat Window ──
         var win = document.createElement('div');
@@ -569,11 +666,73 @@
         try { savedState = sessionStorage.getItem(STATE_KEY); } catch (e) { }
         var isOpen = savedState === 'open';
 
+        // ── Widget Notification Helpers ──
+        var originalTitle = document.title;
+        var unreadCount = 0;
+        var __audioCtx = null;
+        
+        function playWidgetSound() {
+            try {
+                if (!__audioCtx) __audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                if (__audioCtx.state === 'suspended') __audioCtx.resume();
+                
+                var playTone = function(freq, startTime, duration) {
+                    var osc = __audioCtx.createOscillator();
+                    var gain = __audioCtx.createGain();
+                    osc.connect(gain);
+                    gain.connect(__audioCtx.destination);
+                    osc.type = 'sine';
+                    osc.frequency.value = freq;
+                    gain.gain.setValueAtTime(0, startTime);
+                    gain.gain.linearRampToValueAtTime(0.2, startTime + 0.05);
+                    gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+                    osc.start(startTime);
+                    osc.stop(startTime + duration);
+                };
+                playTone(600, __audioCtx.currentTime, 0.15);
+                playTone(800, __audioCtx.currentTime + 0.1, 0.25);
+            } catch(e) {}
+        }
+
+        function notifyNewMessage() {
+            if (!isOpen || document.hidden) {
+                unreadCount++;
+                document.title = '(' + unreadCount + ') ' + (lang === 'vi' ? 'Bạn có tin nhắn mới!' : 'New message!');
+                playWidgetSound();
+                
+                if (!isOpen) {
+                    var b = document.getElementById('nchat-bubble');
+                    if (b && !b.querySelector('.nchat-badge')) {
+                        b.innerHTML += '<div class="nchat-badge" style="position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;font-size:11px;font-weight:bold;width:20px;height:20px;border-radius:10px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(0,0,0,0.2)">1</div>';
+                    } else if (b) {
+                        var badge = b.querySelector('.nchat-badge');
+                        if (badge) badge.textContent = unreadCount > 9 ? '9+' : unreadCount;
+                    }
+                }
+            }
+        }
+
+        function clearUnreadNotifications() {
+            if (unreadCount > 0) {
+                unreadCount = 0;
+                document.title = originalTitle;
+                var badge = document.querySelector('#nchat-bubble .nchat-badge');
+                if (badge) badge.remove();
+            }
+        }
+
+        window.addEventListener('focus', function() {
+            if (isOpen) clearUnreadNotifications();
+        });
+
         function emitEvent(name, detail) {
             try {
                 window.dispatchEvent(new CustomEvent(name, { detail: detail || {} }));
             } catch (e) { /* IE fallback: ignore */ }
         }
+
+        // Save original launcher HTML to restore when closing
+        var _originalBubbleHtml = bubble.innerHTML;
 
         function toggleChat(open) {
             var newState = typeof open === 'boolean' ? open : !isOpen;
@@ -585,13 +744,24 @@
 
             // Update UI
             win.classList.toggle('nchat-open', isOpen);
-            bubble.innerHTML = isOpen
-                ? '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>'
-                : '<svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.2L4 17.2V4h16v12z"/></svg>';
+            if (isOpen) {
+                bubble.classList.add('nchat-opened-bubble');
+                bubble.innerHTML = '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>';
+            } else {
+                bubble.classList.remove('nchat-opened-bubble');
+                bubble.innerHTML = _originalBubbleHtml;
+            }
+
+            // Hide tooltip when chat is open
+            if (tipEl) {
+                if (isOpen) tipEl.classList.remove('nchat-tip-visible');
+            }
 
             if (isOpen) {
+                clearUnreadNotifications();
                 // ── OPEN ──
                 emitEvent('nchat:opened', { widgetId: id, visitorId: vid, firstOpen: !hasOpenedOnce });
+
 
                 // Re-join conversation room
                 if (_socket && _socket.connected && _conversationId) {
@@ -744,6 +914,7 @@
         // Apply restored state (render correct icon & class without animation)
         if (isOpen) {
             win.classList.add('nchat-open');
+            bubble.classList.add('nchat-opened-bubble');
             bubble.innerHTML = '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>';
             hasOpenedOnce = true;
             switchView('chat'); // default to chat, or load list to decide later
@@ -1585,6 +1756,7 @@
                     console.log('[NemarChat] Received message:new payload:', msg);
                     if (msg.sender && msg.sender.type !== 'visitor') {
                         appendMessage(msg); // dedup + ordering + timestamp tracking handled inside
+                        notifyNewMessage();
                     }
                 });
 

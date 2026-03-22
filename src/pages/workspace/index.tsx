@@ -60,7 +60,7 @@ export default function WorkspacePage() {
         form.setFieldValue('slug', slug);
     };
 
-    const handleCreate = async (values: Record<string, string>) => {
+    const handleCreate = async (values: any) => {
         try {
             const res = await createWs(values);
             if (res.success) {
@@ -184,10 +184,10 @@ export default function WorkspacePage() {
                 ) : (
                     <div style={{
                         display: 'grid',
-                        gridTemplateColumns: 'repeat(2, 1fr)',
-                        gap: 20,
+                        gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                        gap: 24,
                     }}>
-                        {workspaces.map((ws: Record<string, unknown>, idx: number) => {
+                        {workspaces.map((ws: any, idx: number) => {
                             const palette = CARD_GRADIENTS[idx % CARD_GRADIENTS.length];
                             const planKey = ((ws.plan as string) || 'free').toLowerCase();
                             const planStyle = PLAN_STYLES[planKey] || PLAN_STYLES.free;
@@ -231,38 +231,41 @@ export default function WorkspacePage() {
                                         {/* ─ Header row ─ */}
                                         <div style={{
                                             display: 'flex', alignItems: 'flex-start',
-                                            justifyContent: 'space-between', marginBottom: 20,
+                                            justifyContent: 'space-between', marginBottom: 24,
                                         }}>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                                                 {/* Avatar */}
                                                 <div style={{
-                                                    width: 50, height: 50, borderRadius: 16,
-                                                    background: palette.bg,
+                                                    width: 56, height: 56, borderRadius: 16,
+                                                    background: `linear-gradient(135deg, ${palette.bg}, #ffffff)`,
                                                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                    color: '#fff', fontWeight: 700, fontSize: 22,
-                                                    boxShadow: `0 8px 20px ${palette.glow}`,
+                                                    color: palette.bg, fontWeight: 800, fontSize: 24,
+                                                    boxShadow: `0 8px 20px ${palette.glow}, inset 0 2px 4px rgba(255,255,255,0.6)`,
+                                                    border: `1px solid ${palette.glow}`,
                                                     flexShrink: 0,
                                                 }}>
                                                     {(ws.name as string).charAt(0).toUpperCase()}
                                                 </div>
 
                                                 {/* Name + slug */}
-                                                <div style={{ minWidth: 0 }}>
+                                                <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
                                                     <h3 style={{
-                                                        fontSize: 18, fontWeight: 700, margin: 0,
-                                                        color: '#0f172a', lineHeight: 1.35,
-                                                        letterSpacing: '-0.01em',
+                                                        fontSize: 19, fontWeight: 700, margin: 0,
+                                                        color: '#0f172a', lineHeight: 1.3,
+                                                        letterSpacing: '-0.02em',
                                                         overflow: 'hidden', textOverflow: 'ellipsis',
                                                         whiteSpace: 'nowrap',
                                                     }}>
                                                         {ws.name as string}
                                                     </h3>
-                                                    <p style={{
-                                                        margin: '3px 0 0', fontSize: 13,
-                                                        color: '#94a3b8', fontWeight: 500,
+                                                    <div style={{
+                                                        display: 'inline-flex', alignItems: 'center',
+                                                        background: '#f1f5f9', padding: '2px 8px', borderRadius: 6,
+                                                        fontSize: 12, color: '#64748b', fontWeight: 600, fontFamily: 'monospace',
+                                                        width: 'fit-content'
                                                     }}>
                                                         /{ws.slug as string}
-                                                    </p>
+                                                    </div>
                                                 </div>
                                             </div>
 
@@ -324,87 +327,89 @@ export default function WorkspacePage() {
 
                                         {/* ─ Action buttons ─ */}
                                         <div style={{
-                                            display: 'flex', gap: 8,
-                                            paddingTop: 18,
+                                            display: 'flex', gap: 12,
+                                            paddingTop: 20,
                                             borderTop: '1px solid #f1f5f9',
                                         }}>
                                             <button
                                                 onClick={() => router.push(`/workspace/${ws._id}`)}
                                                 style={{
-                                                    flex: 1, height: 40, borderRadius: 12,
-                                                    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                                                    flex: 1.5, height: 44, borderRadius: 14,
+                                                    background: 'linear-gradient(135deg, #4f46e5, #7c3aed)',
                                                     border: 'none', color: '#fff',
-                                                    fontSize: 13, fontWeight: 600,
-                                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                                                    fontSize: 14, fontWeight: 600, letterSpacing: '0.01em',
+                                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
                                                     cursor: 'pointer',
-                                                    boxShadow: '0 2px 8px rgba(99,102,241,0.25)',
-                                                    transition: 'all 0.2s',
+                                                    boxShadow: '0 4px 14px rgba(79, 70, 229, 0.3)',
+                                                    transition: 'all 0.25s ease-out',
                                                 }}
                                                 onMouseEnter={e => {
-                                                    e.currentTarget.style.boxShadow = '0 4px 16px rgba(99,102,241,0.35)';
+                                                    e.currentTarget.style.boxShadow = '0 6px 20px rgba(79, 70, 229, 0.4)';
+                                                    e.currentTarget.style.transform = 'translateY(-1px)';
                                                 }}
                                                 onMouseLeave={e => {
-                                                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(99,102,241,0.25)';
+                                                    e.currentTarget.style.boxShadow = '0 4px 14px rgba(79, 70, 229, 0.3)';
+                                                    e.currentTarget.style.transform = 'translateY(0)';
                                                 }}
                                             >
-                                                <ExternalLink size={14} />
-                                                Mở Dashboard
-                                                <ArrowRight size={14} />
+                                                <ExternalLink size={16} strokeWidth={2.5} />
+                                                Mở Workspace
+                                                <ArrowRight size={16} strokeWidth={2.5} />
                                             </button>
 
                                             <button
                                                 onClick={() => router.push(`/workspace/${ws._id}/teams`)}
                                                 style={{
-                                                    height: 40, borderRadius: 12,
+                                                    flex: 1, height: 44, borderRadius: 14,
                                                     background: '#fff',
                                                     border: '1px solid #e2e8f0',
-                                                    color: '#475569',
-                                                    fontSize: 13, fontWeight: 500,
-                                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-                                                    padding: '0 14px',
+                                                    color: '#334155',
+                                                    fontSize: 14, fontWeight: 600,
+                                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
                                                     cursor: 'pointer',
                                                     transition: 'all 0.2s',
+                                                    boxShadow: '0 1px 3px rgba(15,23,42,0.02)',
                                                 }}
                                                 onMouseEnter={e => {
                                                     e.currentTarget.style.borderColor = '#c7d2fe';
                                                     e.currentTarget.style.color = '#4f46e5';
-                                                    e.currentTarget.style.background = '#eef2ff';
+                                                    e.currentTarget.style.background = '#f8fafc';
                                                 }}
                                                 onMouseLeave={e => {
                                                     e.currentTarget.style.borderColor = '#e2e8f0';
-                                                    e.currentTarget.style.color = '#475569';
+                                                    e.currentTarget.style.color = '#334155';
                                                     e.currentTarget.style.background = '#fff';
                                                 }}
                                             >
-                                                <Users size={14} />
-                                                Đội ngũ
+                                                <Users size={16} />
+                                                Nhân sự
                                             </button>
 
                                             <button
                                                 onClick={() => router.push(`/workspace/${ws._id}/settings`)}
                                                 style={{
-                                                    height: 40, borderRadius: 12,
+                                                    flex: 1, height: 44, borderRadius: 14,
                                                     background: '#fff',
                                                     border: '1px solid #e2e8f0',
-                                                    color: '#475569',
-                                                    fontSize: 13, fontWeight: 500,
-                                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-                                                    padding: '0 14px',
+                                                    color: '#334155',
+                                                    fontSize: 14, fontWeight: 600,
+                                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
                                                     cursor: 'pointer',
                                                     transition: 'all 0.2s',
+                                                    boxShadow: '0 1px 3px rgba(15,23,42,0.02)',
                                                 }}
                                                 onMouseEnter={e => {
                                                     e.currentTarget.style.borderColor = '#c7d2fe';
                                                     e.currentTarget.style.color = '#4f46e5';
-                                                    e.currentTarget.style.background = '#eef2ff';
+                                                    e.currentTarget.style.background = '#f8fafc';
                                                 }}
                                                 onMouseLeave={e => {
                                                     e.currentTarget.style.borderColor = '#e2e8f0';
-                                                    e.currentTarget.style.color = '#475569';
+                                                    e.currentTarget.style.color = '#334155';
                                                     e.currentTarget.style.background = '#fff';
                                                 }}
                                             >
-                                                <Settings size={14} />
+                                                <Settings size={16} />
                                                 Cài đặt
                                             </button>
                                         </div>

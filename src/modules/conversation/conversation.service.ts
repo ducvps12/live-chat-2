@@ -61,6 +61,71 @@ export const conversationService = {
     },
 
     /**
+     * Handle incoming messages from Zalo. 
+     * Creates a visitor and conversation if they don't exist.
+     */
+    async handleIncomingZaloMessage(
+        workspaceId: string, 
+        zaloUserId: string, 
+        zaloUserName: string, 
+        zaloAvatar: string, 
+        content: string, 
+        msgType: 'text' | 'image' | 'video' | 'file' = 'text',
+        attachments: any[] = [],
+        clientMessageId?: string
+    ) {
+        // Find a widget to associate the visitor with (we use the first active widget)
+        const widget = await widgetRepo.findByWorkspace(workspaceId);
+        if (!widget || widget.length === 0) {
+            throw new AppError('Không tìm thấy Widget nào cho workspace này để gắn Zalo', 400, 'BAD_REQUEST');
+        }
+        const widgetId = (widget[0]._id as any).toString();
+        const visitorId = `zalo_${zaloUserId}`;
+
+        // Upsert visitor profile
+        const { visitor } = await visitorRepo.findOrCreate(
+            visitorId,
+            widgetId,
+            workspaceId,
+            { name: zaloUserName, avatar: zaloAvatar, attributes: { channel: 'zalo', zaloUserId } }
+        );
+
+        let conversation = await conversationRepo.findActiveByVisitor(visitorId, widgetId);
+        let isNew = false;
+
+        if (!conversation) {
+            conversation = await conversationRepo.create({
+                workspaceId: workspaceId as any,
+                widgetId: widget[0]._id as any,
+                visitorId,
+                visitorInfo: { name: zaloUserName, avatar: zaloAvatar },
+                channel: 'zalo',
+                status: 'open',
+                lastMessageAt: new Date(),
+                metadata: { zaloUserId },
+            });
+            isNew = true;
+            await visitorRepo.incrementConversations(visitorId, widgetId);
+
+            try {
+                emitToWorkspace(workspaceId, 'conversation:new', {
+                    conversation, visitor, visitorInfo: { name: zaloUserName, avatar: zaloAvatar },
+                });
+            } catch { /* socket may not be initialized yet */ }
+        }
+
+        // Add message to conversation
+        return this.addMessage(
+            (conversation._id as any).toString(),
+            { type: 'visitor', id: visitorId, name: zaloUserName },
+            content,
+            msgType as any,
+            attachments,
+            clientMessageId
+        );
+    },
+
+    /**
      * Resume conversation — get conversation + messages
      */
     async resume(conversationId: string, visitorId: string) {
@@ -610,15 +675,10 @@ export const conversationService = {
     },
 
     async getTotalUnreadCount(workspaceId: string, requester: { userId: string; type: 'visitor' | 'agent' }) {
-        // Find all open conversations for this workspace that this requester should see
-        // For agents, we could filter by assignedTo if they are restrictive, but for now we look at all or their assigned ones.
-        // Let's get all open conversations for the workspace since agents can view unassigned ones.
-        
-        const filter: any = { workspaceId, status: 'open' };
-        
-        const convs = await (conversationRepo as any).ConversationModel.find(filter).exec();
+        const convs = await conversationRepo.findOpenByWorkspace(workspaceId);
         
         let totalUnread = 0;
+        let zaloUnread = 0;
         
         await Promise.all(
             convs.map(async (conv: any) => {
@@ -630,11 +690,21 @@ export const conversationService = {
                     requester.type,
                     readCtx ? readCtx.lastReadMessageId : null
                 );
+                
                 totalUnread += count;
+                // Determine if this is a Zalo conversation
+                const isZalo = conv.channel === 'zalo' || conv.metadata?.channel === 'zalo';
+                if (isZalo) {
+                    zaloUnread += count;
+                }
             })
         );
         
-        return { totalUnread };
+        return { 
+            totalUnread, 
+            zaloUnread, 
+            inboxUnread: Math.max(0, totalUnread - zaloUnread) 
+        };
     },
 
     // ── Visitor profile methods ──
@@ -763,5 +833,45 @@ export const conversationService = {
         } catch { /* ignore */ }
 
         return note;
+    },
+
+    /**
+     * Reset toàn bộ tin nhắn của workspace.
+     * - Xóa hết Message docs thuộc các conversations của workspace này.
+     * - Xóa hết ZaloMessage docs của workspace.
+     * - Reset lastMessage, unreadCount trên Conversation docs.
+     * - GIỮ NGUYÊN: Visitor profiles, Conversation metadata (visitorId, assignedTo, tags...).
+     */
+    async resetWorkspaceMessages(workspaceId: string): Promise<{ deletedMessages: number; deletedZaloMessages: number; resetConversations: number }> {
+        const mongoose = require('mongoose');
+        const { MessageModel } = require('./repos/message.model');
+        const { ConversationModel } = require('./repos/conversation.model');
+        const { ZaloMessageModel } = require('../zalo/repos/zalo-message.model');
+
+        const wsObjectId = new mongoose.Types.ObjectId(workspaceId);
+
+        // 1. Lấy tất cả conversationIds của workspace
+        const convIds = await ConversationModel.distinct('_id', { workspaceId: wsObjectId });
+
+        // 2. Xóa toàn bộ Messages thuộc các conversations này
+        const msgResult = await MessageModel.deleteMany({ conversationId: { $in: convIds } });
+
+        // 3. Xóa toàn bộ ZaloMessages của workspace
+        const zaloResult = await ZaloMessageModel.deleteMany({ workspaceId: wsObjectId });
+
+        // 4. Reset conversations: xóa lastMessage, unreadCount = 0 (giữ metadata khác)
+        const convResult = await ConversationModel.updateMany(
+            { workspaceId: wsObjectId },
+            {
+                $unset: { lastMessage: '' },
+                $set: { unreadCount: 0 },
+            }
+        );
+
+        return {
+            deletedMessages: msgResult.deletedCount || 0,
+            deletedZaloMessages: zaloResult.deletedCount || 0,
+            resetConversations: convResult.modifiedCount || 0,
+        };
     },
 };

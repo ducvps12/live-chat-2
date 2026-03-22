@@ -2,7 +2,10 @@ import React, { useMemo, useState } from 'react';
 import { Spin } from 'antd';
 import Link from 'next/link';
 import dayjs from 'dayjs';
+import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/vi';
+
+dayjs.extend(relativeTime);
 import {
     ResponsiveContainer,
     AreaChart,
@@ -945,7 +948,7 @@ const AgentPerformanceSection = ({ workspaceId }: { workspaceId: string }) => {
                                 <p className="m-0 text-[22px] font-bold text-emerald-700">
                                     {agents.reduce((s: number, a: any) => s + a.stats.total, 0)}
                                 </p>
-                                <p className="m-0 mt-1 text-[11px] font-semibold uppercase tracking-wider text-emerald-500">Tổng hội thoại</p>
+                                <p className="m-0 mt-1 text-[11px] font-semibold uppercase tracking-wider text-emerald-500">Khách Hỗ Trợ</p>
                             </div>
                             <div className="rounded-2xl bg-sky-50/70 text-center" style={{ padding: '16px 12px' }}>
                                 <p className="m-0 text-[22px] font-bold text-sky-700">
@@ -973,19 +976,22 @@ const AgentPerformanceSection = ({ workspaceId }: { workspaceId: string }) => {
                                             Vai trò
                                         </th>
                                         <th className="text-center text-[11px] font-semibold uppercase tracking-wider text-slate-500" style={{ padding: '14px 12px' }}>
-                                            Hội thoại
+                                            Khách Hỗ Trợ
                                         </th>
                                         <th className="text-center text-[11px] font-semibold uppercase tracking-wider text-slate-500" style={{ padding: '14px 12px' }}>
-                                            Đang xử lý
+                                            Đang Chat
                                         </th>
                                         <th className="text-center text-[11px] font-semibold uppercase tracking-wider text-slate-500" style={{ padding: '14px 12px' }}>
-                                            Đã đóng
+                                            Đã Đóng
                                         </th>
                                         <th className="text-center text-[11px] font-semibold uppercase tracking-wider text-slate-500" style={{ padding: '14px 12px', minWidth: 160 }}>
                                             Tỷ lệ đóng
                                         </th>
                                         <th className="text-center text-[11px] font-semibold uppercase tracking-wider text-slate-500" style={{ padding: '14px 12px' }}>
                                             Tin nhắn gửi
+                                        </th>
+                                        <th className="text-right text-[11px] font-semibold uppercase tracking-wider text-slate-500" style={{ padding: '14px 16px' }}>
+                                            Hoạt Động Cuối
                                         </th>
                                     </tr>
                                 </thead>
@@ -1078,6 +1084,13 @@ const AgentPerformanceSection = ({ workspaceId }: { workspaceId: string }) => {
                                                     <span className="inline-flex items-center gap-1 text-[13px] font-semibold text-slate-700">
                                                         <MessageSquare size={13} className="text-slate-400" />
                                                         {agent.stats.messagesSent}
+                                                    </span>
+                                                </td>
+
+                                                {/* Last Active */}
+                                                <td className="text-right" style={{ padding: '14px 16px' }}>
+                                                    <span className="text-[12px] font-medium text-slate-500">
+                                                        {agent.stats.lastActivity ? dayjs(agent.stats.lastActivity).fromNow() : 'Chưa có'}
                                                     </span>
                                                 </td>
                                             </tr>

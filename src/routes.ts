@@ -4,6 +4,7 @@ import workspaceRoutes from './modules/workspace/workspace.routes';
 import conversationRoutes from './modules/conversation/conversation.routes';
 import macroRoutes from './modules/macro/macro.routes';
 import externalSessionRoutes from './modules/external-session/externalSession.routes';
+import uploadRoutes from './modules/upload/upload.routes';
 
 const rootRouter = Router();
 
@@ -13,6 +14,7 @@ rootRouter.use('/workspaces', workspaceRoutes);
 rootRouter.use('/conversations', conversationRoutes);
 rootRouter.use('/macros', macroRoutes);
 rootRouter.use('/external-sessions', externalSessionRoutes);
+rootRouter.use('/upload', uploadRoutes);
 
 // Health check
 rootRouter.get('/health', (req, res) => {

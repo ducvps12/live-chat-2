@@ -6,7 +6,7 @@ export const conversationController = {
     // ── Public Widget Endpoints ──
 
     getByVisitor: asyncHandler(async (req: Request, res: Response) => {
-        const conversations = await conversationService.getByVisitor(req.params.visitorId, req.params.widgetId);
+        const conversations = await conversationService.getByVisitor(req.params.visitorId as string, req.params.widgetId as string);
         res.status(200).json({ success: true, data: conversations });
     }),
 
@@ -154,6 +154,27 @@ export const conversationController = {
             clientMessageId,
             replyTo
         );
+
+        // ── Zalo Integration: Push message to Zalo if applicable ──
+        if (conv?.channel === 'zalo') {
+            const zaloUserId = conv.metadata?.zaloUserId;
+            if (zaloUserId) {
+                try {
+                    // Lazy load to avoid circular dependency if any
+                    const { zaloService } = require('../zalo/zalo.service'); 
+                    await zaloService.sendMessage(
+                        (conv.workspaceId as any).toString(),
+                        zaloUserId,
+                        content || '',
+                        type || 'text',
+                        attachments?.[0]?.data || undefined 
+                    );
+                } catch (e) {
+                    console.error('[ConversationController] Failed to send Zalo message:', e);
+                }
+            }
+        }
+
         res.status(201).json({ success: true, data: msg });
     }),
 
@@ -295,6 +316,7 @@ export const conversationController = {
 
     getMessageContext: asyncHandler(async (req: Request, res: Response) => {
         const conversationId = req.params.conversationId as string;
+        const workspaceId = req.params.workspaceId as string;
         const messageId = req.params.messageId as string;
         const limitParam = req.query.limit;
         const limit = Number(Array.isArray(limitParam) ? limitParam[0] : limitParam) || 30;
@@ -322,6 +344,32 @@ export const conversationController = {
             { page: Number(page) || 1, limit: Number(limit) || 20, search }
         );
         res.status(200).json({ success: true, data: result });
+    }),
+
+    exportVisitors: asyncHandler(async (req: Request, res: Response) => {
+        const result = await conversationService.getVisitors(
+            req.params.workspaceId as string,
+            { page: 1, limit: 10000, search: req.query.search as string }
+        );
+
+        // Build CSV
+        const BOM = '\uFEFF'; // UTF-8 BOM for Excel
+        const headers = ['Tên', 'Email', 'Số điện thoại', 'Lần đầu', 'Lần cuối', 'Số hội thoại', 'Kênh'];
+        const rows = result.items.map((v: any) => [
+            `"${(v.name || '').replace(/"/g, '""')}"`,
+            `"${(v.email || '').replace(/"/g, '""')}"`,
+            `"${(v.phone || '').replace(/"/g, '""')}"`,
+            v.firstSeenAt ? new Date(v.firstSeenAt).toLocaleDateString('vi-VN') : '',
+            v.lastSeenAt ? new Date(v.lastSeenAt).toLocaleDateString('vi-VN') : '',
+            v.totalConversations || 0,
+            'Widget',
+        ].join(','));
+
+        const csv = BOM + headers.join(',') + '\n' + rows.join('\n');
+
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="visitors_${Date.now()}.csv"`);
+        res.send(csv);
     }),
 
     enrichVisitor: asyncHandler(async (req: Request, res: Response) => {
@@ -385,5 +433,17 @@ export const conversationController = {
             content
         );
         res.status(201).json({ success: true, data: note });
+    }),
+
+    // ── Reset all messages (keep visitor profiles) ──
+
+    resetMessages: asyncHandler(async (req: Request, res: Response) => {
+        const workspaceId = req.params.workspaceId as string;
+        const result = await conversationService.resetWorkspaceMessages(workspaceId);
+        res.status(200).json({
+            success: true,
+            message: `Đã xóa ${result.deletedMessages} tin nhắn, ${result.deletedZaloMessages} tin Zalo, reset ${result.resetConversations} cuộc hội thoại.`,
+            data: result,
+        });
     }),
 };

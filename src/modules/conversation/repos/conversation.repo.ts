@@ -26,6 +26,10 @@ export const conversationRepo = {
         return ConversationModel.distinct('metadata.domain', { workspaceId, 'metadata.domain': { $exists: true, $ne: null } }).exec() as Promise<string[]>;
     },
 
+    async findOpenByWorkspace(workspaceId: string): Promise<IConversation[]> {
+        return ConversationModel.find({ workspaceId, status: 'open' }).exec();
+    },
+
     async findByWorkspace(
         workspaceId: string,
         options?: { 

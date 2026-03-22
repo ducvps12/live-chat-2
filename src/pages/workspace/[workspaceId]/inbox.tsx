@@ -1,7 +1,7 @@
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { Input, Badge, Spin, Empty, Tag, Button, message, Tooltip, Popover, Select, DatePicker, Form } from 'antd';
+import { Input, Badge, Spin, Empty, Tag, Button, message, Tooltip, Popover, Select, DatePicker, Form, Modal } from 'antd';
 import {
     Search, Send, Paperclip, ArrowLeft, X as XIcon,
     MessageSquare, Clock, User, Image as ImageIcon, RotateCw, Filter, Check, CheckCheck, UserCheck, UserX, Users, Zap, Reply, Edit2, Trash2, Globe
@@ -41,27 +41,7 @@ function timeAgo(dateStr: string) {
     return `${diffD} ngày`;
 }
 
-// ── Audio Helper ──
-function playNotificationSound() {
-    try {
-        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const playTone = (freq: number, startTime: number, duration: number) => {
-            const osc = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            osc.connect(gain);
-            gain.connect(audioCtx.destination);
-            osc.type = 'sine';
-            osc.frequency.value = freq;
-            gain.gain.setValueAtTime(0, startTime);
-            gain.gain.linearRampToValueAtTime(0.2, startTime + 0.05);
-            gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
-            osc.start(startTime);
-            osc.stop(startTime + duration);
-        };
-        playTone(600, audioCtx.currentTime, 0.15);
-        playTone(800, audioCtx.currentTime + 0.1, 0.25);
-    } catch { /* ignore if audio not supported or blocked */ }
-}
+import { playNotificationSound } from '../../../utils/audio';
 
 function visitorName(conv: Conversation) {
     return conv.visitorInfo?.name || conv.visitorInfo?.email || conv.visitorId?.slice(0, 8) || 'Khách';
@@ -79,6 +59,87 @@ function getAssignedName(conv: Conversation): string | undefined {
     return undefined;
 }
 
+// ── Zalo image URL detection & rendering ──
+const IMAGE_URL_REGEX = /https?:\/\/[^\s]+\.(?:jpg|jpeg|png|gif|webp|bmp)(\?[^\s]*)?/gi;
+const ZALO_CDN_REGEX = /https?:\/\/photo-stal[\w-]*\.zdn\.vn\/[^\s]+/gi;
+
+function isImageUrl(url: string): boolean {
+    return /\.(jpg|jpeg|png|gif|webp|bmp)(\?.*)?$/i.test(url) || /photo-stal[\w-]*\.zdn\.vn\//i.test(url);
+}
+
+function renderMessageContent(content: string, isAgent: boolean) {
+    if (!content) return null;
+
+    // Combine both patterns
+    const combinedRegex = new RegExp(`(${IMAGE_URL_REGEX.source}|${ZALO_CDN_REGEX.source})`, 'gi');
+    const parts: Array<{ type: 'text' | 'image'; value: string }> = [];
+    let lastIndex = 0;
+    let match;
+
+    // Reset regex state
+    combinedRegex.lastIndex = 0;
+    while ((match = combinedRegex.exec(content)) !== null) {
+        const url = match[0];
+        if (!isImageUrl(url)) continue;
+
+        if (match.index > lastIndex) {
+            const text = content.slice(lastIndex, match.index).trim();
+            if (text) parts.push({ type: 'text', value: text });
+        }
+        parts.push({ type: 'image', value: url });
+        lastIndex = match.index + url.length;
+    }
+
+    if (lastIndex < content.length) {
+        const text = content.slice(lastIndex).trim();
+        if (text) parts.push({ type: 'text', value: text });
+    }
+
+    // If no images found, render as plain text
+    if (parts.every(p => p.type === 'text')) {
+        return <div>{content}</div>;
+    }
+
+    return (
+        <div>
+            {parts.map((part, i) =>
+                part.type === 'image' ? (
+                    <img
+                        key={i}
+                        src={part.value}
+                        alt="Zalo Image"
+                        style={{
+                            maxWidth: '100%',
+                            maxHeight: 280,
+                            borderRadius: 8,
+                            cursor: 'pointer',
+                            display: 'block',
+                            marginTop: i > 0 ? 6 : 0,
+                            marginBottom: 4,
+                        }}
+                        onClick={() => window.open(part.value, '_blank')}
+                        onError={(e) => {
+                            // Fallback: show as link if image fails to load
+                            const target = e.target as HTMLImageElement;
+                            target.style.display = 'none';
+                            const link = document.createElement('a');
+                            link.href = part.value;
+                            link.target = '_blank';
+                            link.textContent = '🔗 ' + part.value;
+                            link.style.color = isAgent ? '#e0e7ff' : '#6366f1';
+                            link.style.fontSize = '12px';
+                            link.style.wordBreak = 'break-all';
+                            target.parentElement?.insertBefore(link, target);
+                        }}
+                    />
+                ) : (
+                    <div key={i}>{part.value}</div>
+                )
+            )}
+        </div>
+    );
+}
+
 export default function InboxPage() {
     const router = useRouter();
     const { workspaceId } = router.query as { workspaceId: string };
@@ -86,7 +147,10 @@ export default function InboxPage() {
     const me = meData?.data;
 
     const queryClient = useQueryClient();
-    const { data: totalUnreadCount = 0 } = useTotalUnreadCount(workspaceId, !!workspaceId && !!meData);
+    const { data: unreadCounts } = useTotalUnreadCount(workspaceId, !!workspaceId && !!meData);
+    const totalUnreadCount = unreadCounts?.totalUnread || 0;
+    const inboxUnreadCount = unreadCounts?.inboxUnread || 0;
+    const zaloUnreadCount = unreadCounts?.zaloUnread || 0;
 
     useEffect(() => {
         if (totalUnreadCount > 0) {
@@ -951,7 +1015,42 @@ export default function InboxPage() {
         }
     };
 
-    // ── Fetch workspace members ──
+    // ── Reset all messages ──
+    const handleResetAllMessages = () => {
+        Modal.confirm({
+            title: 'Xóa toàn bộ tin nhắn?',
+            content: (
+                <div>
+                    <p style={{ marginBottom: 8 }}>
+                        Thao tác này sẽ <strong>xóa vĩnh viễn</strong> toàn bộ:
+                    </p>
+                    <ul style={{ marginLeft: 16, marginBottom: 8, color: '#555' }}>
+                        <li>Tất cả tin nhắn trong Inbox</li>
+                        <li>Tất cả tin nhắn Zalo đã lưu</li>
+                    </ul>
+                    <p style={{ color: '#666', fontSize: 13 }}>
+                        ✔ Thông tin khách hàng (visitor profiles) sẽ được giữ nguyên.
+                    </p>
+                </div>
+            ),
+            okText: 'Xóa tất cả',
+            okType: 'danger',
+            cancelText: 'Hủy',
+            onOk: async () => {
+                try {
+                    const res = await httpClient.delete(`/conversations/workspace/${workspaceId}/reset-messages`);
+                    const d = res.data?.data || {};
+                    message.success(`Đã xóa ${d.deletedMessages || 0} tin nhắn, ${d.deletedZaloMessages || 0} tin Zalo`);
+                    setMessages([]);
+                    setSelectedConvId(null);
+                    setConversations(prev => prev.map(c => ({ ...c, lastMessage: undefined, unreadCount: 0 })));
+                } catch (err: any) {
+                    message.error(err.response?.data?.message || 'Xóa thất bại');
+                }
+            },
+        });
+    };
+
     useEffect(() => {
         if (!workspaceId) return;
         httpClient.get(`/workspaces/${workspaceId}/members`)
@@ -1078,9 +1177,10 @@ export default function InboxPage() {
                                 onClick={() => router.push(`/workspace/${workspaceId}`)}
                                 style={{ padding: '4px 8px' }}
                             />
-                            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>
-                                <MessageSquare size={20} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+                            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, display: 'flex', alignItems: 'center' }}>
+                                <MessageSquare size={20} style={{ marginRight: 6 }} />
                                 Inbox
+                                <Badge count={inboxUnreadCount} style={{ marginLeft: 8 }} />
                             </h2>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1102,7 +1202,16 @@ export default function InboxPage() {
                                     Zalo
                                 </Button>
                             </Tooltip>
-                            <Badge count={totalUnreadCount} overflowCount={99} />
+                            <Badge count={zaloUnreadCount} overflowCount={99} />
+                            <Tooltip title="Xóa hết tin nhắn">
+                                <Button
+                                    size="small"
+                                    danger
+                                    icon={<Trash2 size={13} />}
+                                    onClick={handleResetAllMessages}
+                                    style={{ height: 26, padding: '2px 8px', borderRadius: 6 }}
+                                />
+                            </Tooltip>
                         </div>
                     </div>
 
@@ -1496,22 +1605,25 @@ export default function InboxPage() {
                                                             </div>
                                                         )}
                                                         {/* Attachments */}
-                                                        {msg.attachments?.map((att, i) => (
-                                                            <div key={i} style={{ marginBottom: msg.content ? 6 : 0 }}>
-                                                                {att.mimeType?.startsWith('image/') ? (
-                                                                    <img
-                                                                        src={att.data}
-                                                                        alt={att.filename}
-                                                                        style={styles.msgImage}
-                                                                        onClick={() => window.open(att.data, '_blank')}
-                                                                    />
-                                                                ) : (
-                                                                    <a href={att.data} download={att.filename} style={{...styles.fileLink, display: 'block', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
-                                                                        📎 {att.filename}
-                                                                    </a>
-                                                                )}
-                                                            </div>
-                                                        ))}
+                                                        {msg.attachments?.map((att, i) => {
+                                                            const src = att.url || att.data;
+                                                            return (
+                                                                <div key={i} style={{ marginBottom: msg.content ? 6 : 0 }}>
+                                                                    {att.mimeType?.startsWith('image/') || isImageUrl(src || '') ? (
+                                                                        <img
+                                                                            src={src}
+                                                                            alt={att.filename || 'Image'}
+                                                                            style={styles.msgImage}
+                                                                            onClick={() => window.open(src, '_blank')}
+                                                                        />
+                                                                    ) : (
+                                                                        <a href={src} download={att.filename} style={{...styles.fileLink, display: 'block', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
+                                                                            📎 {att.filename}
+                                                                        </a>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })}
                                                         {/* Text and Actions */}
                                                         {editingMessageId === msg._id ? (
                                                             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 200, marginTop: 4 }}>
@@ -1535,7 +1647,7 @@ export default function InboxPage() {
                                                             </div>
                                                         ) : (
                                                             <div>
-                                                                {msg.content && <div>{msg.content}</div>}
+                                                                {msg.content && renderMessageContent(msg.content, isAgent)}
                                                                 {msg.editedAt && <div style={{ fontSize: 10, opacity: 0.6, marginTop: 2 }}>(Đã chỉnh sửa)</div>}
                                                             </div>
                                                         )}
