@@ -20,4 +20,4 @@ jobs:
           SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
-          sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no "$SERVER_USER@$SERVER_HOST" "cd /www/live_chat_nemark && bash deploy.sh"
+          sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no "$SERVER_USER@$SERVER_HOST" "cd /www/live_chat_nemark && sed -i 's/\r$//' deploy.sh && bash deploy.sh"
