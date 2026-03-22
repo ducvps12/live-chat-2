@@ -59,6 +59,6 @@ COPY --from=builder /app/src ./src
 # Create directories for persistent data
 RUN mkdir -p /app/data/browser-profiles /app/data/zalo-sessions /app/public/uploads
 
-EXPOSE 3010 4010
+EXPOSE 3020 4020
 
-CMD ["npx", "concurrently", "next start -p 3010", "node --import tsx src/bootstrap/index.ts"]
+CMD ["npx", "concurrently", "next start -p 3020", "node --import tsx src/bootstrap/index.ts"]
