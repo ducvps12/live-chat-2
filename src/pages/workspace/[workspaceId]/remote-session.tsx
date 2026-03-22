@@ -208,6 +208,12 @@ export default function ZaloPersonalPage() {
     const [convSearch, setConvSearch] = useState('');
     const [convStatusFilter, setConvStatusFilter] = useState<'all' | 'open' | 'pending' | 'closed'>('all');
 
+    // ── Refs to track current values inside socket closures ──
+    const selectedConvIdRef = useRef<string | null>(null);
+    const conversationsRef = useRef<ZaloConversation[]>([]);
+    useEffect(() => { selectedConvIdRef.current = selectedConvId; }, [selectedConvId]);
+    useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
+
     // ── Message state ──
     const [messages, setMessages] = useState<ZaloMessage[]>([]);
     const [sending, setSending] = useState(false);
@@ -415,53 +421,67 @@ export default function ZaloPersonalPage() {
         // ── Realtime: listen for new Zalo messages pushed via WebSocket intercept ──
         socket.on('zalo:newMessage', (msg: any) => {
             console.log('[ZaloRT] New realtime message:', msg);
-            const attachments: ZaloMessage['attachments'] = [];
-            const imgUrl = msg.attachmentUrl || msg.thumbUrl;
-            if (imgUrl) {
-                attachments.push({
-                    data: imgUrl,
-                    url: imgUrl,
-                    filename: 'Zalo Image',
-                    mimeType: 'image/jpeg',
-                    size: 0,
+
+            // ── Determine which thread this message belongs to ──
+            const msgThreadId = msg.conversationId || msg.threadId || '';
+
+            // ── Check if message belongs to the currently open conversation ──
+            const currentConvId = selectedConvIdRef.current;
+            const currentConvs = conversationsRef.current;
+            const currentConv = currentConvId ? currentConvs.find(c => c._id === currentConvId) : null;
+            const currentThreadId = currentConv?.threadId || '';
+            const isCurrentThread = msgThreadId && currentThreadId && msgThreadId === currentThreadId;
+
+            // ── Only append to message list if it belongs to the open conversation ──
+            if (isCurrentThread) {
+                const attachments: ZaloMessage['attachments'] = [];
+                const imgUrl = msg.attachmentUrl || msg.thumbUrl;
+                if (imgUrl) {
+                    attachments.push({
+                        data: imgUrl,
+                        url: imgUrl,
+                        filename: 'Zalo Image',
+                        mimeType: 'image/jpeg',
+                        size: 0,
+                    });
+                }
+
+                const newMsg: ZaloMessage = {
+                    _id: msg.msgId || `rt_${Date.now()}`,
+                    conversationId: msg.conversationId || 'active',
+                    sender: {
+                        type: msg.senderId ? 'customer' as const : 'agent' as const,
+                        name: msg.senderName || 'Khách',
+                    },
+                    content: msg.content || '',
+                    type: msg.msgType || 'text',
+                    attachments: attachments.length > 0 ? attachments : undefined,
+                    attachmentUrl: msg.attachmentUrl,
+                    thumbUrl: msg.thumbUrl,
+                    status: 'delivered' as const,
+                    createdAt: msg.timestamp ? new Date(msg.timestamp).toISOString() : new Date().toISOString(),
+                };
+                // Append without duplicates
+                setMessages(prev => {
+                    const exists = prev.some(m => m._id === newMsg._id);
+                    if (exists) return prev;
+                    
+                    // Deduplicate optimistic message
+                    let cleanPrev = prev;
+                    if (newMsg.sender.type === 'agent') {
+                        const optIdx = prev.findIndex(m => 
+                            (m._id.startsWith('tmp_') || m._id.startsWith('real_') || m._id.startsWith('sent_')) 
+                            && m.content === newMsg.content
+                        );
+                        if (optIdx !== -1) {
+                            cleanPrev = [...prev];
+                            cleanPrev.splice(optIdx, 1);
+                        }
+                    }
+                    
+                    return [...cleanPrev, newMsg];
                 });
             }
-
-            const newMsg: ZaloMessage = {
-                _id: msg.msgId || `rt_${Date.now()}`,
-                conversationId: msg.conversationId || 'active',
-                sender: {
-                    type: msg.senderId ? 'customer' as const : 'agent' as const,
-                    name: msg.senderName || 'Khách',
-                },
-                content: msg.content || '',
-                type: msg.msgType || 'text',
-                attachments: attachments.length > 0 ? attachments : undefined,
-                attachmentUrl: msg.attachmentUrl,
-                thumbUrl: msg.thumbUrl,
-                status: 'delivered' as const,
-                createdAt: msg.timestamp ? new Date(msg.timestamp).toISOString() : new Date().toISOString(),
-            };
-            // Append without duplicates
-            setMessages(prev => {
-                const exists = prev.some(m => m._id === newMsg._id);
-                if (exists) return prev;
-                
-                // Deduplicate optimistic message
-                let cleanPrev = prev;
-                if (newMsg.sender.type === 'agent') {
-                    const optIdx = prev.findIndex(m => 
-                        (m._id.startsWith('tmp_') || m._id.startsWith('real_') || m._id.startsWith('sent_')) 
-                        && m.content === newMsg.content
-                    );
-                    if (optIdx !== -1) {
-                        cleanPrev = [...prev];
-                        cleanPrev.splice(optIdx, 1);
-                    }
-                }
-                
-                return [...cleanPrev, newMsg];
-            });
 
             // Move conversation to top + update lastMessage/lastMessageAt
             const threadId = msg.conversationId || msg.threadId || '';
@@ -493,10 +513,12 @@ export default function ZaloPersonalPage() {
                 }
             }
 
-            // Show notification for incoming messages
-            if (newMsg.sender.type === 'customer') {
+            // Show notification for incoming messages (from other people, not self)
+            if (!msg.isSelf && msg.senderId) {
                 playNotificationSound();
-                message.info(`Tin nhắn mới từ ${newMsg.sender.name}: ${newMsg.content.substring(0, 30)}...`);
+                const senderName = msg.senderName || 'Khách';
+                const content = (msg.content || '').substring(0, 30);
+                message.info(`Tin nhắn mới từ ${senderName}: ${content}...`);
             }
         });
 
