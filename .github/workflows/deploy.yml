@@ -14,60 +14,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.2.2
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          password: ${{ secrets.SERVER_PASSWORD }}
-          command_timeout: 30m
-          script: |
-            set -e
-
-            APP_DIR="/www/live_chat_nemark"
-            cd "$APP_DIR"
-
-            echo "📥 Pulling latest code..."
-            git pull origin main
-
-            echo "🔍 Checking .env.production..."
-            if [ ! -f .env.production ]; then
-              echo "❌ .env.production not found! Creating from template..."
-              cp .env.production.template .env.production
-              echo "⚠️  Please edit .env.production with real values!"
-            fi
-
-            echo "🏗️  Building and starting containers..."
-            docker compose down --timeout 30
-            docker compose up --build -d
-
-            echo "⏳ Waiting for services to start..."
-            sleep 15
-
-            echo "🔍 Health check..."
-            # Check if containers are running
-            if docker compose ps | grep -q "Up"; then
-              echo "✅ Containers are running!"
-            else
-              echo "❌ Containers failed to start!"
-              docker compose logs --tail=50
-              exit 1
-            fi
-
-            # Check if app responds
-            for i in 1 2 3 4 5; do
-              if curl -sf http://localhost:4020/api/health > /dev/null 2>&1; then
-                echo "✅ API health check passed!"
-                break
-              fi
-              if [ "$i" -eq 5 ]; then
-                echo "⚠️  API health check failed (may still be starting up)"
-                docker compose logs app --tail=30
-              fi
-              echo "Retry $i/5..."
-              sleep 5
-            done
-
-            # Clean up old images
-            docker image prune -f
-
-            echo "🎉 Deployment complete!"
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+          sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no "$SERVER_USER@$SERVER_HOST" "cd /www/live_chat_nemark && bash deploy.sh"
