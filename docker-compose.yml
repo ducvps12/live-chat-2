@@ -6,10 +6,14 @@ services:
     restart: unless-stopped
     volumes:
       - mongo_data:/data/db
-    ports:
-      - "27017:27017"
     networks:
       - nemark_net
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   # ─── Application (Next.js + Express + Socket.IO) ───
   app:
@@ -27,9 +31,16 @@ services:
       - ./data:/app/data
       - ./public/uploads:/app/public/uploads
     depends_on:
-      - mongo
+      mongo:
+        condition: service_healthy
     networks:
       - nemark_net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4020/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 volumes:
   mongo_data:
