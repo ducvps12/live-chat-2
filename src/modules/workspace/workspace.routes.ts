@@ -5,6 +5,8 @@ import { validateRequest } from '../../middlewares/validateRequest';
 import { requireAuth } from '../../middlewares/auth.middleware';
 import { requirePermission } from '../../middlewares/permission.middleware';
 import { zaloRoutes } from '../zalo/zalo.routes';
+import { facebookRoutes } from '../facebook/facebook.routes';
+import { subscriptionRoutes } from '../subscription/subscription.routes';
 import { scopeCheck } from '../../middlewares/scopeCheck';
 import { PERMISSIONS } from '../../config/permissions';
 
@@ -201,6 +203,8 @@ router.get(
 
 // Mount sub-routers
 router.use('/:workspaceId/zalo', zaloRoutes); // Tích hợp API Zalo
+router.use('/:workspaceId/facebook', facebookRoutes); // Tích hợp Facebook Fanpage
+router.use('/:workspaceId/subscription', subscriptionRoutes); // Gói cước & thanh toán
 
 // ────────── Presence ──────────
 router.get(

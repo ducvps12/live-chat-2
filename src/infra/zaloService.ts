@@ -49,6 +49,7 @@ export interface ZaloSession {
     listenerStarted: boolean;
     onMessage?: (msg: ZaloIncomingMessage) => void;
     onError?: (error: string) => void;
+    additionalCallbacks?: Array<(msg: ZaloIncomingMessage) => void>;
     watchdogTimer?: ReturnType<typeof setInterval>;
     lastWatchdogTickAt?: number;
     createdAt: Date;
@@ -57,6 +58,7 @@ export interface ZaloSession {
 
 export interface ZaloIncomingMessage {
     msgId: string;
+    cliMsgId?: string;
     threadId: string;
     threadType: 'user' | 'group';
     content: string;
@@ -67,6 +69,131 @@ export interface ZaloIncomingMessage {
     msgType: string;
     attachmentUrl?: string;
     thumbUrl?: string;
+    stickerUrl?: string;
+    quote?: {
+        ownerId: string;
+        msg: string;
+        msgId: string;
+        cliMsgId: string;
+        ts: number;
+    };
+    extractedData?: {
+        emails: string[];
+        phones: string[];
+        links: string[];
+    };
+}
+
+// ── Contact data extraction ──
+const PHONE_RE = /(?:\+84|84|0)(3[2-9]|5[2689]|7[06-9]|8[1-9]|9[0-9])\d{7}/g;
+const EMAIL_RE = /[\w.+-]+@[\w-]+\.[\w.]+/g;
+const URL_RE = /https?:\/\/[^\s<>"]+/g;
+
+function extractContactData(text: string): { emails: string[]; phones: string[]; links: string[] } {
+    const emails = [...new Set((text.match(EMAIL_RE) || []).map(e => e.toLowerCase()))];
+    const phones = [...new Set((text.match(PHONE_RE) || []))];
+    const links = [...new Set((text.match(URL_RE) || []))];
+    return { emails, phones, links };
+}
+
+// Persistent per-thread contact data store
+export interface ThreadContactData {
+    threadId: string;
+    threadType: 'user' | 'group';
+    contactName: string;
+    emails: string[];
+    phones: string[];
+    links: string[];
+    files: string[];
+    messageCount: number;
+    firstSeen: number;
+    lastSeen: number;
+}
+
+const contactDataStore = new Map<string, ThreadContactData>();
+
+function contactDataPath(sessionId: string): string {
+    return path.join(CREDENTIALS_DIR, `${sessionId}_contacts.json`);
+}
+
+export function loadContactData(sessionId: string): void {
+    try {
+        const filePath = contactDataPath(sessionId);
+        if (!fs.existsSync(filePath)) return;
+        const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        if (data && typeof data === 'object') {
+            for (const [key, val] of Object.entries(data)) {
+                contactDataStore.set(key, val as ThreadContactData);
+            }
+        }
+    } catch { /* ignore */ }
+}
+
+function saveContactData(sessionId: string): void {
+    try {
+        ensureCredentialsDir();
+        const obj: Record<string, ThreadContactData> = {};
+        for (const [key, val] of contactDataStore.entries()) {
+            if (key.startsWith(`${sessionId}:`)) {
+                obj[key] = val;
+            }
+        }
+        fs.writeFileSync(contactDataPath(sessionId), JSON.stringify(obj, null, 2), 'utf-8');
+    } catch { /* silent */ }
+}
+
+function trackMessageData(sessionId: string, msg: ZaloIncomingMessage): void {
+    const key = `${sessionId}:${msg.threadId}`;
+    let data = contactDataStore.get(key);
+    if (!data) {
+        data = {
+            threadId: msg.threadId,
+            threadType: msg.threadType,
+            contactName: msg.senderName,
+            emails: [],
+            phones: [],
+            links: [],
+            files: [],
+            messageCount: 0,
+            firstSeen: msg.timestamp,
+            lastSeen: msg.timestamp,
+        };
+        contactDataStore.set(key, data);
+    }
+
+    data.messageCount++;
+    data.lastSeen = msg.timestamp;
+    if (!msg.isSelf) data.contactName = msg.senderName;
+
+    // Extract and merge unique data
+    const extracted = extractContactData(msg.content);
+    for (const email of extracted.emails) {
+        if (!data.emails.includes(email)) data.emails.push(email);
+    }
+    for (const phone of extracted.phones) {
+        if (!data.phones.includes(phone)) data.phones.push(phone);
+    }
+    for (const link of extracted.links) {
+        if (!data.links.includes(link) && data.links.length < 100) data.links.push(link);
+    }
+    if (msg.attachmentUrl && !data.files.includes(msg.attachmentUrl) && data.files.length < 50) {
+        data.files.push(msg.attachmentUrl);
+    }
+
+    // Debounced save
+    saveContactData(sessionId);
+}
+
+export function getThreadContactData(sessionId: string, threadId: string): ThreadContactData | null {
+    return contactDataStore.get(`${sessionId}:${threadId}`) || null;
+}
+
+export function getAllContactData(sessionId: string): ThreadContactData[] {
+    const result: ThreadContactData[] = [];
+    for (const [key, val] of contactDataStore.entries()) {
+        if (key.startsWith(`${sessionId}:`)) result.push(val);
+    }
+    return result;
 }
 
 export interface ZaloConversationItem {
@@ -184,6 +311,10 @@ export function hasStoredCredentials(sessionId: string): boolean {
 // MESSAGE CACHE
 // ========================
 
+
+// Map of msgId -> cliMsgId for sent messages (needed for undo)
+const sentMsgCliIds = new Map<string, string>();
+
 function cacheMessage(sessionId: string, msg: ZaloIncomingMessage): void {
     const key = `${sessionId}:${msg.threadId}`;
     let list = messageCache.get(key);
@@ -191,7 +322,16 @@ function cacheMessage(sessionId: string, msg: ZaloIncomingMessage): void {
         list = [];
         messageCache.set(key, list);
     }
-    if (list.some(m => m.msgId === msg.msgId)) return;
+    // If message already cached, update cliMsgId if the new one has it
+    const existing = list.find(m => m.msgId === msg.msgId);
+    if (existing) {
+        if (msg.cliMsgId && msg.cliMsgId !== msg.msgId) {
+            existing.cliMsgId = msg.cliMsgId;
+            // Also update sentMsgCliIds map for undo
+            sentMsgCliIds.set(msg.msgId, msg.cliMsgId);
+        }
+        return;
+    }
     list.push(msg);
     if (list.length > MESSAGE_CACHE_MAX_PER_THREAD) {
         list.splice(0, list.length - MESSAGE_CACHE_MAX_PER_THREAD);
@@ -228,6 +368,10 @@ function normalizeMessageContent(content: unknown): string {
     }
     if (!content || typeof content !== 'object') return '';
     const record = content as Record<string, unknown>;
+    // Detect sticker content (has id + cateId + type)
+    if (record.id && record.cateId) {
+        return `[Sticker:${record.id}:${record.cateId}:${record.type || 0}]`;
+    }
     const title = typeof record.title === 'string' ? record.title.trim() : '';
     const description = typeof record.description === 'string' ? record.description.trim() : '';
     const href = typeof record.href === 'string' ? record.href.trim() : '';
@@ -263,7 +407,32 @@ export async function createZaloSession(
         console.log(`[ZaloService] Creating QR login session ${sessionId}...`);
         loadActivityFromDisk(sessionId);
 
-        const zalo = new Zalo({ logging: false, selfListen: false });
+        const zalo = new Zalo({
+            logging: false,
+            selfListen: false,
+            imageMetadataGetter: async (filePath: string) => {
+                const data = fs.readFileSync(filePath);
+                // Simple PNG/JPEG dimension parser (no sharp dependency)
+                let width = 0, height = 0;
+                if (data[0] === 0x89 && data[1] === 0x50) { // PNG
+                    width = data.readUInt32BE(16);
+                    height = data.readUInt32BE(20);
+                } else if (data[0] === 0xFF && data[1] === 0xD8) { // JPEG
+                    let offset = 2;
+                    while (offset < data.length) {
+                        if (data[offset] !== 0xFF) break;
+                        const marker = data[offset + 1];
+                        if (marker === 0xC0 || marker === 0xC2) {
+                            height = data.readUInt16BE(offset + 5);
+                            width = data.readUInt16BE(offset + 7);
+                            break;
+                        }
+                        offset += 2 + data.readUInt16BE(offset + 2);
+                    }
+                }
+                return { width: width || 800, height: height || 600, size: data.length };
+            },
+        });
 
         const session: ZaloSession = {
             sessionId,
@@ -397,7 +566,31 @@ export async function restoreZaloSession(
     try {
         console.log(`[ZaloService] Restoring session ${sessionId} from saved credentials...`);
 
-        const zalo = new Zalo({ logging: false, selfListen: false });
+        const zalo = new Zalo({
+            logging: false,
+            selfListen: false,
+            imageMetadataGetter: async (filePath: string) => {
+                const data = fs.readFileSync(filePath);
+                let width = 0, height = 0;
+                if (data[0] === 0x89 && data[1] === 0x50) {
+                    width = data.readUInt32BE(16);
+                    height = data.readUInt32BE(20);
+                } else if (data[0] === 0xFF && data[1] === 0xD8) {
+                    let offset = 2;
+                    while (offset < data.length) {
+                        if (data[offset] !== 0xFF) break;
+                        const marker = data[offset + 1];
+                        if (marker === 0xC0 || marker === 0xC2) {
+                            height = data.readUInt16BE(offset + 5);
+                            width = data.readUInt16BE(offset + 7);
+                            break;
+                        }
+                        offset += 2 + data.readUInt16BE(offset + 2);
+                    }
+                }
+                return { width: width || 800, height: height || 600, size: data.length };
+            },
+        });
         const api = await zalo.login({
             imei: creds.imei,
             cookie: creds.cookie,
@@ -449,10 +642,21 @@ function startMessageListener(sessionId: string): void {
         // Reset reconnect counter on successful start
         reconnectAttempts.set(sessionId, 0);
 
-        const onMessage = (message: any) => {
+        const onMessage = async (message: any) => {
             try {
                 session.lastWatchdogTickAt = Date.now(); // only reset on actual message
                 const rawContent = message.data?.content;
+                const dataMsgType = message.data?.msgType; // Zalo's own msgType field
+                const propertyExt = message.data?.propertyExt;
+
+                // Enhanced debug logging for sticker/media detection
+                if (rawContent && typeof rawContent === 'object') {
+                    const keys = Object.keys(rawContent);
+                    console.log(`[ZaloService] RAW MSG type=${dataMsgType}, propertyExt=${JSON.stringify(propertyExt)}, contentKeys=[${keys.join(',')}], content=${JSON.stringify(rawContent).substring(0, 200)}`);
+                } else if (rawContent && typeof rawContent === 'string' && rawContent.startsWith('{')) {
+                    console.log(`[ZaloService] RAW MSG type=${dataMsgType}, propertyExt=${JSON.stringify(propertyExt)}, stringContent=${rawContent.substring(0, 200)}`);
+                }
+
                 const content = normalizeMessageContent(rawContent);
                 const isPlainText = typeof rawContent === 'string' && !rawContent.startsWith('{');
                 const threadType = message.type === ThreadType.User ? 'user' : 'group';
@@ -460,35 +664,113 @@ function startMessageListener(sessionId: string): void {
                 // Extract image/media URLs from structured content
                 let attachmentUrl = '';
                 let thumbUrl = '';
+                let stickerUrl = '';
                 let msgType: string = isPlainText ? 'text' : 'media';
                 
+                // ── Sticker detection helper ──
+                const extractStickerInfo = (obj: any): { id: number; cateId: number; type: number } | null => {
+                    if (!obj || typeof obj !== 'object') return null;
+                    // Direct fields: { id, cateId, type }
+                    if (obj.id && (obj.cateId || obj.cateid || obj.cate_id || obj.catId)) {
+                        return { id: Number(obj.id), cateId: Number(obj.cateId || obj.cateid || obj.cate_id || obj.catId), type: Number(obj.type || 0) };
+                    }
+                    // Nested params: { params: { id, cateid, type } }
+                    if (obj.params) {
+                        const p = typeof obj.params === 'string' ? (() => { try { return JSON.parse(obj.params); } catch { return null; } })() : obj.params;
+                        if (p && p.id && (p.cateId || p.cateid || p.cate_id || p.catId)) {
+                            return { id: Number(p.id), cateId: Number(p.cateId || p.cateid || p.cate_id || p.catId), type: Number(p.type || 0) };
+                        }
+                    }
+                    // action = sticker pattern
+                    if (obj.action === 'sticker' || obj.actionType === 'sticker') {
+                        const stickerId = obj.stickerId || obj.id || obj.params?.id;
+                        if (stickerId) return { id: Number(stickerId), cateId: Number(obj.cateId || obj.cateid || 0), type: Number(obj.type || 0) };
+                    }
+                    return null;
+                };
+
+                // Check if message is a sticker via multiple signals:
+                // 1. Zalo's own msgType field contains 'sticker'
+                const isStickerByMsgType = dataMsgType && String(dataMsgType).toLowerCase().includes('sticker');
+                // 2. propertyExt.subType or type indicates sticker  
+                const isStickerByPropExt = propertyExt && (propertyExt.subType === 7 || propertyExt.type === 7);
+
+                let stickerInfo: { id: number; cateId: number; type: number } | null = null;
+
                 if (!isPlainText && rawContent && typeof rawContent === 'object') {
                     const rc = rawContent as Record<string, unknown>;
+                    stickerInfo = extractStickerInfo(rc);
+                    
+                    if (!stickerInfo && (isStickerByMsgType || isStickerByPropExt)) {
+                        // Sticker content might be in a different shape — try harder
+                        stickerInfo = extractStickerInfo(rc.params) || extractStickerInfo(rc.data);
+                    }
+
+                    if (stickerInfo) {
+                        msgType = 'sticker';
+                        // Try to get sticker URL via API
+                        if (stickerInfo.id && session.api?.getStickersDetail) {
+                            try {
+                                const details = await session.api.getStickersDetail(stickerInfo.id);
+                                if (details && details.length > 0) {
+                                    stickerUrl = details[0].stickerWebpUrl || details[0].stickerSpriteUrl || details[0].stickerUrl || '';
+                                }
+                            } catch (e) { console.log(`[ZaloService] getStickersDetail failed for ${stickerInfo.id}:`, e); }
+                        }
+                        if (!stickerUrl && stickerInfo.id) {
+                            // Fallback CDN URLs
+                            stickerUrl = `https://zalo-api.zadn.vn/api/emoticon/sticker/webpc?eid=${stickerInfo.id}&size=120`;
+                        }
+                    }
                     // Zalo image messages typically have hdUrl/normalUrl/thumb
-                    if (rc.hdUrl) attachmentUrl = String(rc.hdUrl);
-                    else if (rc.normalUrl) attachmentUrl = String(rc.normalUrl);
-                    else if (rc.href) attachmentUrl = String(rc.href);
+                    else if (rc.hdUrl) { attachmentUrl = String(rc.hdUrl); msgType = 'image'; }
+                    else if (rc.normalUrl) { attachmentUrl = String(rc.normalUrl); msgType = 'image'; }
+                    else if (rc.href) { attachmentUrl = String(rc.href); }
                     if (rc.thumb) thumbUrl = String(rc.thumb);
                     else if (rc.thumbUrl) thumbUrl = String(rc.thumbUrl);
-                    
-                    // Determine specific media type
-                    if (attachmentUrl || thumbUrl) {
-                        msgType = 'image';
-                    }
+                    if ((attachmentUrl || thumbUrl) && msgType !== 'sticker') msgType = 'image';
                 } else if (!isPlainText && typeof rawContent === 'string') {
                     try {
                         const parsed = JSON.parse(rawContent);
-                        if (parsed.hdUrl) attachmentUrl = parsed.hdUrl;
-                        else if (parsed.normalUrl) attachmentUrl = parsed.normalUrl;
-                        else if (parsed.href) attachmentUrl = parsed.href;
-                        if (parsed.thumb) thumbUrl = parsed.thumb;
-                        else if (parsed.thumbUrl) thumbUrl = parsed.thumbUrl;
-                        if (attachmentUrl || thumbUrl) msgType = 'image';
+                        stickerInfo = extractStickerInfo(parsed);
+                        if (stickerInfo || isStickerByMsgType || isStickerByPropExt) {
+                            if (!stickerInfo) stickerInfo = extractStickerInfo(parsed.params) || extractStickerInfo(parsed.data);
+                            msgType = 'sticker';
+                            if (stickerInfo?.id) {
+                                stickerUrl = `https://zalo-api.zadn.vn/api/emoticon/sticker/webpc?eid=${stickerInfo.id}&size=120`;
+                            }
+                        } else {
+                            if (parsed.hdUrl) attachmentUrl = parsed.hdUrl;
+                            else if (parsed.normalUrl) attachmentUrl = parsed.normalUrl;
+                            else if (parsed.href) attachmentUrl = parsed.href;
+                            if (parsed.thumb) thumbUrl = parsed.thumb;
+                            else if (parsed.thumbUrl) thumbUrl = parsed.thumbUrl;
+                            if (attachmentUrl || thumbUrl) msgType = 'image';
+                        }
                     } catch { /* not JSON */ }
+                }
+
+                // Final fallback: if content is "[Media/Sticker]" from normalizeMessageContent, mark as sticker
+                if (content === '[Media/Sticker]' && msgType === 'media') {
+                    msgType = 'sticker';
+                }
+
+                // Extract quote/reply info
+                let quote: ZaloIncomingMessage['quote'] = undefined;
+                if (message.data?.quote) {
+                    const q = message.data.quote;
+                    quote = {
+                        ownerId: q.ownerId || q.fromD || '',
+                        msg: q.msg || '',
+                        msgId: String(q.globalMsgId || ''),
+                        cliMsgId: String(q.cliMsgId || ''),
+                        ts: q.ts || 0,
+                    };
                 }
 
                 const incomingMsg: ZaloIncomingMessage = {
                     msgId: message.data?.msgId || `zca_${Date.now()}`,
+                    cliMsgId: message.data?.cliMsgId || undefined,
                     threadId: message.threadId,
                     threadType,
                     content,
@@ -499,14 +781,25 @@ function startMessageListener(sessionId: string): void {
                     msgType,
                     attachmentUrl: attachmentUrl || undefined,
                     thumbUrl: thumbUrl || undefined,
+                    stickerUrl: stickerUrl || undefined,
+                    quote,
+                    extractedData: extractContactData(content),
                 };
 
                 console.log(`[ZaloService] New message in ${threadType} ${message.threadId}: "${incomingMsg.content.substring(0, 50)}" (type=${msgType}, self=${incomingMsg.isSelf}${attachmentUrl ? ', img=' + attachmentUrl.substring(0, 60) : ''})`);
 
                 cacheMessage(sessionId, incomingMsg);
+                trackMessageData(sessionId, incomingMsg);
 
                 if (session.onMessage) {
                     session.onMessage(incomingMsg);
+                }
+
+                // Call additional callbacks (e.g. socket forwarders added by remote-session page)
+                if (session.additionalCallbacks) {
+                    for (const cb of session.additionalCallbacks) {
+                        try { cb(incomingMsg); } catch (e) { console.error('[ZaloService] Additional callback error:', e); }
+                    }
                 }
             } catch (err) {
                 console.error(`[ZaloService] Message processing error:`, err);
@@ -622,15 +915,31 @@ function scheduleReconnect(sessionId: string, reason: string): void {
     reconnectTimers.set(sessionId, timer);
 }
 
-// ========================
-// CONVERSATIONS
-// ========================
+// ── Conversation cache to prevent 429 rate limiting ──
+const convCache = new Map<string, { conversations: ZaloConversationItem[]; fetchedAt: number }>();
+const CONV_CACHE_TTL = 30_000; // 30 seconds
 
 export async function getZaloConversations(sessionId: string): Promise<ZaloConversationItem[]> {
     const session = sessions.get(sessionId);
     if (!session || !session.api || session.status !== 'connected') {
         console.warn(`[ZaloService] Session ${sessionId} not connected`);
         return [];
+    }
+
+    // Return cached if fresh enough
+    const cached = convCache.get(sessionId);
+    if (cached && Date.now() - cached.fetchedAt < CONV_CACHE_TTL) {
+        // Re-enrich with latest activity data before returning
+        for (const conv of cached.conversations) {
+            const activityKey = `${sessionId}:${conv.threadId}`;
+            const activity = recentConvActivity.get(activityKey);
+            if (activity) {
+                conv.lastMessage = activity.lastMsg;
+                conv.lastMessageAt = new Date(activity.lastMsgAt).toISOString();
+            }
+        }
+        console.log(`[ZaloService] Returning ${cached.conversations.length} cached conversations`);
+        return cached.conversations;
     }
 
     try {
@@ -655,6 +964,15 @@ export async function getZaloConversations(sessionId: string): Promise<ZaloConve
             console.log(`[ZaloService] Got ${friendList.length} friends`);
         } catch (err: any) {
             console.error(`[ZaloService] Failed to get friends:`, err.message);
+            // Fallback: use cached friends if available (prevents 429 from hiding all DMs)
+            const oldCache = convCache.get(sessionId);
+            if (oldCache) {
+                const cachedFriends = oldCache.conversations.filter(c => c.threadType === 'user');
+                if (cachedFriends.length > 0) {
+                    console.log(`[ZaloService] Using ${cachedFriends.length} cached friends as fallback`);
+                    conversations.push(...cachedFriends);
+                }
+            }
         }
 
         // Groups — getAllGroups() returns {gridVerMap}, then getGroupInfo for details
@@ -724,6 +1042,9 @@ export async function getZaloConversations(sessionId: string): Promise<ZaloConve
             return (a.displayName || '').localeCompare(b.displayName || '');
         });
 
+        // Store in cache
+        convCache.set(sessionId, { conversations, fetchedAt: Date.now() });
+
         return conversations;
     } catch (err) {
         console.error(`[ZaloService] getConversations error:`, err);
@@ -750,22 +1071,40 @@ function registerDMHistoryAPI(session: ZaloSession): void {
             if (!chatBaseUrl) {
                 throw new Error('Chat service URL not available');
             }
-            const serviceURL = utils.makeURL(`${chatBaseUrl}/api/message/history`);
-            const params = {
-                peerUid,
-                count,
-                msgId: "0", // String "0" is often required by Zalo for history
-            };
-            const encryptedParams = utils.encodeAES(JSON.stringify(params));
-            if (!encryptedParams) throw new Error('Failed to encrypt params');
-            const response = await utils.request(utils.makeURL(serviceURL, { params: encryptedParams }), {
-                method: 'GET',
-            });
-            return utils.resolve(response, (result: any) => {
-                let data = result.data;
-                if (typeof data === 'string') data = JSON.parse(data);
-                return data;
-            });
+
+            // Try multiple endpoint patterns that Zalo uses for DM history
+            const endpoints = [
+                '/api/message/peerHistory',
+                '/api/message/list',
+                '/api/message/history',
+            ];
+
+            for (const endpoint of endpoints) {
+                try {
+                    const serviceURL = utils.makeURL(`${chatBaseUrl}${endpoint}`);
+                    const params = {
+                        peerUid,
+                        count,
+                        msgId: "0",
+                    };
+                    const encryptedParams = utils.encodeAES(JSON.stringify(params));
+                    if (!encryptedParams) throw new Error('Failed to encrypt params');
+                    const response = await utils.request(utils.makeURL(serviceURL, { params: encryptedParams }), {
+                        method: 'GET',
+                    });
+                    const result = utils.resolve(response, (result: any) => {
+                        let data = result.data;
+                        if (typeof data === 'string') data = JSON.parse(data);
+                        return data;
+                    });
+                    console.log(`[ZaloService] getDMHistory via ${endpoint}: success`);
+                    return result;
+                } catch (err: any) {
+                    console.log(`[ZaloService] getDMHistory via ${endpoint}: ${err.message}`);
+                    continue;
+                }
+            }
+            throw new Error('All DM history endpoints failed');
         });
         (session as any)._dmHistoryRegistered = true;
         console.log('[ZaloService] Custom getDMHistory API registered');
@@ -827,6 +1166,7 @@ export async function getZaloMessages(
                     const media = isText ? { attachmentUrl: '', thumbUrl: '', mediaType: 'text' } : extractMediaUrls(rawContent);
                     return {
                         id: data.msgId || `zca_gmsg_${Date.now()}_${i}`,
+                        cliMsgId: data.cliMsgId || undefined,
                         content,
                         senderType: gm.isSelf ? 'me' : 'other',
                         senderName: data.dName || (gm.isSelf ? 'Bạn' : 'Thành viên'),
@@ -851,18 +1191,41 @@ export async function getZaloMessages(
                 
                 if (msgs.length > 0) {
                     console.log(`[ZaloService] getDMHistory: ${msgs.length} messages for DM ${threadId}`);
-                    const ownId = session.api.getOwnId?.() || '';
+                    // Try multiple methods to get own user ID
+                    let ownId = '';
+                    try { ownId = session.api.getOwnId?.() || ''; } catch {}
+                    if (!ownId) {
+                        try { ownId = (session.api as any).getContext?.()?.uid || ''; } catch {}
+                    }
+                    if (!ownId) {
+                        try {
+                            const ctx = (session.api as any).getContext?.();
+                            ownId = ctx?.secretKey?.split?.('_')?.[0] || '';
+                        } catch {}
+                    }
+                    console.log(`[ZaloService] DM ownId resolved: "${ownId}"`);
+                    
                     return msgs.map((m: any, i: number) => {
                         const data = m.data || m;
                         const rawContent = data.content || data.content_str;
                         const content = normalizeMessageContent(rawContent);
                         const ts = resolveTimestamp(data.ts);
                         const senderId = data.uidFrom || data.uid || '';
-                        const isSelf = m.isSelf ?? (String(senderId) === String(ownId));
+                        // Multiple isSelf detection strategies
+                        let isSelf = false;
+                        if (m.isSelf !== undefined) {
+                            isSelf = !!m.isSelf;
+                        } else if (ownId && String(senderId) === String(ownId)) {
+                            isSelf = true;
+                        } else if (String(senderId) !== '' && String(senderId) !== String(threadId)) {
+                            // In a DM, if sender is NOT the peer, it must be us
+                            isSelf = true;
+                        }
                         const isText = typeof rawContent === 'string' && !rawContent.startsWith('{');
                         const media = isText ? { attachmentUrl: '', thumbUrl: '', mediaType: 'text' } : extractMediaUrls(rawContent);
                         return {
                             id: data.msgId || `zca_dm_${Date.now()}_${i}`,
+                            cliMsgId: data.cliMsgId || undefined,
                             content,
                             senderType: isSelf ? 'me' : 'other',
                             senderName: data.dName || (isSelf ? 'Bạn' : 'Người gửi'),
@@ -892,6 +1255,7 @@ export async function getZaloMessages(
 function mapCachedToOutput(msg: ZaloIncomingMessage) {
     return {
         id: msg.msgId,
+        cliMsgId: msg.cliMsgId || undefined,
         content: msg.content,
         senderType: msg.isSelf ? 'me' : 'other',
         senderName: msg.senderName,
@@ -907,12 +1271,13 @@ function mapCachedToOutput(msg: ZaloIncomingMessage) {
 // SEND MESSAGE
 // ========================
 
+
 export async function sendZaloMsg(
     sessionId: string,
     threadId: string,
     threadType: 'user' | 'group',
     text: string,
-): Promise<{ success: boolean; error?: string; msgId?: string }> {
+): Promise<{ success: boolean; error?: string; msgId?: string; cliMsgId?: string }> {
     const session = sessions.get(sessionId);
     if (!session || !session.api || session.status !== 'connected') {
         return { success: false, error: 'Session chưa kết nối' };
@@ -920,14 +1285,22 @@ export async function sendZaloMsg(
 
     try {
         const type = threadType === 'group' ? ThreadType.Group : ThreadType.User;
+        // Capture cliMsgId (clientId) right before send — zca-js uses Date.now() internally
+        const approxCliMsgId = String(Date.now());
         const result = await session.api.sendMessage(text, threadId, type);
         const msgId = result?.msgId ?? result?.message?.msgId ?? result?.attachment?.[0]?.msgId;
 
-        console.log(`[ZaloService] Sent to ${threadType} ${threadId}: "${text.substring(0, 50)}" (msgId=${msgId})`);
+        console.log(`[ZaloService] Sent to ${threadType} ${threadId}: "${text.substring(0, 50)}" (msgId=${msgId}, approxCliMsgId=${approxCliMsgId})`);
 
-        // Cache sent message
+        // Store cliMsgId mapping for undo
+        if (msgId) {
+            sentMsgCliIds.set(String(msgId), approxCliMsgId);
+        }
+
+        // Cache sent message with cliMsgId
         cacheMessage(sessionId, {
             msgId: msgId ? String(msgId) : `sent_${Date.now()}`,
+            cliMsgId: approxCliMsgId,
             threadId,
             threadType,
             content: text,
@@ -938,7 +1311,7 @@ export async function sendZaloMsg(
             msgType: 'text',
         });
 
-        return { success: true, msgId: msgId ? String(msgId) : undefined };
+        return { success: true, msgId: msgId ? String(msgId) : undefined, cliMsgId: approxCliMsgId };
     } catch (err: any) {
         console.error(`[ZaloService] sendMessage error:`, err);
         return { success: false, error: err.message || 'Lỗi gửi tin nhắn' };
@@ -964,7 +1337,19 @@ export async function sendZaloImage(
     let tempFilePath = '';
     let isTempFile = false;
     try {
-        if (imageUrl.includes('/uploads/')) {
+        if (imageUrl.startsWith('data:')) {
+            // Handle base64 data URLs from Inbox
+            const os = await import('os');
+            const matches = imageUrl.match(/^data:image\/(\w+);base64,(.+)$/);
+            if (!matches) throw new Error('Invalid data URL format');
+            const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
+            const base64Data = matches[2];
+            const fileName = `zalo_img_${Date.now()}.${ext}`;
+            tempFilePath = path.join(os.tmpdir(), fileName);
+            isTempFile = true;
+            fs.writeFileSync(tempFilePath, Buffer.from(base64Data, 'base64'));
+            console.log(`[ZaloService] sendImage: decoded data URL to ${tempFilePath} (${fs.statSync(tempFilePath).size}b)`);
+        } else if (imageUrl.includes('/uploads/')) {
             // Optimization for local uploads: read directly from public/uploads folder
             const fileName = imageUrl.substring(imageUrl.lastIndexOf('/') + 1);
             tempFilePath = path.join(process.cwd(), 'public', 'uploads', fileName);
@@ -1003,9 +1388,18 @@ export async function sendZaloImage(
 
         const type = threadType === 'group' ? ThreadType.Group : ThreadType.User;
         
-        // Send image via zca-js
-        const result = await session.api.sendImage(tempFilePath, threadId, type);
-        const msgId = result?.msgId ?? result?.message?.msgId ?? result?.attachment?.[0]?.msgId;
+        // Send image via zca-js sendMessage with attachment
+        console.log(`[ZaloService] sendImage: file=${tempFilePath}, exists=${fs.existsSync(tempFilePath)}, size=${fs.existsSync(tempFilePath) ? fs.statSync(tempFilePath).size : 'N/A'}b`);
+        const result = await session.api.sendMessage(
+            {
+                msg: caption || '',
+                attachments: [tempFilePath],
+            },
+            threadId,
+            type,
+        );
+        console.log(`[ZaloService] sendMessage+image result:`, JSON.stringify(result).substring(0, 200));
+        const msgId = result?.message?.msgId ?? result?.attachment?.[0]?.msgId;
 
         console.log(`[ZaloService] Sent image to ${threadType} ${threadId} (msgId=${msgId})`);
 
@@ -1078,8 +1472,218 @@ export function isZaloSessionConnected(sessionId: string): boolean {
     return session?.status === 'connected' && !!session.api;
 }
 
+/**
+ * Register an additional message callback for an existing connected session.
+ * Used by socket handlers to forward messages to the frontend in realtime
+ * when a session was already booted by bootActiveAccounts.
+ */
+export function addSessionMessageCallback(
+    sessionId: string,
+    callback: (msg: ZaloIncomingMessage) => void
+): boolean {
+    const session = sessions.get(sessionId);
+    if (!session || session.status !== 'connected') return false;
+    if (!session.additionalCallbacks) session.additionalCallbacks = [];
+    session.additionalCallbacks.push(callback);
+    console.log(`[ZaloService] Added additional message callback for session ${sessionId} (total: ${session.additionalCallbacks.length})`);
+    return true;
+}
+
+/**
+ * Remove all additional message callbacks for a session.
+ * Called when the socket disconnects to prevent memory leaks.
+ */
+export function clearSessionMessageCallbacks(sessionId: string): void {
+    const session = sessions.get(sessionId);
+    if (session) {
+        session.additionalCallbacks = [];
+        console.log(`[ZaloService] Cleared additional message callbacks for session ${sessionId}`);
+    }
+}
+
 export function getActiveZaloSessions(): string[] {
     return Array.from(sessions.entries())
         .filter(([_, s]) => s.status === 'connected')
         .map(([id]) => id);
+}
+
+// ========================
+// ADVANCED ACTIONS
+// ========================
+
+/**
+ * Undo (recall) a sent message
+ */
+export async function undoZaloMessage(
+    sessionId: string,
+    msgId: string,
+    cliMsgId: string,
+    threadId: string,
+    threadType: 'user' | 'group' = 'user'
+): Promise<{ status: number }> {
+    const session = sessions.get(sessionId);
+    if (!session?.api || session.status !== 'connected') {
+        throw new Error('Zalo session not connected');
+    }
+    const type = threadType === 'group' ? ThreadType.Group : ThreadType.User;
+
+    // If cliMsgId is same as msgId or empty, try to find real cliMsgId
+    let realCliMsgId = cliMsgId;
+    if (!realCliMsgId || realCliMsgId === msgId) {
+        // 1. Check sentMsgCliIds map first (most reliable for self-sent messages)
+        if (sentMsgCliIds.has(msgId)) {
+            realCliMsgId = sentMsgCliIds.get(msgId)!;
+            console.log(`[ZaloService] undo: found cliMsgId from sentMsgCliIds map: ${realCliMsgId}`);
+        } else if (sentMsgCliIds.has(String(msgId))) {
+            realCliMsgId = sentMsgCliIds.get(String(msgId))!;
+            console.log(`[ZaloService] undo: found cliMsgId from sentMsgCliIds map (string): ${realCliMsgId}`);
+        } else {
+            // 2. Check message cache
+            const cacheKey = `${sessionId}:${threadId}`;
+            if (messageCache.has(cacheKey)) {
+                const cached = messageCache.get(cacheKey)!;
+                const found = cached.find((m: any) => m.msgId === msgId || m.msgId === String(msgId));
+                if (found?.cliMsgId && found.cliMsgId !== msgId) {
+                    realCliMsgId = found.cliMsgId;
+                    console.log(`[ZaloService] undo: found real cliMsgId from cache: ${realCliMsgId}`);
+                }
+            }
+        }
+    }
+
+    console.log(`[ZaloService] undo: msgId=${msgId}, cliMsgId=${realCliMsgId}, threadId=${threadId}, type=${threadType}`);
+    try {
+        const result = await session.api.undo({ msgId, cliMsgId: realCliMsgId }, threadId, type);
+        console.log(`[ZaloService] undo result:`, JSON.stringify(result));
+        // Also remove from message cache
+        const cacheKey = `${sessionId}:${threadId}`;
+        if (messageCache.has(cacheKey)) {
+            const cached = messageCache.get(cacheKey)!;
+            messageCache.set(cacheKey, cached.filter((m: any) => m.msgId !== String(msgId)));
+        }
+        return result;
+    } catch (err: any) {
+        console.error(`[ZaloService] undo error:`, err.message || err);
+        throw err;
+    }
+}
+
+/**
+ * Send a reply (quote) message
+ */
+export async function sendZaloReply(
+    sessionId: string,
+    threadId: string,
+    threadType: 'user' | 'group',
+    text: string,
+    quotedMsg: {
+        msgId: string;
+        cliMsgId: string;
+        content: string;
+        uidFrom: string;
+        ts: number;
+    }
+): Promise<any> {
+    const session = sessions.get(sessionId);
+    if (!session?.api || session.status !== 'connected') {
+        throw new Error('Zalo session not connected');
+    }
+    const type = threadType === 'group' ? ThreadType.Group : ThreadType.User;
+    console.log(`[ZaloService] reply: text="${text}", threadId=${threadId}, type=${threadType}`);
+    console.log(`[ZaloService] reply quote:`, JSON.stringify(quotedMsg));
+    try {
+        const result = await session.api.sendMessage({
+            msg: text,
+            quote: {
+                content: quotedMsg.content,
+                msgType: '0',
+                propertyExt: undefined,
+                uidFrom: quotedMsg.uidFrom,
+                msgId: quotedMsg.msgId,
+                cliMsgId: quotedMsg.cliMsgId,
+                ts: String(quotedMsg.ts),
+                ttl: 0,
+            },
+        }, threadId, type);
+        console.log(`[ZaloService] reply result:`, JSON.stringify(result));
+        return result;
+    } catch (err: any) {
+        console.error(`[ZaloService] reply error:`, err.message || err);
+        throw err;
+    }
+}
+
+/**
+ * Search for stickers by keyword, returning full detail
+ */
+export async function searchZaloStickers(
+    sessionId: string,
+    keyword: string,
+    limit: number = 20
+): Promise<Array<{ id: number; cateId: number; type: number; stickerUrl: string; stickerWebpUrl: string | null }>> {
+    const session = sessions.get(sessionId);
+    if (!session?.api || session.status !== 'connected') {
+        throw new Error('Zalo session not connected');
+    }
+
+    // Search for stickers
+    const basics = await session.api.searchSticker(keyword, limit);
+    if (!basics || basics.length === 0) return [];
+
+    // Get detailed info (with URLs)
+    const stickerIds = basics.map((s: any) => s.sticker_id || s.id);
+    try {
+        const details = await session.api.getStickersDetail(stickerIds);
+        return details.map((d: any) => ({
+            id: d.id,
+            cateId: d.cateId,
+            type: d.type,
+            stickerUrl: d.stickerSpriteUrl || d.stickerUrl || '',
+            stickerWebpUrl: d.stickerWebpUrl || null,
+        }));
+    } catch {
+        // Return basic info without URLs
+        return basics.map((s: any) => ({
+            id: s.sticker_id || s.id,
+            cateId: s.cate_id || s.cateId,
+            type: s.type || 0,
+            stickerUrl: '',
+            stickerWebpUrl: null,
+        }));
+    }
+}
+
+/**
+ * Send a sticker to a thread
+ */
+export async function sendZaloSticker(
+    sessionId: string,
+    sticker: { id: number; cateId: number; type: number },
+    threadId: string,
+    threadType: 'user' | 'group' = 'user'
+): Promise<{ msgId: number }> {
+    const session = sessions.get(sessionId);
+    if (!session?.api || session.status !== 'connected') {
+        throw new Error('Zalo session not connected');
+    }
+    const type = threadType === 'group' ? ThreadType.Group : ThreadType.User;
+    return session.api.sendSticker(sticker, threadId, type);
+}
+
+/**
+ * Send a voice message
+ */
+export async function sendZaloVoice(
+    sessionId: string,
+    voiceUrl: string,
+    threadId: string,
+    threadType: 'user' | 'group' = 'user',
+    ttl: number = 0
+): Promise<{ msgId: string }> {
+    const session = sessions.get(sessionId);
+    if (!session?.api || session.status !== 'connected') {
+        throw new Error('Zalo session not connected');
+    }
+    const type = threadType === 'group' ? ThreadType.Group : ThreadType.User;
+    return session.api.sendVoice({ voiceUrl, ttl }, threadId, type);
 }

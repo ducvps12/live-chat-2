@@ -26,4 +26,8 @@ router.get('/contacts/export', zaloController.exportContacts);   // GET export C
 router.get('/contacts/:zaloUserId', zaloController.getContact);  // GET single
 router.patch('/contacts/:zaloUserId', zaloController.updateContact); // PATCH (update phone, name)
 
+// ── Historical Sync ──
+router.post('/sync', zaloController.startSync);                  // POST — start full history sync
+router.get('/sync/status', zaloController.getSyncStatus);        // GET — poll sync progress
+
 export const zaloRoutes = router;

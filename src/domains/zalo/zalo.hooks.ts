@@ -3,17 +3,12 @@ import { zaloService } from '../../services/zalo.service';
 import { ZALO_KEYS } from './zalo.keys';
 import { message } from 'antd';
 
-export function useZaloStatus(workspaceId: string) {
+export function useZaloStatus(workspaceId: string, waitingForScan = false) {
     return useQuery({
         queryKey: ZALO_KEYS.status(workspaceId),
         queryFn: () => zaloService.getStatus(workspaceId),
         enabled: !!workspaceId,
-        refetchInterval: (query) => {
-            // Polling if status is pending
-            const data = query.state.data?.data;
-            if (data?.status === 'pending') return 3000; // Poll every 3 seconds
-            return false;
-        }
+        refetchInterval: waitingForScan ? 3000 : false,
     });
 }
 
@@ -33,8 +28,9 @@ export function useGenerateZaloQR() {
 export function useDisconnectZalo() {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: (workspaceId: string) => zaloService.disconnect(workspaceId),
-        onSuccess: (data, workspaceId) => {
+        mutationFn: ({ workspaceId, accountId }: { workspaceId: string; accountId?: string }) =>
+            zaloService.disconnect(workspaceId, accountId),
+        onSuccess: (data, { workspaceId }) => {
             message.success('Đã ngắt kết nối Zalo');
             queryClient.invalidateQueries({ queryKey: ZALO_KEYS.status(workspaceId) });
         },

@@ -128,22 +128,41 @@ export default function ContactsPage() {
                 }
             }
 
-            // Combine
+            // Combine — deduplicate Zalo visitors that appear in BOTH sources
+            // Widget visitors with visitorId starting with 'zalo_' are actually Zalo users
+            // that got auto-created by handleIncomingZaloMessage. Filter them out when showing 'all'.
             if (activeTab === 'all') {
-                const combined = [...widgetContacts, ...zaloContacts]
+                // Build a set of Zalo user IDs for dedup
+                const zaloUserIds = new Set(zaloContacts.map(c => c.zaloUserId).filter(Boolean));
+                
+                // Filter widget contacts: remove those that are actually Zalo visitors
+                const filteredWidget = widgetContacts.filter(v => {
+                    if (!v.visitorId) return true;
+                    // If visitorId starts with 'zalo_', strip prefix and check if it's in zaloContacts
+                    if (v.visitorId.startsWith('zalo_')) {
+                        const zaloId = v.visitorId.replace('zalo_', '');
+                        return !zaloUserIds.has(zaloId); // Only keep if NOT in Zalo contacts
+                    }
+                    return true;
+                });
+                
+                const combined = [...filteredWidget, ...zaloContacts]
                     .sort((a, b) => new Date(b.lastSeen).getTime() - new Date(a.lastSeen).getTime());
                 setContacts(combined);
-                setTotal(wTotal + zTotal);
+                setTotal(filteredWidget.length + zTotal);
             } else if (activeTab === 'widget') {
-                setContacts(widgetContacts);
-                setTotal(wTotal);
+                // When showing widget-only tab, also filter out zalo_ visitors
+                const filteredWidget = widgetContacts.filter(v => !v.visitorId?.startsWith('zalo_'));
+                setContacts(filteredWidget);
+                setTotal(filteredWidget.length);
             } else {
                 setContacts(zaloContacts);
                 setTotal(zTotal);
             }
 
-            // Update stats (always fetch both for stats)
-            setStats({ total: wTotal + zTotal, widget: wTotal, zalo: zTotal });
+            // Update stats — exclude zalo_ visitors from widget count
+            const actualWidgetCount = (widgetContacts || []).filter(v => !v.visitorId?.startsWith('zalo_')).length;
+            setStats({ total: actualWidgetCount + zTotal, widget: actualWidgetCount, zalo: zTotal });
         } catch (err) {
             console.error('[Contacts] Fetch error:', err);
             message.error('Lỗi tải danh sách liên hệ');

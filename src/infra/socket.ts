@@ -8,7 +8,7 @@ import { conversationRepo } from '../modules/conversation/repos/conversation.rep
 import { presenceStore } from './presence';
 import { browserPool } from './browserPool';
 import { startScreencast, stopScreencast, dispatchMouse, dispatchKeyboard, dispatchScroll, detectLoginState } from './sessionStream';
-import { createZaloSession, restoreZaloSession, getZaloConversations, getZaloMessages, sendZaloMsg, sendZaloImage, destroyZaloSession, isZaloSessionConnected, hasStoredCredentials, logoutZaloSession } from './zaloService';
+import { createZaloSession, restoreZaloSession, getZaloConversations, getZaloMessages, sendZaloMsg, sendZaloImage, destroyZaloSession, isZaloSessionConnected, hasStoredCredentials, logoutZaloSession, addSessionMessageCallback, clearSessionMessageCallbacks, undoZaloMessage, sendZaloReply, searchZaloStickers, sendZaloSticker, sendZaloVoice, getThreadContactData, getAllContactData, loadContactData } from './zaloService';
 import { externalSessionRepo } from '../modules/external-session/repos/externalSession.repo';
 import { zaloMessageRepo } from '../modules/zalo/repos/zalo-message.repo';
 import type { ZaloIncomingMessage } from './zaloService';
@@ -628,7 +628,7 @@ export function initSocketGateway(server: http.Server): Server {
                     // onLogin: session connected
                     async (session) => {
                         console.log(`[ZaloZCA] Session ${sessionId} logged in via thành công`);
-                        await externalSessionRepo.updateStatus(sessionId, 'connected', { connectedAt: new Date() });
+                        try { await externalSessionRepo.updateStatus(sessionId, 'connected', { connectedAt: new Date() }); } catch { /* virtual account */ }
                         socket.emit('session:status', { status: 'connected' });
                         socket.emit('session:loginDetected', {});
                         socket.emit('zalo:zcaConnected', { sessionId });
@@ -678,7 +678,25 @@ export function initSocketGateway(server: http.Server): Server {
                 console.log(`[ZaloZCA] Attempting session restore for ${sessionId}...`);
 
                 if (isZaloSessionConnected(sessionId)) {
-                    console.log(`[ZaloZCA] Session ${sessionId} already connected`);
+                    console.log(`[ZaloZCA] Session ${sessionId} already connected — registering socket forwarder`);
+                    // Register an additional callback so incoming messages are forwarded to this socket
+                    addSessionMessageCallback(sessionId, (msg) => {
+                        saveZaloMessageToDB(sessionId, msg).catch(() => {});
+                        remoteNs.to(`remote:${sessionId}`).emit('zalo:newMessage', {
+                            msgId: msg.msgId,
+                            content: msg.content,
+                            senderId: msg.senderId,
+                            senderName: msg.senderName,
+                            conversationId: msg.threadId,
+                            isGroup: msg.threadType === 'group',
+                            isSelf: msg.isSelf,
+                            timestamp: msg.timestamp,
+                            msgType: msg.msgType,
+                            threadType: msg.threadType,
+                            attachmentUrl: msg.attachmentUrl,
+                            thumbUrl: msg.thumbUrl,
+                        });
+                    });
                     socket.emit('zalo:zcaConnected', { sessionId });
                     return;
                 }
@@ -711,7 +729,7 @@ export function initSocketGateway(server: http.Server): Server {
                 );
 
                 if (restored) {
-                    await externalSessionRepo.updateStatus(sessionId, 'connected', { connectedAt: new Date() });
+                    try { await externalSessionRepo.updateStatus(sessionId, 'connected', { connectedAt: new Date() }); } catch { /* virtual account — no DB entry */ }
                     socket.emit('session:status', { status: 'connected' });
                     socket.emit('zalo:zcaConnected', { sessionId });
                     console.log(`[ZaloZCA] Session ${sessionId} restored successfully!`);
@@ -855,6 +873,102 @@ export function initSocketGateway(server: http.Server): Server {
                 console.log(`[ZaloZCA] Session ${sessionId} logged out`);
             } catch (err: any) {
                 socket.emit('zalo:zcaError', { sessionId, error: err.message });
+            }
+        });
+
+        // ── Undo (recall) a message ──
+        socket.on('zalo:undoMessage', async ({ sessionId, msgId, cliMsgId, threadId, threadType }: {
+            sessionId: string; msgId: string; cliMsgId: string; threadId: string; threadType?: 'user' | 'group';
+        }) => {
+            try {
+                const result = await undoZaloMessage(sessionId, msgId, cliMsgId, threadId, threadType || 'user');
+                socket.emit('zalo:undoResult', { success: true, msgId, result });
+                // Broadcast to room so UI removes the message
+                remoteNs.to(`remote:${sessionId}`).emit('zalo:messageRecalled', { msgId, threadId });
+            } catch (err: any) {
+                socket.emit('zalo:undoResult', { success: false, error: err.message });
+            }
+        });
+
+        // ── Reply (quote) a message ──
+        socket.on('zalo:replyMessage', async ({ sessionId, threadId, threadType, text, quotedMsg }: {
+            sessionId: string; threadId: string; threadType: 'user' | 'group'; text: string;
+            quotedMsg: { msgId: string; cliMsgId: string; content: string; uidFrom: string; ts: number };
+        }) => {
+            try {
+                const result = await sendZaloReply(sessionId, threadId, threadType, text, quotedMsg);
+                socket.emit('zalo:messageSent', { success: true, result });
+                // Re-fetch messages
+                await new Promise(r => setTimeout(r, 300));
+                const messages = await getZaloMessages(sessionId, threadId, threadType);
+                socket.emit('zalo:messages', { messages });
+            } catch (err: any) {
+                socket.emit('zalo:messageSent', { success: false, error: err.message });
+            }
+        });
+
+        // ── Search stickers ──
+        socket.on('zalo:searchStickers', async ({ sessionId, keyword }: {
+            sessionId: string; keyword: string;
+        }) => {
+            try {
+                const stickers = await searchZaloStickers(sessionId, keyword);
+                socket.emit('zalo:stickersResult', { stickers });
+            } catch (err: any) {
+                socket.emit('zalo:stickersResult', { stickers: [], error: err.message });
+            }
+        });
+
+        // ── Send sticker ──
+        socket.on('zalo:sendSticker', async ({ sessionId, sticker, threadId, threadType }: {
+            sessionId: string; sticker: { id: number; cateId: number; type: number };
+            threadId: string; threadType?: 'user' | 'group';
+        }) => {
+            try {
+                await sendZaloSticker(sessionId, sticker, threadId, threadType || 'user');
+                socket.emit('zalo:messageSent', { success: true });
+                // Re-fetch messages
+                await new Promise(r => setTimeout(r, 300));
+                const messages = await getZaloMessages(sessionId, threadId, threadType || 'user');
+                socket.emit('zalo:messages', { messages });
+            } catch (err: any) {
+                socket.emit('zalo:messageSent', { success: false, error: err.message });
+            }
+        });
+
+        // ── Send voice ──
+        socket.on('zalo:sendVoice', async ({ sessionId, voiceUrl, threadId, threadType }: {
+            sessionId: string; voiceUrl: string; threadId: string; threadType?: 'user' | 'group';
+        }) => {
+            try {
+                await sendZaloVoice(sessionId, voiceUrl, threadId, threadType || 'user');
+                socket.emit('zalo:messageSent', { success: true });
+            } catch (err: any) {
+                socket.emit('zalo:messageSent', { success: false, error: err.message });
+            }
+        });
+
+        // ── Get contact data for a thread ──
+        socket.on('zalo:getContactData', async ({ sessionId, threadId }: {
+            sessionId: string; threadId: string;
+        }) => {
+            try {
+                loadContactData(sessionId); // ensure loaded
+                const data = getThreadContactData(sessionId, threadId);
+                socket.emit('zalo:contactData', { threadId, data });
+            } catch (err: any) {
+                socket.emit('zalo:contactData', { threadId, data: null, error: err.message });
+            }
+        });
+
+        // ── Get all contact data for a session ──
+        socket.on('zalo:getAllContacts', async ({ sessionId }: { sessionId: string }) => {
+            try {
+                loadContactData(sessionId);
+                const contacts = getAllContactData(sessionId);
+                socket.emit('zalo:allContacts', { contacts });
+            } catch (err: any) {
+                socket.emit('zalo:allContacts', { contacts: [], error: err.message });
             }
         });
 

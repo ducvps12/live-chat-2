@@ -216,15 +216,23 @@ export const VisitorProfileSidebar: React.FC<VisitorProfileSidebarProps> = ({
                             </div>
                             <Select
                                 size="small"
-                                placeholder="+ Thêm tag"
+                                mode="tags"
+                                placeholder="+ Nhập tag mới hoặc chọn..."
                                 style={{ width: '100%' }}
-                                value={undefined}
-                                onChange={(val: string) => onAddTag?.(val)}
+                                value={[]}
+                                onChange={(vals: string[]) => {
+                                    // Only add the last typed/selected value
+                                    const newTag = vals[vals.length - 1];
+                                    if (newTag && !conversationTags.includes(newTag)) {
+                                        onAddTag?.(newTag.trim());
+                                    }
+                                }}
                                 options={workspaceTags
                                     .filter(t => !conversationTags.includes(t))
                                     .map(t => ({ label: t, value: t }))}
                                 popupMatchSelectWidth={true}
                                 allowClear={false}
+                                tokenSeparators={[',']}
                             />
                         </div>
 

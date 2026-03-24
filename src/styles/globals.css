@@ -2,7 +2,7 @@
 @import "tailwindcss";
 
 /* ============================================
-   NEMARK LIVE CHAT — Design System
+   NEMARK LIVE CHAT — Design System v2.0
    ============================================ */
 
 /* --- Theme Variables --- */
@@ -15,6 +15,8 @@
   --color-primary-100: #e0e7ff;
   --color-primary-600: #4f46e5;
   --color-primary-700: #4338ca;
+  --color-primary-bg: #eef2ff;
+  --color-primary-bg-hover: #e0e7ff;
 
   /* Accent - Cyan / Teal */
   --color-accent: #06b6d4;
@@ -25,45 +27,68 @@
   --color-violet: #8b5cf6;
   --color-violet-light: #a78bfa;
 
+  /* Status Colors */
+  --color-success: #10b981;
+  --color-success-bg: #ecfdf5;
+  --color-warning: #f59e0b;
+  --color-warning-bg: #fffbeb;
+  --color-danger: #ef4444;
+  --color-danger-bg: #fef2f2;
+
   /* Neutral */
   --color-bg: #ffffff;
   --color-bg-soft: #f8fafc;
   --color-bg-muted: #f1f5f9;
   --color-surface: #ffffff;
+  --color-surface-hover: #f8fafc;
   --color-border: #e2e8f0;
   --color-border-light: #f1f5f9;
+  --color-border-hover: #cbd5e1;
   --color-text: #0f172a;
   --color-text-secondary: #475569;
   --color-text-muted: #94a3b8;
+  --color-hover: #f1f5f9;
 
   /* Gradients */
   --gradient-hero: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #06b6d4 100%);
+  --gradient-primary: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
   --gradient-card: linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%);
   --gradient-accent: linear-gradient(135deg, #6366f1 0%, #06b6d4 100%);
   --gradient-dark: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+  --gradient-sidebar-active: linear-gradient(135deg, #eef2ff 0%, #e8e0ff 100%);
 
   /* Shadows */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.03);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
   --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.08);
   --shadow-xl: 0 12px 40px rgba(0, 0, 0, 0.12);
   --shadow-glow: 0 0 40px rgba(99, 102, 241, 0.15);
   --shadow-glow-accent: 0 0 40px rgba(6, 182, 212, 0.15);
+  --shadow-card-hover: 0 20px 48px rgba(99, 102, 241, 0.12), 0 4px 12px rgba(15, 23, 42, 0.04);
 
   /* Radii */
+  --radius-xs: 6px;
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
   --radius-xl: 24px;
+  --radius-2xl: 28px;
   --radius-full: 9999px;
 
   /* Transitions */
   --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-base: 250ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-spring: 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
 
   /* Font */
   --font-sans: 'Inter', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  /* Sidebar */
+  --sidebar-width: 260px;
+  --sidebar-collapsed-width: 80px;
+  --header-height: 64px;
 }
 
 /* --- Global Reset + Base --- */
@@ -85,6 +110,31 @@ body {
   background: var(--color-bg);
   line-height: 1.6;
   overflow-x: hidden;
+}
+
+/* --- Custom Scrollbar --- */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* --- Selection --- */
+::selection {
+  background: var(--color-primary-100);
+  color: var(--color-primary-700);
 }
 
 /* ============================================
@@ -222,6 +272,239 @@ body {
 }
 
 /* ============================================
+   Sidebar Styles
+   ============================================ */
+
+.app-sidebar-menu .ant-menu-item {
+  border-radius: 10px !important;
+  margin-bottom: 4px !important;
+  height: 44px !important;
+  line-height: 44px !important;
+  transition: all var(--transition-fast) !important;
+  position: relative;
+}
+
+.app-sidebar-menu .ant-menu-item:hover {
+  background-color: var(--color-hover) !important;
+}
+
+.app-sidebar-menu .ant-menu-item-selected {
+  background: var(--gradient-sidebar-active) !important;
+  color: var(--color-primary) !important;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.08);
+}
+
+.app-sidebar-menu .ant-menu-item-selected::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--gradient-primary);
+}
+
+.app-sidebar-menu .ant-menu-item-selected a,
+.app-sidebar-menu .ant-menu-item-selected svg {
+  color: var(--color-primary) !important;
+}
+
+.app-sidebar-menu .ant-menu-item a {
+  color: inherit;
+}
+
+/* Sidebar interactive elements */
+.ws-switcher {
+  transition: all var(--transition-fast) !important;
+}
+
+.ws-switcher:hover {
+  background: var(--color-hover) !important;
+  border-color: var(--color-border-hover) !important;
+}
+
+.user-profile-btn {
+  transition: all var(--transition-fast) !important;
+}
+
+.user-profile-btn:hover {
+  background: var(--color-hover) !important;
+}
+
+.sidebar-toggle-btn {
+  transition: all var(--transition-fast) !important;
+}
+
+.sidebar-toggle-btn:hover {
+  background: var(--color-primary-50) !important;
+  border-color: var(--color-primary-light) !important;
+  color: var(--color-primary) !important;
+  transform: scale(1.1);
+}
+
+/* ============================================
+   Skeleton Loading
+   ============================================ */
+
+@keyframes skeleton-loading {
+  0% {
+    background-position: -200px 0;
+  }
+  100% {
+    background-position: calc(200px + 100%) 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background-size: 200px 100%;
+  animation: skeleton-loading 1.5s ease-in-out infinite;
+  border-radius: var(--radius-sm);
+}
+
+.skeleton-text {
+  height: 14px;
+  margin-bottom: 8px;
+  width: 80%;
+}
+
+.skeleton-title {
+  height: 20px;
+  margin-bottom: 12px;
+  width: 60%;
+}
+
+.skeleton-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+}
+
+.skeleton-card {
+  height: 200px;
+  border-radius: var(--radius-xl);
+}
+
+/* ============================================
+   Empty State
+   ============================================ */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 32px;
+  text-align: center;
+}
+
+.empty-state-icon {
+  width: 80px;
+  height: 80px;
+  border-radius: var(--radius-xl);
+  background: var(--gradient-sidebar-active);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 24px;
+  color: var(--color-primary);
+}
+
+.empty-state-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-text);
+  margin-bottom: 8px;
+}
+
+.empty-state-desc {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  max-width: 360px;
+  line-height: 1.6;
+  margin-bottom: 24px;
+}
+
+/* ============================================
+   Status Badges
+   ============================================ */
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.status-badge-active {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  border: 1px solid #d1fae5;
+}
+
+.status-badge-active::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-success);
+  animation: pulse-glow 2s infinite;
+}
+
+.status-badge-warning {
+  background: var(--color-warning-bg);
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.status-badge-danger {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  border: 1px solid #fecaca;
+}
+
+/* ============================================
+   Global Ant Design Overrides
+   ============================================ */
+
+.ant-modal-content {
+  border-radius: var(--radius-xl) !important;
+  overflow: hidden;
+}
+
+.ant-message .ant-message-notice-content {
+  border-radius: var(--radius-md) !important;
+  box-shadow: var(--shadow-lg) !important;
+}
+
+.ant-input:focus,
+.ant-input-focused {
+  border-color: var(--color-primary) !important;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1) !important;
+}
+
+.ant-select-focused .ant-select-selector {
+  border-color: var(--color-primary) !important;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1) !important;
+}
+
+.ant-btn-primary {
+  background: var(--color-primary) !important;
+  border-color: var(--color-primary) !important;
+}
+
+.ant-btn-primary:hover {
+  background: var(--color-primary-dark) !important;
+  border-color: var(--color-primary-dark) !important;
+}
+
+/* ============================================
    Animations
    ============================================ */
 
@@ -305,6 +588,17 @@ body {
   }
 }
 
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 .animate-fade-in-up {
   animation: fadeInUp 0.6s ease-out forwards;
 }
@@ -323,6 +617,10 @@ body {
 
 .animate-float {
   animation: float 3s ease-in-out infinite;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.3s ease-out forwards;
 }
 
 .animate-delay-1 {
@@ -346,6 +644,52 @@ body {
 }
 
 /* ============================================
+   Hero Dashboard Mockup Animations
+   ============================================ */
+
+/* Typing indicator dots */
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #64748b;
+  animation: typingBounce 1.2s ease-in-out infinite;
+}
+
+@keyframes typingBounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+/* Message bubble entrance */
+.hero-msg-bubble {
+  animation: msgSlideIn 0.4s ease-out both;
+}
+
+@keyframes msgSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Feature card icon hover */
+.card:hover .feature-icon-hero {
+  transform: scale(1.08) translateY(-2px);
+  box-shadow: 0 12px 40px rgba(99, 102, 241, 0.35);
+}
+
+/* ============================================
    Responsive
    ============================================ */
 
@@ -361,5 +705,9 @@ body {
   .btn-lg {
     padding: 14px 28px;
     font-size: 15px;
+  }
+
+  .hero-mockup-right {
+    display: none !important;
   }
 }

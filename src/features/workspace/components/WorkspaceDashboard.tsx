@@ -210,6 +210,7 @@ const WorkspaceDashboard: React.FC<Props> = ({ workspaceId }) => {
                             value={String(s.conversations.open)}
                             hint={waitQueue > 0 ? `${waitQueue} cuộc chờ quá 2 phút` : 'Tất cả đang được xử lý'}
                             hintTone={waitQueue > 0 ? 'warn' : 'ok'}
+                            href={`/workspace/${workspaceId}/inbox`}
                         />
 
                         <MetricCard
@@ -219,6 +220,7 @@ const WorkspaceDashboard: React.FC<Props> = ({ workspaceId }) => {
                             value={String(s.customers.totalVisitors)}
                             hint={unassigned > 0 ? `${unassigned} khách chưa gán agent` : 'Tất cả đã được gán'}
                             hintTone={unassigned > 0 ? 'info' : 'ok'}
+                            href={`/workspace/${workspaceId}/contacts`}
                         />
 
                         <MetricCard
@@ -232,6 +234,7 @@ const WorkspaceDashboard: React.FC<Props> = ({ workspaceId }) => {
                                     : 'Không có hội thoại bị bỏ lỡ'
                             }
                             hintTone={s.conversations.missed > 0 ? 'bad' : 'ok'}
+                            href={`/workspace/${workspaceId}/inbox`}
                         />
 
                         <MetricCard
@@ -241,6 +244,7 @@ const WorkspaceDashboard: React.FC<Props> = ({ workspaceId }) => {
                             value={`${onlineMembers} / ${recommendedAgents}`}
                             hint={shortage > 0 ? `Thiếu ${shortage} người vào giờ cao điểm` : 'Đội ngũ đang đủ nhân sự'}
                             hintTone={shortage > 0 ? 'warn' : 'ok'}
+                            href={`/workspace/${workspaceId}/teams`}
                         />
                     </div>
                 </section>
@@ -446,6 +450,7 @@ const WorkspaceDashboard: React.FC<Props> = ({ workspaceId }) => {
                                     title="Khách mới"
                                     meta="Từ trang bán hàng"
                                     time="5 phút trước"
+                                    href={`/workspace/${workspaceId}/contacts`}
                                 />
                                 <ActivityItem
                                     icon={MessageSquare}
@@ -453,6 +458,7 @@ const WorkspaceDashboard: React.FC<Props> = ({ workspaceId }) => {
                                     title="Tin nhắn mới"
                                     meta="#TKT-094 đang chờ phản hồi"
                                     time="12 phút trước"
+                                    href={`/workspace/${workspaceId}/inbox`}
                                 />
                                 <ActivityItem
                                     icon={Users}
@@ -460,6 +466,7 @@ const WorkspaceDashboard: React.FC<Props> = ({ workspaceId }) => {
                                     title="Tư vấn viên tham gia"
                                     meta="Hỗ trợ ticket #092"
                                     time="35 phút trước"
+                                    href={`/workspace/${workspaceId}/inbox`}
                                 />
                                 <ActivityItem
                                     icon={AlertTriangle}
@@ -467,6 +474,7 @@ const WorkspaceDashboard: React.FC<Props> = ({ workspaceId }) => {
                                     title="Cuộc chat bỏ lỡ"
                                     meta="Khách đã rời đi trước khi được trả lời"
                                     time="1 giờ trước"
+                                    href={`/workspace/${workspaceId}/inbox`}
                                 />
                             </div>
                         </div>
@@ -682,6 +690,7 @@ const MetricCard = ({
     value,
     hint,
     hintTone,
+    href,
 }: {
     icon: LucideIcon;
     tone: Tone;
@@ -689,12 +698,13 @@ const MetricCard = ({
     value: string;
     hint: string;
     hintTone: HintTone;
+    href?: string;
 }) => {
     const hintConfig = hintToneMap[hintTone];
     const HintIcon = hintConfig.icon;
 
-    return (
-        <div className="group rounded-[24px] border border-slate-200/80 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.04)] transition-all duration-200 hover:border-slate-300" style={{ padding: '24px' }}>
+    const cardContent = (
+        <>
             <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0 space-y-3">
                     <p className="m-0 text-[12px] font-semibold uppercase tracking-[0.16em] text-slate-500">
@@ -708,7 +718,7 @@ const MetricCard = ({
 
                 <div
                     className={[
-                        'flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ring-1 transition-transform duration-200 group-hover:scale-[1.03]',
+                        'flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ring-1 transition-transform duration-200 group-hover:scale-[1.06]',
                         toneIconMap[tone],
                     ].join(' ')}
                 >
@@ -727,6 +737,31 @@ const MetricCard = ({
                 <HintIcon size={15} className="mt-0.5 shrink-0" />
                 <span className="text-[12px] font-medium leading-5">{hint}</span>
             </div>
+
+            {href && (
+                <div className="mt-4 flex items-center justify-end gap-1 text-[11px] font-medium text-slate-400 transition-colors duration-200 group-hover:text-indigo-500">
+                    <span>Xem chi tiết</span>
+                    <ChevronRight size={13} />
+                </div>
+            )}
+        </>
+    );
+
+    if (href) {
+        return (
+            <Link
+                href={href}
+                className="group block rounded-[24px] border border-slate-200/80 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.04)] transition-all duration-200 hover:border-slate-300 hover:shadow-[0_8px_24px_rgba(15,23,42,0.08)] hover:scale-[1.01] no-underline"
+                style={{ padding: '24px', textDecoration: 'none', color: 'inherit' }}
+            >
+                {cardContent}
+            </Link>
+        );
+    }
+
+    return (
+        <div className="group rounded-[24px] border border-slate-200/80 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.04)] transition-all duration-200 hover:border-slate-300" style={{ padding: '24px' }}>
+            {cardContent}
         </div>
     );
 };
@@ -785,18 +820,20 @@ const ActivityItem = ({
     title,
     meta,
     time,
+    href,
 }: {
     icon: LucideIcon;
     tone: Tone;
     title: string;
     meta: string;
     time: string;
+    href?: string;
 }) => {
-    return (
-        <div className="flex items-start gap-4" style={{ padding: '16px 0' }}>
+    const content = (
+        <>
             <div
                 className={[
-                    'mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl',
+                    'mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl transition-transform duration-200 group-hover:scale-[1.06]',
                     activityToneMap[tone],
                 ].join(' ')}
             >
@@ -810,7 +847,28 @@ const ActivityItem = ({
                 <p className="m-0 text-[13px] leading-6 text-slate-500">{meta}</p>
             </div>
 
-            <div className="shrink-0 pt-0.5 text-[12px] text-slate-400">{time}</div>
+            <div className="flex shrink-0 items-center gap-1 pt-0.5">
+                <span className="text-[12px] text-slate-400">{time}</span>
+                {href && <ChevronRight size={14} className="text-slate-300 transition-colors duration-200 group-hover:text-indigo-500" />}
+            </div>
+        </>
+    );
+
+    if (href) {
+        return (
+            <Link
+                href={href}
+                className="group flex items-start gap-4 rounded-2xl transition-all duration-200 hover:bg-slate-50 no-underline"
+                style={{ padding: '16px 8px', margin: '0 -8px', textDecoration: 'none', color: 'inherit' }}
+            >
+                {content}
+            </Link>
+        );
+    }
+
+    return (
+        <div className="group flex items-start gap-4" style={{ padding: '16px 0' }}>
+            {content}
         </div>
     );
 };

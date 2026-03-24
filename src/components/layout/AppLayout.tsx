@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import { Layout, Menu, Dropdown, Avatar, Spin, Badge } from 'antd';
 import { 
-    MessageSquare, Settings, Users, Box, User, LogOut, Code, ChevronDown, CheckCircle, ChevronLeft, ChevronRight, LayoutDashboard, Contact2 
+    MessageSquare, Settings, Users, Box, User, LogOut, Code, ChevronDown, CheckCircle, ChevronLeft, ChevronRight, LayoutDashboard, Contact2, CreditCard 
 } from 'lucide-react';
 import Link from 'next/link';
 import { useGetMe, useLogout } from '../../domains/auth/auth.hooks';
@@ -23,7 +23,20 @@ interface AppLayoutProps {
 }
 
 export default function AppLayout({ children, hideHeader = false, headerTitle, headerExtra }: AppLayoutProps) {
-    const [collapsed, setCollapsed] = useState(true);
+    const [collapsed, setCollapsed] = useState(() => {
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem('sidebar-collapsed');
+            return saved === null ? true : saved === 'true';
+        }
+        return true;
+    });
+    const handleToggleCollapse = () => {
+        setCollapsed(prev => {
+            const next = !prev;
+            localStorage.setItem('sidebar-collapsed', String(next));
+            return next;
+        });
+    };
     const router = useRouter();
     const { workspaceId: queryWsId } = router.query;
     const workspaceId = queryWsId as string | undefined;
@@ -60,8 +73,6 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
         socket.on('conversation:updated', (data: any) => {
             const isFromVisitor = data.lastMessage?.sender?.type === 'visitor';
             if (isFromVisitor) {
-                // If the user is actively on a chat page (inbox or Zalo), those pages handle sounds
-                // and read status independently, so we just ignore it here to avoid double ringing.
                 const p = window.location.pathname;
                 const isChatPage = p.includes('/inbox') || p.includes('/remote-session');
                 
@@ -113,7 +124,6 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
     const menuItems: any[] = [];
 
     if (workspaceId) {
-        // Workspace-specific menu
         menuItems.push(
             {
                 key: `/workspace/${workspaceId}`,
@@ -144,10 +154,14 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                 key: `/workspace/${workspaceId}/settings`,
                 icon: <Settings size={20} />,
                 label: <Link href={`/workspace/${workspaceId}/settings`}>Cài đặt</Link>,
+            },
+            {
+                key: `/workspace/${workspaceId}/billing`,
+                icon: <CreditCard size={20} />,
+                label: <Link href={`/workspace/${workspaceId}/billing`}>Thanh toán</Link>,
             }
         );
     } else {
-        // Global menu
         menuItems.push(
             {
                 key: '/workspace',
@@ -163,6 +177,7 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
         if (router.pathname.includes('/inbox')) selectedKey = `/workspace/${workspaceId}/inbox`;
         else if (router.pathname.includes('/contacts')) selectedKey = `/workspace/${workspaceId}/contacts`;
         else if (router.pathname.includes('/teams')) selectedKey = `/workspace/${workspaceId}/teams`;
+        else if (router.pathname.includes('/billing')) selectedKey = `/workspace/${workspaceId}/billing`;
         else if (router.pathname.includes('/settings')) selectedKey = `/workspace/${workspaceId}/settings`;
         else if (router.pathname.includes('/widgets')) selectedKey = `/workspace/${workspaceId}/widgets`;
         else selectedKey = `/workspace/${workspaceId}`;
@@ -193,6 +208,19 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
 
     return (
         <Layout style={{ minHeight: '100vh', background: 'var(--color-bg-soft)' }}>
+            <style>{`
+                @media (max-width: 768px) {
+                    .app-sider-nav {
+                        display: none !important;
+                    }
+                    .app-main-content {
+                        margin-left: 0 !important;
+                    }
+                    .app-main-header {
+                        display: none !important;
+                    }
+                }
+            `}</style>
             {/* ─── LEFT SIDEBAR ─── */}
             <Sider 
                 collapsed={collapsed}
@@ -200,6 +228,7 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                 width={260}
                 theme="light" 
                 collapsible={false}
+                className="app-sider-nav"
                 style={{
                     borderRight: '1px solid var(--color-border)',
                     position: 'fixed',
@@ -210,7 +239,7 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                     zIndex: 100,
                     display: 'flex',
                     flexDirection: 'column',
-                    background: 'var(--color-bg)'
+                    background: 'var(--color-bg)',
                 }}
             >
                 {/* Brand / Logo */}
@@ -221,16 +250,18 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                     justifyContent: collapsed ? 'center' : 'flex-start',
                     padding: collapsed ? '0' : '0 24px',
                     borderBottom: '1px solid var(--color-border)',
-                    gap: 12
+                    gap: 12,
+                    background: 'linear-gradient(180deg, var(--color-primary-50) 0%, var(--color-bg) 100%)',
                 }}>
                     <div style={{
                         width: collapsed ? 38 : 32, 
                         height: collapsed ? 38 : 32, 
                         borderRadius: collapsed ? 10 : 8,
-                        background: 'var(--gradient-hero)',
+                        background: 'var(--gradient-primary)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         color: 'white', fontWeight: 'bold', fontSize: collapsed ? 18 : 16,
-                        flexShrink: 0
+                        flexShrink: 0,
+                        boxShadow: '0 4px 12px rgba(99, 102, 241, 0.25)',
                     }}>N</div>
                     {!collapsed && <span style={{ fontWeight: 700, fontSize: 18, color: 'var(--color-text)', whiteSpace: 'nowrap' }}>NemarChat</span>}
                 </div>
@@ -244,13 +275,12 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                                 height: 44, 
                                 padding: collapsed ? 0 : '0 14px',
                                 background: 'var(--color-bg-soft)', 
-                                borderRadius: collapsed ? 12 : 8, 
+                                borderRadius: collapsed ? 12 : 10, 
                                 display: 'flex', 
                                 alignItems: 'center', 
                                 justifyContent: collapsed ? 'center' : 'space-between',
                                 cursor: 'pointer',
                                 border: '1px solid var(--color-border)',
-                                transition: 'all 0.2s'
                             }} className="ws-switcher">
                                 {collapsed ? (
                                     <span style={{ fontWeight: 700, fontSize: 18, color: 'var(--color-primary)' }}>
@@ -272,7 +302,7 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                 {/* Navigation Menu */}
                 <div style={{ flex: 1, overflowY: 'auto', padding: collapsed ? '12px 0' : '12px 12px' }}>
                     {!collapsed && (
-                        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: 8, paddingLeft: 12, letterSpacing: 0.5 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: 8, paddingLeft: 12, letterSpacing: '0.08em' }}>
                             {workspaceId ? 'Workspace Menu' : 'Main Menu'}
                         </div>
                     )}
@@ -297,13 +327,14 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                 }}>
                     {/* Expand/Collapse Toggle Float Button */}
                     <div 
-                        onClick={() => setCollapsed(!collapsed)}
+                        onClick={handleToggleCollapse}
+                        className="sidebar-toggle-btn"
                         style={{
                             position: 'absolute',
-                            right: -12,
-                            top: -12,
-                            width: 24,
-                            height: 24,
+                            right: -14,
+                            top: -14,
+                            width: 28,
+                            height: 28,
                             background: '#fff',
                             border: '1px solid var(--color-border)',
                             borderRadius: '50%',
@@ -313,8 +344,7 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                             cursor: 'pointer',
                             zIndex: 101,
                             color: 'var(--color-text-secondary)',
-                            boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
-                            transition: 'all 0.2s'
+                            boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
                         }}
                     >
                         {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
@@ -344,15 +374,14 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                     >
                         <div style={{ 
                             padding: collapsed ? '6px' : '10px 12px', 
-                            borderRadius: collapsed ? 12 : 8,
+                            borderRadius: collapsed ? 12 : 10,
                             cursor: 'pointer',
                             display: 'flex',
                             alignItems: 'center',
                             gap: 12,
                             width: collapsed ? 'auto' : '100%',
-                            transition: 'background 0.2s'
                         }} className="user-profile-btn">
-                            <Avatar src={user.avatarUrl} size={collapsed ? 42 : 36} style={{ background: 'var(--gradient-hero)', flexShrink: 0 }}>
+                            <Avatar src={user.avatarUrl} size={collapsed ? 42 : 36} style={{ background: 'var(--gradient-primary)', flexShrink: 0 }}>
                                 {!user.avatarUrl && (user.name?.charAt(0)?.toUpperCase() || 'U')}
                             </Avatar>
                             {!collapsed && (
@@ -365,7 +394,7 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                                             {user.email}
                                         </div>
                                     </div>
-                                    <Settings size={16} color="var(--color-text-secondary)" style={{ flexShrink: 0 }} />
+                                    <Settings size={16} color="var(--color-text-muted)" style={{ flexShrink: 0 }} />
                                 </>
                             )}
                         </div>
@@ -374,10 +403,12 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
             </Sider>
 
             {/* ─── MAIN CONTENT ─── */}
-            <Layout style={{ marginLeft: collapsed ? 80 : 260, background: 'var(--color-bg-soft)', minHeight: '100vh', display: 'flex', flexDirection: 'column', transition: 'margin-left 0.2s' }}>
+            <Layout className="app-main-content" style={{ marginLeft: collapsed ? 80 : 260, background: 'var(--color-bg-soft)', minHeight: '100vh', display: 'flex', flexDirection: 'column', transition: 'margin-left 0.2s' }}>
                 {!hideHeader && (
-                    <Header style={{ 
-                        background: 'var(--color-bg)', 
+                    <Header className="app-main-header" style={{ 
+                        background: 'rgba(255, 255, 255, 0.85)', 
+                        backdropFilter: 'blur(12px)',
+                        WebkitBackdropFilter: 'blur(12px)',
                         padding: '0 32px', 
                         height: 64, 
                         display: 'flex', 
@@ -386,7 +417,8 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                         borderBottom: '1px solid var(--color-border)',
                         position: 'sticky',
                         top: 0,
-                        zIndex: 99
+                        zIndex: 99,
+                        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.02)',
                     }}>
                         <div style={{ fontSize: 18, fontWeight: 700, display: 'flex', alignItems: 'center' }}>
                             {headerTitle || ''}
@@ -400,41 +432,7 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                     {children}
                 </Content>
             </Layout>
-
-            {/* Custom CSS for Sidebar */}
-            <style jsx global>{`
-                .app-sidebar-menu .ant-menu-item {
-                    border-radius: 8px;
-                    margin-bottom: 8px;
-                    ${!collapsed ? 'width: calc(100% - 16px);' : ''}
-                }
-                .app-sidebar-menu .ant-menu-item-selected {
-                    background-color: var(--color-primary-light) !important;
-                    color: var(--color-primary) !important;
-                    font-weight: 600;
-                }
-                .app-sidebar-menu .ant-menu-item-selected a,
-                .app-sidebar-menu .ant-menu-item-selected svg {
-                    color: var(--color-primary) !important;
-                }
-                .app-sidebar-menu .ant-menu-item a {
-                    color: inherit;
-                }
-                .ws-switcher:hover, .user-profile-btn:hover {
-                    background: var(--color-hover) !important;
-                }
-                :root {
-                    --color-primary: #6366f1;
-                    --color-primary-light: #eff0fe;
-                    --color-bg: #ffffff;
-                    --color-bg-soft: #f8fafc;
-                    --color-border: #e2e8f0;
-                    --color-text: #0f172a;
-                    --color-text-secondary: #475569;
-                    --color-text-muted: #94a3b8;
-                    --color-hover: #f1f5f9;
-                }
-            `}</style>
         </Layout>
     );
 }
+

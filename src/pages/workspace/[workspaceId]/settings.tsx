@@ -5,6 +5,7 @@ import { Spin } from 'antd';
 import AppLayout from '../../../components/layout/AppLayout';
 import WorkspaceSettingsForm from '../../../features/workspace/components/WorkspaceSettingsForm';
 import ZaloIntegrationSettings from '../../../features/workspace/components/ZaloIntegrationSettings';
+import FacebookIntegrationSettings from '../../../features/workspace/components/FacebookIntegrationSettings';
 
 export default function WorkspaceSettingsPage() {
     const router = useRouter();
@@ -31,6 +32,7 @@ export default function WorkspaceSettingsPage() {
             <main style={{ maxWidth: 800, margin: '0 auto', padding: '40px 24px' }}>
                 <WorkspaceSettingsForm workspaceId={workspaceId as string} />
                 <ZaloIntegrationSettings workspaceId={workspaceId as string} />
+                <FacebookIntegrationSettings workspaceId={workspaceId as string} />
             </main>
         </AppLayout>
     );

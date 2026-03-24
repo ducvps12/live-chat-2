@@ -24,8 +24,9 @@ export const conversationService = {
             visitorInfo
         );
 
-        // Try to find existing open conversation unless forceNew is true
-        let conversation = forceNew ? null : await conversationRepo.findActiveByVisitor(visitorId, widgetId);
+        // Try to find existing conversation (any status) unless forceNew is true
+        // This prevents creating duplicate conversations when a closed conversation gets a new session
+        let conversation = forceNew ? null : await conversationRepo.findLatestByVisitor(visitorId, widgetId);
         let isNew = false;
 
         if (!conversation) {
@@ -40,6 +41,10 @@ export const conversationService = {
             });
             isNew = true;
             await visitorRepo.incrementConversations(visitorId, widgetId);
+        } else if (conversation.status === 'closed' || conversation.status === 'resolved') {
+            // Reopen existing closed conversation instead of creating a duplicate
+            await conversationRepo.updateStatus((conversation._id as any).toString(), 'open');
+            conversation.status = 'open';
         }
 
         const msgResult = await messageRepo.findByConversation(conversation._id.toString(), { limit: 30, excludeInternal: true });
@@ -72,14 +77,39 @@ export const conversationService = {
         content: string, 
         msgType: 'text' | 'image' | 'video' | 'file' = 'text',
         attachments: any[] = [],
-        clientMessageId?: string
+        clientMessageId?: string,
+        groupSenderName?: string, // For group messages: the individual sender's name
     ) {
-        // Find a widget to associate the visitor with (we use the first active widget)
-        const widget = await widgetRepo.findByWorkspace(workspaceId);
-        if (!widget || widget.length === 0) {
-            throw new AppError('Không tìm thấy Widget nào cho workspace này để gắn Zalo', 400, 'BAD_REQUEST');
+        // Find a widget to associate the visitor with (we use the first active widget, or auto-create one for Zalo)
+        let widgetList = await widgetRepo.findByWorkspace(workspaceId);
+        let targetWidget;
+        if (!widgetList || widgetList.length === 0) {
+            // Auto-create a Zalo widget for this workspace
+            console.log(`[ConvService] Auto-creating Zalo widget for workspace ${workspaceId}`);
+            targetWidget = await widgetRepo.create({
+                workspaceId: workspaceId as any,
+                name: 'Zalo',
+                isActive: true,
+                config: {
+                    primaryColor: '#0068ff',
+                    greeting: 'Xin chào! Chúng tôi có thể giúp gì cho bạn?',
+                    placeholder: 'Nhập tin nhắn...',
+                    position: 'bottom-right',
+                    language: 'vi',
+                    showBranding: false,
+                    offlineMessage: 'Hiện tại không có agent trực tuyến.',
+                    preChatForm: {
+                        enabled: false,
+                        title: '',
+                        fields: [],
+                    },
+                },
+                domainRules: { mode: 'allowlist', domains: [] },
+            } as any);
+        } else {
+            targetWidget = widgetList[0];
         }
-        const widgetId = (widget[0]._id as any).toString();
+        const widgetId = (targetWidget._id as any).toString();
         const visitorId = `zalo_${zaloUserId}`;
 
         // Upsert visitor profile
@@ -90,13 +120,16 @@ export const conversationService = {
             { name: zaloUserName, avatar: zaloAvatar, attributes: { channel: 'zalo', zaloUserId } }
         );
 
-        let conversation = await conversationRepo.findActiveByVisitor(visitorId, widgetId);
+        // Find the LATEST conversation for this Zalo visitor (regardless of status)
+        // This prevents creating duplicate conversations when a closed conversation gets a new message
+        let conversation = await conversationRepo.findLatestByVisitor(visitorId, widgetId);
         let isNew = false;
 
         if (!conversation) {
+            // No conversation exists at all — create new
             conversation = await conversationRepo.create({
                 workspaceId: workspaceId as any,
-                widgetId: widget[0]._id as any,
+                widgetId: targetWidget._id as any,
                 visitorId,
                 visitorInfo: { name: zaloUserName, avatar: zaloAvatar },
                 channel: 'zalo',
@@ -112,12 +145,118 @@ export const conversationService = {
                     conversation, visitor, visitorInfo: { name: zaloUserName, avatar: zaloAvatar },
                 });
             } catch { /* socket may not be initialized yet */ }
+        } else if (conversation.status === 'closed' || conversation.status === 'resolved') {
+            // Reopen the existing conversation instead of creating a duplicate
+            await conversationRepo.updateStatus((conversation._id as any).toString(), 'open');
+            conversation.status = 'open';
+            
+            try {
+                emitToWorkspace(workspaceId, 'conversation:reopened', {
+                    conversationId: (conversation._id as any).toString(),
+                });
+            } catch { /* socket may not be initialized */ }
         }
 
         // Add message to conversation
+        // For group messages: use individual sender name instead of group name
+        const messageSenderName = groupSenderName || zaloUserName;
         return this.addMessage(
             (conversation._id as any).toString(),
-            { type: 'visitor', id: visitorId, name: zaloUserName },
+            { type: 'visitor', id: visitorId, name: messageSenderName },
+            content,
+            msgType as any,
+            attachments,
+            clientMessageId
+        );
+    },
+
+    /**
+     * Handle incoming Facebook Messenger message → Route vào Inbox
+     */
+    async handleIncomingFacebookMessage(
+        workspaceId: string,
+        fbUserId: string,
+        fbUserName: string,
+        fbAvatar: string,
+        content: string,
+        msgType: 'text' | 'image' | 'video' | 'file' = 'text',
+        attachments: any[] = [],
+        clientMessageId?: string,
+        pageId?: string,
+        pageName?: string,
+    ) {
+        // Find/create widget for Facebook
+        let widgetList = await widgetRepo.findByWorkspace(workspaceId);
+        let targetWidget = widgetList?.find(w => (w as any).name === 'Facebook') || widgetList?.[0];
+
+        if (!targetWidget) {
+            console.log(`[ConvService] Auto-creating Facebook widget for workspace ${workspaceId}`);
+            targetWidget = await widgetRepo.create({
+                workspaceId: workspaceId as any,
+                name: 'Facebook',
+                isActive: true,
+                config: {
+                    primaryColor: '#1877F2',
+                    greeting: 'Xin chào! Chúng tôi có thể giúp gì cho bạn?',
+                    placeholder: 'Nhập tin nhắn...',
+                    position: 'bottom-right',
+                    language: 'vi',
+                    showBranding: false,
+                    offlineMessage: 'Hiện tại không có agent trực tuyến.',
+                    preChatForm: { enabled: false, title: '', fields: [] },
+                },
+                domainRules: { mode: 'allowlist', domains: [] },
+            } as any);
+        }
+
+        const widgetId = (targetWidget._id as any).toString();
+        const visitorId = `fb_${fbUserId}`;
+
+        // Upsert visitor
+        const { visitor } = await visitorRepo.findOrCreate(
+            visitorId,
+            widgetId,
+            workspaceId,
+            { name: fbUserName, avatar: fbAvatar, attributes: { channel: 'facebook', fbUserId, pageId, pageName } }
+        );
+
+        // Find/create conversation
+        let conversation = await conversationRepo.findLatestByVisitor(visitorId, widgetId);
+        let isNew = false;
+
+        if (!conversation) {
+            conversation = await conversationRepo.create({
+                workspaceId: workspaceId as any,
+                widgetId: targetWidget._id as any,
+                visitorId,
+                visitorInfo: { name: fbUserName, avatar: fbAvatar },
+                channel: 'facebook',
+                status: 'open',
+                lastMessageAt: new Date(),
+                metadata: { fbUserId, pageId, pageName },
+            });
+            isNew = true;
+            await visitorRepo.incrementConversations(visitorId, widgetId);
+
+            try {
+                emitToWorkspace(workspaceId, 'conversation:new', {
+                    conversation, visitor, visitorInfo: { name: fbUserName, avatar: fbAvatar },
+                });
+            } catch { /* socket may not be initialized yet */ }
+        } else if (conversation.status === 'closed' || conversation.status === 'resolved') {
+            await conversationRepo.updateStatus((conversation._id as any).toString(), 'open');
+            conversation.status = 'open';
+
+            try {
+                emitToWorkspace(workspaceId, 'conversation:reopened', {
+                    conversationId: (conversation._id as any).toString(),
+                });
+            } catch { /* socket may not be initialized */ }
+        }
+
+        return this.addMessage(
+            (conversation._id as any).toString(),
+            { type: 'visitor', id: visitorId, name: fbUserName },
             content,
             msgType as any,
             attachments,

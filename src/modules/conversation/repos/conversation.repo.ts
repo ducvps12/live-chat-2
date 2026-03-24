@@ -16,6 +16,16 @@ export const conversationRepo = {
             .exec();
     },
 
+    /**
+     * Find the most recent conversation for a visitor, regardless of status.
+     * Used by Zalo handler to prevent duplicate conversations — reopens closed ones.
+     */
+    async findLatestByVisitor(visitorId: string, widgetId: string): Promise<IConversation | null> {
+        return ConversationModel.findOne({ visitorId, widgetId })
+            .sort({ lastMessageAt: -1 })
+            .exec();
+    },
+
     async findByVisitor(visitorId: string, widgetId: string) {
         return ConversationModel.find({ visitorId, widgetId })
             .sort({ updatedAt: -1 })

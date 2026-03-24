@@ -1,7 +1,7 @@
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
-import { Button, Modal, Form, Input, message, Empty, Spin } from 'antd';
+import { Modal, Form, Input, message, Spin } from 'antd';
 import {
     Plus,
     Settings,
@@ -12,25 +12,28 @@ import {
     Sparkles,
     MessageSquare,
     Crown,
+    LayoutDashboard,
+    Zap,
+    ChevronRight,
 } from 'lucide-react';
 import { useGetMe } from '../../domains/auth/auth.hooks';
 import { useMyWorkspaces, useCreateWorkspace } from '../../domains/workspace/workspace.hooks';
 import AppLayout from '../../components/layout/AppLayout';
 
-/* ─── Gradient palette per card index ─── */
-const CARD_GRADIENTS = [
-    { bg: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)', glow: 'rgba(99,102,241,0.18)' },
-    { bg: 'linear-gradient(135deg, #8b5cf6 0%, #d946ef 100%)', glow: 'rgba(139,92,246,0.18)' },
-    { bg: 'linear-gradient(135deg, #06b6d4 0%, #6366f1 100%)', glow: 'rgba(6,182,212,0.18)' },
-    { bg: 'linear-gradient(135deg, #f59e0b 0%, #ef4444 100%)', glow: 'rgba(245,158,11,0.18)' },
-    { bg: 'linear-gradient(135deg, #10b981 0%, #06b6d4 100%)', glow: 'rgba(16,185,129,0.18)' },
-    { bg: 'linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%)', glow: 'rgba(236,72,153,0.18)' },
+/* ─── Google/Apple-Inspired Minimal Color System ─── */
+const ACCENT_COLORS = [
+    { accent: '#1a73e8', soft: '#e8f0fe', glow: 'rgba(26,115,232,0.08)' },
+    { accent: '#34a853', soft: '#e6f4ea', glow: 'rgba(52,168,83,0.08)' },
+    { accent: '#ea4335', soft: '#fce8e6', glow: 'rgba(234,67,53,0.08)' },
+    { accent: '#fbbc04', soft: '#fef7e0', glow: 'rgba(251,188,4,0.08)' },
+    { accent: '#9334e6', soft: '#f3e8fd', glow: 'rgba(147,52,230,0.08)' },
+    { accent: '#00acc1', soft: '#e0f7fa', glow: 'rgba(0,172,193,0.08)' },
 ];
 
-const PLAN_STYLES: Record<string, { bg: string; text: string; border: string; icon: boolean }> = {
-    free: { bg: '#f1f5f9', text: '#475569', border: '#e2e8f0', icon: false },
-    pro: { bg: 'linear-gradient(135deg, #eef2ff, #e0e7ff)', text: '#4f46e5', border: '#c7d2fe', icon: true },
-    business: { bg: 'linear-gradient(135deg, #fefce8, #fef3c7)', text: '#b45309', border: '#fcd34d', icon: true },
+const PLAN_CONFIG: Record<string, { label: string; color: string; bg: string; icon: boolean }> = {
+    free:     { label: 'Free',     color: '#5f6368', bg: '#f1f3f4', icon: false },
+    pro:      { label: 'Pro',      color: '#1a73e8', bg: '#e8f0fe', icon: true },
+    business: { label: 'Business', color: '#e37400', bg: '#fef7e0', icon: true },
 };
 
 export default function WorkspacePage() {
@@ -38,6 +41,7 @@ export default function WorkspacePage() {
     const [ready, setReady] = useState(false);
     const [showCreate, setShowCreate] = useState(false);
     const [form] = Form.useForm();
+    const [hoveredCard, setHoveredCard] = useState<string | null>(null);
 
     useEffect(() => {
         const stored = localStorage.getItem('nemark_token');
@@ -64,7 +68,7 @@ export default function WorkspacePage() {
         try {
             const res = await createWs(values);
             if (res.success) {
-                message.success('Tạo workspace thành công!');
+                message.success('Workspace đã được tạo thành công');
                 setShowCreate(false);
                 form.resetFields();
             }
@@ -76,7 +80,7 @@ export default function WorkspacePage() {
 
     if (!ready || meLoading) {
         return (
-            <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg-soft)' }}>
+            <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8f9fa' }}>
                 <Spin size="large" />
             </div>
         );
@@ -84,11 +88,18 @@ export default function WorkspacePage() {
 
     if (meError || !meData?.data?.user) {
         return (
-            <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg-soft)' }}>
-                <div className="card" style={{ padding: 40, textAlign: 'center', maxWidth: 400 }}>
-                    <h2 style={{ marginBottom: 12 }}>Phiên đăng nhập hết hạn</h2>
-                    <p style={{ color: 'var(--color-text-secondary)', marginBottom: 24 }}>Vui lòng đăng nhập lại.</p>
-                    <a href="/auth/login" className="btn btn-primary" style={{ display: 'inline-block' }}>Đăng nhập</a>
+            <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8f9fa' }}>
+                <div style={{
+                    padding: '48px 40px', textAlign: 'center', maxWidth: 400,
+                    background: '#fff', borderRadius: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                }}>
+                    <h2 style={{ fontSize: 20, fontWeight: 600, margin: '0 0 8px', color: '#202124' }}>Phiên đăng nhập hết hạn</h2>
+                    <p style={{ color: '#5f6368', marginBottom: 24, fontSize: 14 }}>Vui lòng đăng nhập lại để tiếp tục.</p>
+                    <a href="/auth/login" style={{
+                        display: 'inline-flex', alignItems: 'center', height: 40, padding: '0 24px',
+                        background: '#1a73e8', color: '#fff', borderRadius: 20, fontWeight: 500, fontSize: 14,
+                        textDecoration: 'none',
+                    }}>Đăng nhập</a>
                 </div>
             </div>
         );
@@ -97,322 +108,231 @@ export default function WorkspacePage() {
     const workspaces = wsData?.data || [];
 
     return (
-        <AppLayout headerTitle="Workspace của bạn">
+        <AppLayout headerTitle="Workspace">
             <Head><title>Workspace | NemarChat</title></Head>
 
-            <main style={{ maxWidth: 1120, margin: '0 auto', padding: '36px 24px 72px' }}>
+            <main style={{ maxWidth: 960, margin: '0 auto', padding: '40px 32px 80px' }}>
                 {/* ─── Page Header ─── */}
                 <div style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    marginBottom: 36, flexWrap: 'wrap', gap: 16,
+                    display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
+                    marginBottom: 40, gap: 16,
                 }}>
                     <div>
                         <h1 style={{
-                            fontSize: 28, fontWeight: 800, marginBottom: 6,
-                            letterSpacing: '-0.02em', color: '#0f172a',
+                            fontSize: 24, fontWeight: 600, margin: '0 0 4px',
+                            color: '#202124', letterSpacing: '-0.01em',
+                            fontFamily: "'Google Sans', 'SF Pro Display', -apple-system, BlinkMacSystemFont, system-ui, sans-serif",
                         }}>
-                            Workspace của bạn
+                            Workspace
                         </h1>
-                        <p style={{ color: '#64748b', fontSize: 15, margin: 0, lineHeight: 1.6 }}>
-                            Quản lý các workspace và cấu hình live-chat cho từng dự án.
+                        <p style={{
+                            color: '#5f6368', fontSize: 14, margin: 0, lineHeight: 1.5,
+                        }}>
+                            Quản lý các workspace và cấu hình live-chat cho từng dự án
                         </p>
                     </div>
 
                     <button
                         onClick={() => setShowCreate(true)}
                         style={{
-                            height: 44,
-                            borderRadius: 14,
-                            background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a855f7 100%)',
+                            height: 36,
+                            borderRadius: 18,
+                            background: '#1a73e8',
                             border: 'none',
                             color: '#fff',
-                            fontWeight: 600,
+                            fontWeight: 500,
                             fontSize: 14,
                             display: 'flex',
                             alignItems: 'center',
-                            gap: 8,
-                            padding: '0 22px',
+                            gap: 6,
+                            padding: '0 20px 0 16px',
                             cursor: 'pointer',
-                            boxShadow: '0 6px 20px rgba(99,102,241,0.3), 0 1px 3px rgba(99,102,241,0.2)',
-                            transition: 'all 0.25s cubic-bezier(0.4,0,0.2,1)',
+                            transition: 'all 0.2s ease',
+                            boxShadow: '0 1px 2px rgba(0,0,0,0.1), 0 1px 3px rgba(0,0,0,0.08)',
+                            flexShrink: 0,
                         }}
                         onMouseEnter={e => {
-                            e.currentTarget.style.transform = 'translateY(-2px)';
-                            e.currentTarget.style.boxShadow = '0 10px 28px rgba(99,102,241,0.4), 0 2px 6px rgba(99,102,241,0.25)';
+                            e.currentTarget.style.background = '#1765cc';
+                            e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.15), 0 4px 8px rgba(26,115,232,0.2)';
                         }}
                         onMouseLeave={e => {
-                            e.currentTarget.style.transform = 'translateY(0)';
-                            e.currentTarget.style.boxShadow = '0 6px 20px rgba(99,102,241,0.3), 0 1px 3px rgba(99,102,241,0.2)';
+                            e.currentTarget.style.background = '#1a73e8';
+                            e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.1), 0 1px 3px rgba(0,0,0,0.08)';
                         }}
                     >
-                        <Plus size={18} strokeWidth={2.5} />
-                        Tạo Workspace
+                        <Plus size={18} strokeWidth={2} />
+                        Tạo mới
                     </button>
                 </div>
 
-                {/* ─── Workspace Grid ─── */}
+                {/* ─── Content ─── */}
                 {wsLoading ? (
                     <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" /></div>
                 ) : workspaces.length === 0 ? (
+                    /* Empty State — Apple-style centered card */
                     <div style={{
-                        padding: '72px 40px', textAlign: 'center',
-                        background: '#fff', borderRadius: 24,
-                        border: '1px solid #e2e8f0',
-                        boxShadow: '0 1px 3px rgba(15,23,42,0.04)',
+                        padding: '80px 40px', textAlign: 'center',
+                        background: '#fff', borderRadius: 16,
+                        border: '1px solid #e0e0e0',
                     }}>
-                        <Empty
-                            description={
-                                <span style={{ color: '#64748b', fontSize: 15 }}>
-                                    Bạn chưa có workspace nào. Hãy tạo workspace đầu tiên!
-                                </span>
-                            }
-                        />
+                        <div style={{
+                            width: 64, height: 64, borderRadius: 16,
+                            background: '#e8f0fe', display: 'flex',
+                            alignItems: 'center', justifyContent: 'center',
+                            margin: '0 auto 20px',
+                        }}>
+                            <LayoutDashboard size={28} color="#1a73e8" strokeWidth={1.5} />
+                        </div>
+                        <h3 style={{
+                            fontSize: 18, fontWeight: 600, margin: '0 0 8px', color: '#202124',
+                        }}>Chưa có workspace nào</h3>
+                        <p style={{
+                            color: '#5f6368', fontSize: 14, margin: '0 0 28px', maxWidth: 340,
+                            marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.5,
+                        }}>
+                            Tạo workspace đầu tiên để bắt đầu quản lý hỗ trợ khách hàng.
+                        </p>
                         <button
                             onClick={() => setShowCreate(true)}
                             style={{
-                                marginTop: 28, height: 44, borderRadius: 14,
-                                background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                                border: 'none', color: '#fff', fontWeight: 600,
-                                fontSize: 14, padding: '0 28px', cursor: 'pointer',
-                                boxShadow: '0 4px 14px rgba(99,102,241,0.25)',
+                                height: 40, borderRadius: 20,
+                                background: '#1a73e8', border: 'none', color: '#fff',
+                                fontWeight: 500, fontSize: 14, padding: '0 28px',
+                                cursor: 'pointer',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
                             }}
                         >
-                            <Sparkles size={16} style={{ marginRight: 6, verticalAlign: 'middle' }} />
-                            Tạo Workspace đầu tiên
+                            <Plus size={16} style={{ marginRight: 6, verticalAlign: 'middle' }} />
+                            Tạo workspace
                         </button>
                     </div>
                 ) : (
-                    <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                        gap: 24,
-                    }}>
+                    /* Workspace Cards */
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                         {workspaces.map((ws: any, idx: number) => {
-                            const palette = CARD_GRADIENTS[idx % CARD_GRADIENTS.length];
+                            const palette = ACCENT_COLORS[idx % ACCENT_COLORS.length];
                             const planKey = ((ws.plan as string) || 'free').toLowerCase();
-                            const planStyle = PLAN_STYLES[planKey] || PLAN_STYLES.free;
+                            const plan = PLAN_CONFIG[planKey] || PLAN_CONFIG.free;
                             const members = (ws.members as unknown[]) || [];
                             const settings = (ws.settings as Record<string, string>) || {};
+                            const isHovered = hoveredCard === ws._id;
 
                             return (
                                 <div
                                     key={ws._id as string}
+                                    onClick={() => router.push(`/workspace/${ws._id}`)}
+                                    onMouseEnter={() => setHoveredCard(ws._id)}
+                                    onMouseLeave={() => setHoveredCard(null)}
                                     style={{
-                                        position: 'relative',
-                                        borderRadius: 22,
-                                        background: '#fff',
-                                        border: '1px solid #e8ecf2',
-                                        padding: 0,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: 20,
+                                        padding: '20px 24px',
+                                        background: isHovered ? '#f8f9fa' : '#fff',
+                                        borderRadius: 12,
+                                        border: '1px solid #e0e0e0',
                                         cursor: 'pointer',
-                                        transition: 'all 0.3s cubic-bezier(0.4,0,0.2,1)',
-                                        overflow: 'hidden',
-                                    }}
-                                    onMouseEnter={e => {
-                                        const el = e.currentTarget;
-                                        el.style.transform = 'translateY(-4px)';
-                                        el.style.boxShadow = `0 20px 48px ${palette.glow}, 0 4px 12px rgba(15,23,42,0.06)`;
-                                        el.style.borderColor = '#c7d2fe';
-                                    }}
-                                    onMouseLeave={e => {
-                                        const el = e.currentTarget;
-                                        el.style.transform = 'translateY(0)';
-                                        el.style.boxShadow = '0 1px 3px rgba(15,23,42,0.04)';
-                                        el.style.borderColor = '#e8ecf2';
+                                        transition: 'all 0.15s ease',
+                                        boxShadow: isHovered
+                                            ? '0 1px 3px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.04)'
+                                            : '0 1px 2px rgba(0,0,0,0.04)',
                                     }}
                                 >
-                                    {/* ─ Gradient accent top bar ─ */}
+                                    {/* Avatar */}
                                     <div style={{
-                                        height: 4,
-                                        background: palette.bg,
-                                        borderRadius: '22px 22px 0 0',
-                                    }} />
+                                        width: 48, height: 48, borderRadius: 12,
+                                        background: palette.soft,
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        color: palette.accent, fontWeight: 600, fontSize: 20,
+                                        flexShrink: 0,
+                                        transition: 'transform 0.15s ease',
+                                        transform: isHovered ? 'scale(1.05)' : 'scale(1)',
+                                    }}>
+                                        {(ws.name as string).charAt(0).toUpperCase()}
+                                    </div>
 
-                                    <div style={{ padding: '24px 28px 28px' }}>
-                                        {/* ─ Header row ─ */}
-                                        <div style={{
-                                            display: 'flex', alignItems: 'flex-start',
-                                            justifyContent: 'space-between', marginBottom: 24,
-                                        }}>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                                                {/* Avatar */}
-                                                <div style={{
-                                                    width: 56, height: 56, borderRadius: 16,
-                                                    background: `linear-gradient(135deg, ${palette.bg}, #ffffff)`,
-                                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                    color: palette.bg, fontWeight: 800, fontSize: 24,
-                                                    boxShadow: `0 8px 20px ${palette.glow}, inset 0 2px 4px rgba(255,255,255,0.6)`,
-                                                    border: `1px solid ${palette.glow}`,
-                                                    flexShrink: 0,
-                                                }}>
-                                                    {(ws.name as string).charAt(0).toUpperCase()}
-                                                </div>
-
-                                                {/* Name + slug */}
-                                                <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                                    <h3 style={{
-                                                        fontSize: 19, fontWeight: 700, margin: 0,
-                                                        color: '#0f172a', lineHeight: 1.3,
-                                                        letterSpacing: '-0.02em',
-                                                        overflow: 'hidden', textOverflow: 'ellipsis',
-                                                        whiteSpace: 'nowrap',
-                                                    }}>
-                                                        {ws.name as string}
-                                                    </h3>
-                                                    <div style={{
-                                                        display: 'inline-flex', alignItems: 'center',
-                                                        background: '#f1f5f9', padding: '2px 8px', borderRadius: 6,
-                                                        fontSize: 12, color: '#64748b', fontWeight: 600, fontFamily: 'monospace',
-                                                        width: 'fit-content'
-                                                    }}>
-                                                        /{ws.slug as string}
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            {/* Plan badge */}
+                                    {/* Info */}
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                                            <h3 style={{
+                                                fontSize: 15, fontWeight: 600, margin: 0,
+                                                color: '#202124', lineHeight: 1.3,
+                                                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                            }}>
+                                                {ws.name as string}
+                                            </h3>
                                             <span style={{
-                                                display: 'inline-flex', alignItems: 'center', gap: 5,
-                                                padding: '5px 12px', borderRadius: 10,
-                                                background: planStyle.bg,
-                                                border: `1px solid ${planStyle.border}`,
-                                                color: planStyle.text,
-                                                fontSize: 11, fontWeight: 700,
-                                                letterSpacing: '0.04em',
+                                                padding: '2px 8px', borderRadius: 4,
+                                                background: plan.bg, color: plan.color,
+                                                fontSize: 11, fontWeight: 600,
                                                 textTransform: 'uppercase',
+                                                letterSpacing: '0.02em',
+                                                display: 'inline-flex', alignItems: 'center', gap: 3,
                                                 flexShrink: 0,
                                             }}>
-                                                {planStyle.icon && <Crown size={12} />}
-                                                {((ws.plan as string) || 'free').toUpperCase()}
+                                                {plan.icon && <Crown size={10} />}
+                                                {plan.label}
                                             </span>
                                         </div>
-
-                                        {/* ─ Info pills ─ */}
                                         <div style={{
-                                            display: 'flex', flexWrap: 'wrap', gap: 10,
-                                            marginBottom: 22,
+                                            display: 'flex', alignItems: 'center', gap: 16,
+                                            fontSize: 13, color: '#5f6368',
                                         }}>
-                                            <span style={{
-                                                display: 'inline-flex', alignItems: 'center', gap: 6,
-                                                padding: '7px 14px', borderRadius: 10,
-                                                background: '#f8fafc', border: '1px solid #f1f5f9',
-                                                fontSize: 13, color: '#475569', fontWeight: 500,
-                                            }}>
-                                                <Users size={14} color="#6366f1" />
+                                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                                <Users size={13} color="#9aa0a6" />
                                                 {members.length} thành viên
                                             </span>
-
-                                            <span style={{
-                                                display: 'inline-flex', alignItems: 'center', gap: 6,
-                                                padding: '7px 14px', borderRadius: 10,
-                                                background: '#f8fafc', border: '1px solid #f1f5f9',
-                                                fontSize: 13, color: '#475569', fontWeight: 500,
-                                            }}>
-                                                <Globe size={14} color="#06b6d4" />
+                                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                                <Globe size={13} color="#9aa0a6" />
                                                 {settings.language || 'vi'}
                                             </span>
-
-                                            <span style={{
-                                                display: 'inline-flex', alignItems: 'center', gap: 6,
-                                                padding: '7px 14px', borderRadius: 10,
-                                                background: '#f0fdf4', border: '1px solid #dcfce7',
-                                                fontSize: 13, color: '#16a34a', fontWeight: 500,
-                                            }}>
+                                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                                                 <span style={{
-                                                    width: 7, height: 7, borderRadius: '50%',
-                                                    background: '#22c55e', flexShrink: 0,
+                                                    width: 6, height: 6, borderRadius: '50%',
+                                                    background: '#34a853', flexShrink: 0,
                                                 }} />
-                                                Hoạt động
+                                                Đang hoạt động
                                             </span>
                                         </div>
+                                    </div>
 
-                                        {/* ─ Action buttons ─ */}
-                                        <div style={{
-                                            display: 'flex', gap: 12,
-                                            paddingTop: 20,
-                                            borderTop: '1px solid #f1f5f9',
-                                        }}>
-                                            <button
-                                                onClick={() => router.push(`/workspace/${ws._id}`)}
-                                                style={{
-                                                    flex: 1.5, height: 44, borderRadius: 14,
-                                                    background: 'linear-gradient(135deg, #4f46e5, #7c3aed)',
-                                                    border: 'none', color: '#fff',
-                                                    fontSize: 14, fontWeight: 600, letterSpacing: '0.01em',
-                                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                                                    cursor: 'pointer',
-                                                    boxShadow: '0 4px 14px rgba(79, 70, 229, 0.3)',
-                                                    transition: 'all 0.25s ease-out',
-                                                }}
-                                                onMouseEnter={e => {
-                                                    e.currentTarget.style.boxShadow = '0 6px 20px rgba(79, 70, 229, 0.4)';
-                                                    e.currentTarget.style.transform = 'translateY(-1px)';
-                                                }}
-                                                onMouseLeave={e => {
-                                                    e.currentTarget.style.boxShadow = '0 4px 14px rgba(79, 70, 229, 0.3)';
-                                                    e.currentTarget.style.transform = 'translateY(0)';
-                                                }}
-                                            >
-                                                <ExternalLink size={16} strokeWidth={2.5} />
-                                                Mở Workspace
-                                                <ArrowRight size={16} strokeWidth={2.5} />
-                                            </button>
-
-                                            <button
-                                                onClick={() => router.push(`/workspace/${ws._id}/teams`)}
-                                                style={{
-                                                    flex: 1, height: 44, borderRadius: 14,
-                                                    background: '#fff',
-                                                    border: '1px solid #e2e8f0',
-                                                    color: '#334155',
-                                                    fontSize: 14, fontWeight: 600,
-                                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                                                    cursor: 'pointer',
-                                                    transition: 'all 0.2s',
-                                                    boxShadow: '0 1px 3px rgba(15,23,42,0.02)',
-                                                }}
-                                                onMouseEnter={e => {
-                                                    e.currentTarget.style.borderColor = '#c7d2fe';
-                                                    e.currentTarget.style.color = '#4f46e5';
-                                                    e.currentTarget.style.background = '#f8fafc';
-                                                }}
-                                                onMouseLeave={e => {
-                                                    e.currentTarget.style.borderColor = '#e2e8f0';
-                                                    e.currentTarget.style.color = '#334155';
-                                                    e.currentTarget.style.background = '#fff';
-                                                }}
-                                            >
-                                                <Users size={16} />
-                                                Nhân sự
-                                            </button>
-
-                                            <button
-                                                onClick={() => router.push(`/workspace/${ws._id}/settings`)}
-                                                style={{
-                                                    flex: 1, height: 44, borderRadius: 14,
-                                                    background: '#fff',
-                                                    border: '1px solid #e2e8f0',
-                                                    color: '#334155',
-                                                    fontSize: 14, fontWeight: 600,
-                                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                                                    cursor: 'pointer',
-                                                    transition: 'all 0.2s',
-                                                    boxShadow: '0 1px 3px rgba(15,23,42,0.02)',
-                                                }}
-                                                onMouseEnter={e => {
-                                                    e.currentTarget.style.borderColor = '#c7d2fe';
-                                                    e.currentTarget.style.color = '#4f46e5';
-                                                    e.currentTarget.style.background = '#f8fafc';
-                                                }}
-                                                onMouseLeave={e => {
-                                                    e.currentTarget.style.borderColor = '#e2e8f0';
-                                                    e.currentTarget.style.color = '#334155';
-                                                    e.currentTarget.style.background = '#fff';
-                                                }}
-                                            >
-                                                <Settings size={16} />
-                                                Cài đặt
-                                            </button>
-                                        </div>
+                                    {/* Actions */}
+                                    <div style={{
+                                        display: 'flex', alignItems: 'center', gap: 4,
+                                        opacity: isHovered ? 1 : 0,
+                                        transition: 'opacity 0.15s ease',
+                                    }}>
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); router.push(`/workspace/${ws._id}/teams`); }}
+                                            title="Nhân sự"
+                                            style={{
+                                                width: 36, height: 36, borderRadius: 18,
+                                                background: 'transparent', border: 'none',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                cursor: 'pointer', color: '#5f6368',
+                                                transition: 'background 0.15s',
+                                            }}
+                                            onMouseEnter={e => e.currentTarget.style.background = '#e8eaed'}
+                                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                        >
+                                            <Users size={18} />
+                                        </button>
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); router.push(`/workspace/${ws._id}/settings`); }}
+                                            title="Cài đặt"
+                                            style={{
+                                                width: 36, height: 36, borderRadius: 18,
+                                                background: 'transparent', border: 'none',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                cursor: 'pointer', color: '#5f6368',
+                                                transition: 'background 0.15s',
+                                            }}
+                                            onMouseEnter={e => e.currentTarget.style.background = '#e8eaed'}
+                                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                        >
+                                            <Settings size={18} />
+                                        </button>
+                                        <ChevronRight size={20} color="#9aa0a6" style={{ marginLeft: 4 }} />
                                     </div>
                                 </div>
                             );
@@ -421,7 +341,7 @@ export default function WorkspacePage() {
                 )}
             </main>
 
-            {/* ─── Create Workspace Modal ─── */}
+            {/* ─── Create Modal — Apple-style clean sheet ─── */}
             <Modal
                 title={null}
                 open={showCreate}
@@ -429,101 +349,101 @@ export default function WorkspacePage() {
                 footer={null}
                 destroyOnClose
                 styles={{
-                    body: { padding: '28px 28px 24px' },
+                    body: { padding: '32px 32px 28px' },
                     header: { display: 'none' },
                 }}
-                width={480}
+                width={440}
             >
-                <div style={{ marginBottom: 24 }}>
+                <div style={{ marginBottom: 28 }}>
                     <div style={{
-                        display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8,
+                        width: 48, height: 48, borderRadius: 14,
+                        background: '#e8f0fe',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        marginBottom: 16,
                     }}>
-                        <div style={{
-                            width: 40, height: 40, borderRadius: 12,
-                            background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        }}>
-                            <MessageSquare size={18} color="#fff" />
-                        </div>
-                        <h2 style={{ fontSize: 20, fontWeight: 700, margin: 0, color: '#0f172a' }}>
-                            Tạo Workspace mới
-                        </h2>
+                        <Zap size={22} color="#1a73e8" strokeWidth={2} />
                     </div>
-                    <p style={{ fontSize: 14, color: '#64748b', margin: 0 }}>
+                    <h2 style={{
+                        fontSize: 20, fontWeight: 600, margin: '0 0 6px', color: '#202124',
+                        fontFamily: "'Google Sans', 'SF Pro Display', -apple-system, sans-serif",
+                    }}>
+                        Tạo workspace mới
+                    </h2>
+                    <p style={{ fontSize: 14, color: '#5f6368', margin: 0, lineHeight: 1.5 }}>
                         Thiết lập workspace để bắt đầu hỗ trợ khách hàng.
                     </p>
                 </div>
 
                 <Form form={form} layout="vertical" onFinish={handleCreate} requiredMark={false}>
                     <Form.Item
-                        label={<span style={{ fontWeight: 600, fontSize: 13, color: '#334155' }}>Tên workspace</span>}
+                        label={<span style={{ fontWeight: 500, fontSize: 13, color: '#202124' }}>Tên workspace</span>}
                         name="name"
-                        rules={[{ required: true, message: 'Vui lòng nhập tên workspace!' }]}
+                        rules={[{ required: true, message: 'Vui lòng nhập tên workspace' }]}
                     >
                         <Input
                             placeholder="VD: Công ty ABC"
                             onChange={handleNameChange}
-                            style={{ height: 42, borderRadius: 12, fontSize: 14 }}
+                            style={{ height: 44, borderRadius: 8, fontSize: 14, border: '1px solid #dadce0' }}
                         />
                     </Form.Item>
 
                     <Form.Item
-                        label={<span style={{ fontWeight: 600, fontSize: 13, color: '#334155' }}>Slug (URL)</span>}
+                        label={<span style={{ fontWeight: 500, fontSize: 13, color: '#202124' }}>Slug (URL)</span>}
                         name="slug"
                         rules={[
-                            { required: true, message: 'Vui lòng nhập slug!' },
-                            { pattern: /^[a-z0-9-]+$/, message: 'Slug chỉ chấp nhận chữ thường, số và dấu gạch ngang' }
+                            { required: true, message: 'Vui lòng nhập slug' },
+                            { pattern: /^[a-z0-9-]+$/, message: 'Chỉ chấp nhận chữ thường, số và dấu gạch ngang' }
                         ]}
                     >
                         <Input
                             placeholder="cong-ty-abc"
                             addonBefore="/"
-                            style={{ borderRadius: 12, fontSize: 14 }}
+                            style={{ borderRadius: 8, fontSize: 14 }}
                         />
                     </Form.Item>
 
                     <div style={{
-                        display: 'flex', justifyContent: 'flex-end', gap: 10,
+                        display: 'flex', justifyContent: 'flex-end', gap: 12,
                         marginTop: 28, paddingTop: 20,
-                        borderTop: '1px solid #f1f5f9',
+                        borderTop: '1px solid #e0e0e0',
                     }}>
-                        <Button
+                        <button
+                            type="button"
                             onClick={() => { setShowCreate(false); form.resetFields(); }}
-                            style={{ height: 42, borderRadius: 12, fontSize: 14, fontWeight: 500, padding: '0 20px' }}
+                            style={{
+                                height: 36, borderRadius: 18, padding: '0 20px',
+                                background: 'transparent', border: '1px solid #dadce0',
+                                color: '#1a73e8', fontSize: 14, fontWeight: 500,
+                                cursor: 'pointer', transition: 'background 0.15s',
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.background = '#e8f0fe'}
+                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                         >
                             Huỷ
-                        </Button>
+                        </button>
                         <button
-                            type="submit"
+                            type="button"
                             disabled={creating}
+                            onClick={() => form.submit()}
                             style={{
-                                height: 42, borderRadius: 12,
-                                background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                                border: 'none', color: '#fff',
-                                fontWeight: 600, fontSize: 14,
-                                padding: '0 24px',
+                                height: 36, borderRadius: 18, padding: '0 24px',
+                                background: '#1a73e8', border: 'none',
+                                color: '#fff', fontSize: 14, fontWeight: 500,
                                 cursor: creating ? 'not-allowed' : 'pointer',
                                 opacity: creating ? 0.7 : 1,
-                                boxShadow: '0 4px 14px rgba(99,102,241,0.25)',
                                 display: 'flex', alignItems: 'center', gap: 6,
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                                transition: 'background 0.15s',
                             }}
-                            onClick={() => form.submit()}
+                            onMouseEnter={e => { if (!creating) e.currentTarget.style.background = '#1765cc'; }}
+                            onMouseLeave={e => { if (!creating) e.currentTarget.style.background = '#1a73e8'; }}
                         >
-                            {creating ? <Spin size="small" /> : <Sparkles size={16} />}
+                            {creating && <Spin size="small" />}
                             Tạo workspace
                         </button>
                     </div>
                 </Form>
             </Modal>
-
-            {/* ─── Responsive: 1 col on small screens ─── */}
-            <style jsx>{`
-                @media (max-width: 768px) {
-                    main > div:last-of-type {
-                        grid-template-columns: 1fr !important;
-                    }
-                }
-            `}</style>
         </AppLayout>
     );
 }

@@ -177,6 +177,249 @@ function Header() {
 }
 
 /* ============================================
+   Hero Dashboard Mockup (Pure CSS/JSX)
+   ============================================ */
+function HeroDashboardMockup() {
+    const sidebarItems = [
+        { icon: MessageCircle, label: 'Inbox', active: true, badge: 3 },
+        { icon: Users, label: 'Visitors', active: false },
+        { icon: BarChart3, label: 'Analytics', active: false },
+        { icon: Settings, label: 'Settings', active: false },
+    ];
+
+    const messages = [
+        { from: 'visitor', text: 'Xin chào, tôi muốn hỏi về gói Professional', time: '14:02', delay: 0 },
+        { from: 'agent', text: 'Chào bạn! Mình sẵn sàng hỗ trợ. Gói Pro bao gồm 20 agents, widget tuỳ chỉnh đầy đủ 🎉', time: '14:02', delay: 0.3 },
+        { from: 'visitor', text: 'Có hỗ trợ tích hợp Zalo OA không?', time: '14:03', delay: 0.6 },
+        { from: 'agent', text: 'Có ạ! NemarChat hỗ trợ tích hợp Zalo OA, Facebook Messenger và nhiều kênh khác 💬', time: '14:03', delay: 0.9 },
+    ];
+
+    const mockupBase: React.CSSProperties = {
+        background: '#0f172a',
+        borderRadius: 'calc(var(--radius-xl) - 3px)',
+        display: 'grid',
+        gridTemplateColumns: '56px 1fr 220px',
+        height: 420,
+        overflow: 'hidden',
+        fontSize: 12,
+        fontFamily: 'var(--font-sans)',
+    };
+
+    return (
+        <div style={mockupBase}>
+            {/* === Sidebar === */}
+            <div style={{
+                background: '#1e293b',
+                borderRight: '1px solid rgba(255,255,255,0.06)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                paddingTop: 16,
+                gap: 4,
+            }}>
+                {/* Logo icon */}
+                <div style={{
+                    width: 32, height: 32, borderRadius: 8,
+                    background: 'var(--gradient-hero)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    marginBottom: 16,
+                }}>
+                    <MessageCircle size={14} color="white" />
+                </div>
+                {sidebarItems.map((item) => (
+                    <div
+                        key={item.label}
+                        style={{
+                            width: 40, height: 40,
+                            borderRadius: 10,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            position: 'relative',
+                            background: item.active ? 'rgba(99,102,241,0.15)' : 'transparent',
+                            color: item.active ? '#818cf8' : '#64748b',
+                            transition: 'all 0.2s',
+                        }}
+                    >
+                        <item.icon size={18} />
+                        {item.badge && (
+                            <div style={{
+                                position: 'absolute', top: 4, right: 4,
+                                width: 16, height: 16, borderRadius: '50%',
+                                background: '#ef4444', color: 'white',
+                                fontSize: 9, fontWeight: 700,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}>
+                                {item.badge}
+                            </div>
+                        )}
+                    </div>
+                ))}
+            </div>
+
+            {/* === Chat Area === */}
+            <div style={{
+                display: 'flex', flexDirection: 'column',
+                borderRight: '1px solid rgba(255,255,255,0.06)',
+            }}>
+                {/* Chat header */}
+                <div style={{
+                    padding: '14px 20px',
+                    borderBottom: '1px solid rgba(255,255,255,0.06)',
+                    display: 'flex', alignItems: 'center', gap: 10,
+                }}>
+                    <div style={{
+                        width: 32, height: 32, borderRadius: '50%',
+                        background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: 'white', fontSize: 13, fontWeight: 700,
+                    }}>K</div>
+                    <div>
+                        <div style={{ color: '#e2e8f0', fontWeight: 600, fontSize: 13 }}>Khách hàng #1024</div>
+                        <div style={{ color: '#22c55e', fontSize: 10, display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />
+                            Online
+                        </div>
+                    </div>
+                </div>
+
+                {/* Messages */}
+                <div style={{ flex: 1, padding: '16px 20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {messages.map((msg, i) => (
+                        <div
+                            key={i}
+                            className="hero-msg-bubble"
+                            style={{
+                                alignSelf: msg.from === 'agent' ? 'flex-end' : 'flex-start',
+                                maxWidth: '75%',
+                                padding: '8px 14px',
+                                borderRadius: msg.from === 'agent' ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
+                                background: msg.from === 'agent'
+                                    ? 'linear-gradient(135deg, #6366f1, #8b5cf6)'
+                                    : 'rgba(255,255,255,0.08)',
+                                color: msg.from === 'agent' ? 'white' : '#cbd5e1',
+                                fontSize: 12,
+                                lineHeight: 1.5,
+                                animationDelay: `${msg.delay + 0.5}s`,
+                            }}
+                        >
+                            {msg.text}
+                            <div style={{
+                                fontSize: 9, marginTop: 4,
+                                opacity: 0.6, textAlign: msg.from === 'agent' ? 'right' : 'left',
+                            }}>{msg.time}</div>
+                        </div>
+                    ))}
+
+                    {/* Typing indicator */}
+                    <div style={{
+                        alignSelf: 'flex-start',
+                        padding: '10px 16px',
+                        borderRadius: '14px 14px 14px 4px',
+                        background: 'rgba(255,255,255,0.08)',
+                        display: 'flex', gap: 4, alignItems: 'center',
+                        animation: 'fadeIn 0.3s ease-out forwards',
+                        animationDelay: '1.8s',
+                        opacity: 0,
+                    }}>
+                        <span className="typing-dot" style={{ animationDelay: '0s' }} />
+                        <span className="typing-dot" style={{ animationDelay: '0.15s' }} />
+                        <span className="typing-dot" style={{ animationDelay: '0.3s' }} />
+                    </div>
+                </div>
+
+                {/* Input bar */}
+                <div style={{
+                    padding: '12px 20px',
+                    borderTop: '1px solid rgba(255,255,255,0.06)',
+                    display: 'flex', alignItems: 'center', gap: 10,
+                }}>
+                    <div style={{
+                        flex: 1, padding: '8px 14px',
+                        borderRadius: 20, background: 'rgba(255,255,255,0.06)',
+                        color: '#64748b', fontSize: 12,
+                    }}>
+                        Nhập tin nhắn...
+                    </div>
+                    <div style={{
+                        width: 32, height: 32, borderRadius: '50%',
+                        background: 'var(--gradient-hero)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                        <ArrowRight size={14} color="white" />
+                    </div>
+                </div>
+            </div>
+
+            {/* === Right Panel — Visitor Profile === */}
+            <div className="hero-mockup-right" style={{
+                background: '#1e293b',
+                padding: '20px 16px',
+                display: 'flex', flexDirection: 'column', gap: 16,
+                overflowY: 'auto',
+            }}>
+                {/* Profile */}
+                <div style={{ textAlign: 'center' }}>
+                    <div style={{
+                        width: 48, height: 48, borderRadius: '50%',
+                        background: 'linear-gradient(135deg, #06b6d4, #8b5cf6)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        margin: '0 auto 8px', color: 'white', fontWeight: 700, fontSize: 18,
+                    }}>K</div>
+                    <div style={{ color: '#e2e8f0', fontWeight: 600, fontSize: 13 }}>Khách hàng #1024</div>
+                    <div style={{ color: '#64748b', fontSize: 11 }}>Hồ Chí Minh, VN</div>
+                </div>
+
+                {/* Details */}
+                <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 10, padding: 12 }}>
+                    <div style={{ color: '#94a3b8', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Thông tin</div>
+                    {[
+                        { label: 'Device', value: 'Chrome / Windows' },
+                        { label: 'Lần truy cập', value: '3 lần' },
+                        { label: 'Trang hiện tại', value: '/pricing' },
+                    ].map((d) => (
+                        <div key={d.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 11 }}>
+                            <span style={{ color: '#64748b' }}>{d.label}</span>
+                            <span style={{ color: '#cbd5e1', fontWeight: 500 }}>{d.value}</span>
+                        </div>
+                    ))}
+                </div>
+
+                {/* Tags */}
+                <div>
+                    <div style={{ color: '#94a3b8', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Tags</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                        {['VIP', 'Pricing', 'Potential'].map((tag) => (
+                            <span key={tag} style={{
+                                padding: '3px 8px', borderRadius: 6,
+                                background: tag === 'VIP' ? 'rgba(99,102,241,0.15)' : tag === 'Potential' ? 'rgba(34,197,94,0.15)' : 'rgba(6,182,212,0.15)',
+                                color: tag === 'VIP' ? '#818cf8' : tag === 'Potential' ? '#4ade80' : '#22d3ee',
+                                fontSize: 10, fontWeight: 600,
+                            }}>{tag}</span>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Activity Timeline */}
+                <div>
+                    <div style={{ color: '#94a3b8', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Hoạt động</div>
+                    {[
+                        { action: 'Xem trang /pricing', time: '2 phút trước' },
+                        { action: 'Bắt đầu chat', time: '1 phút trước' },
+                    ].map((a, i) => (
+                        <div key={i} style={{ display: 'flex', gap: 8, padding: '4px 0', alignItems: 'flex-start' }}>
+                            <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#6366f1', marginTop: 5, flexShrink: 0 }} />
+                            <div>
+                                <div style={{ color: '#cbd5e1', fontSize: 11 }}>{a.action}</div>
+                                <div style={{ color: '#475569', fontSize: 9 }}>{a.time}</div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+/* ============================================
    Hero Section
    ============================================ */
 function Hero() {
@@ -311,7 +554,7 @@ function Hero() {
                     ))}
                 </div>
 
-                {/* Hero Visual — Chat mockup */}
+                {/* Hero Visual — CSS Dashboard Mockup */}
                 <div
                     className="animate-fade-in-up animate-delay-5"
                     style={{
@@ -320,122 +563,34 @@ function Hero() {
                         background: 'var(--gradient-dark)',
                         padding: 3,
                         boxShadow: 'var(--shadow-xl), var(--shadow-glow)',
-                        maxWidth: 900,
+                        maxWidth: 960,
                         marginLeft: 'auto',
                         marginRight: 'auto',
+                        overflow: 'hidden',
                     }}
                 >
-                    <div
-                        style={{
-                            borderRadius: 'calc(var(--radius-xl) - 3px)',
-                            background: '#1e293b',
-                            padding: '20px 24px',
-                            minHeight: 400,
-                            display: 'flex',
-                            flexDirection: 'column',
-                        }}
-                    >
-                        {/* Dots */}
-                        <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
-                            <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#ef4444' }} />
-                            <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#eab308' }} />
-                            <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#22c55e' }} />
-                        </div>
-
-                        {/* Chat UI */}
-                        <div style={{ display: 'flex', flex: 1, gap: 16 }}>
-                            {/* Sidebar */}
-                            <div style={{ width: 220, borderRight: '1px solid #334155', paddingRight: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                <div style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', marginBottom: 8 }}>
-                                    Hội thoại
-                                </div>
-                                {[
-                                    { name: 'Nguyễn Minh Anh', msg: 'Tôi muốn hỏi về sản phẩm...', time: '2 phút', active: true },
-                                    { name: 'Trần Văn Hùng', msg: 'Cảm ơn bạn đã hỗ trợ!', time: '15 phút', active: false },
-                                    { name: 'Lê Thị Hương', msg: 'Cập nhật đơn hàng #2847', time: '1 giờ', active: false },
-                                ].map((item) => (
-                                    <div
-                                        key={item.name}
-                                        style={{
-                                            padding: '10px 12px',
-                                            borderRadius: 10,
-                                            background: item.active ? 'rgba(99,102,241,0.15)' : 'transparent',
-                                            cursor: 'pointer',
-                                        }}
-                                    >
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                            <span style={{ color: item.active ? '#818cf8' : '#e2e8f0', fontWeight: 600, fontSize: 13 }}>
-                                                {item.name}
-                                            </span>
-                                            <span style={{ color: '#64748b', fontSize: 11 }}>{item.time}</span>
-                                        </div>
-                                        <div style={{ color: '#64748b', fontSize: 12, marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                            {item.msg}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-
-                            {/* Chat area */}
-                            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 16, padding: '0 8px' }}>
-                                {[
-                                    { from: 'visitor', text: 'Xin chào, tôi muốn hỏi về gói Enterprise ạ 👋' },
-                                    { from: 'agent', text: 'Chào bạn Minh Anh! Rất vui được hỗ trợ. Gói Enterprise bao gồm tất cả tính năng từ Phase 0 đến Phase 18. Bạn cần tìm hiểu phần nào cụ thể ạ?' },
-                                    { from: 'visitor', text: 'Tôi quan tâm đến phần AI tự động trả lời và CSAT' },
-                                ].map((msg, i) => (
-                                    <div
-                                        key={i}
-                                        style={{
-                                            display: 'flex',
-                                            justifyContent: msg.from === 'agent' ? 'flex-start' : 'flex-end',
-                                        }}
-                                    >
-                                        <div
-                                            style={{
-                                                padding: '10px 16px',
-                                                borderRadius: 14,
-                                                maxWidth: '75%',
-                                                fontSize: 13,
-                                                lineHeight: 1.5,
-                                                ...(msg.from === 'agent'
-                                                    ? { background: '#334155', color: '#e2e8f0' }
-                                                    : { background: 'var(--color-primary)', color: 'white' }),
-                                            }}
-                                        >
-                                            {msg.text}
-                                        </div>
-                                    </div>
-                                ))}
-
-                                {/* Typing indicator */}
-                                <div style={{ display: 'flex' }}>
-                                    <div
-                                        style={{
-                                            padding: '10px 16px',
-                                            borderRadius: 14,
-                                            background: '#334155',
-                                            display: 'flex',
-                                            gap: 4,
-                                        }}
-                                    >
-                                        {[0, 1, 2].map((i) => (
-                                            <div
-                                                key={i}
-                                                style={{
-                                                    width: 6,
-                                                    height: 6,
-                                                    borderRadius: '50%',
-                                                    background: '#64748b',
-                                                    animation: `float 1.4s ease-in-out infinite`,
-                                                    animationDelay: `${i * 0.2}s`,
-                                                }}
-                                            />
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
+                    {/* Browser chrome dots */}
+                    <div style={{
+                        padding: '10px 16px',
+                        display: 'flex',
+                        gap: 8,
+                        background: '#0f172a',
+                        borderRadius: 'calc(var(--radius-xl) - 3px) calc(var(--radius-xl) - 3px) 0 0',
+                    }}>
+                        <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#ef4444' }} />
+                        <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#eab308' }} />
+                        <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#22c55e' }} />
+                        <div style={{
+                            flex: 1, marginLeft: 16,
+                            background: 'rgba(255,255,255,0.06)',
+                            borderRadius: 6, padding: '3px 12px',
+                            color: '#475569', fontSize: 11,
+                            display: 'flex', alignItems: 'center',
+                        }}>
+                            app.nemarkchat.com/inbox
                         </div>
                     </div>
+                    <HeroDashboardMockup />
                 </div>
             </div>
         </section>
@@ -450,6 +605,7 @@ interface FeatureItem {
     title: string;
     desc: string;
     iconClass: string;
+    image: string;
 }
 
 const features: FeatureItem[] = [
@@ -458,36 +614,42 @@ const features: FeatureItem[] = [
         title: 'Chat Realtime',
         desc: 'Tin nhắn gửi-nhận tức thì qua WebSocket. Typing indicator, read receipt, delivered — đầy đủ như Messenger.',
         iconClass: 'card-icon-primary',
+        image: '/images/feature-realtime.png',
     },
     {
         icon: Globe,
         title: 'Widget nhúng dễ dàng',
         desc: 'Chỉ cần 1 dòng script. Widget tự động tải config, pre-chat form, business hours, và giao diện tuỳ chỉnh.',
         iconClass: 'card-icon-accent',
+        image: '/images/feature-widget.png',
     },
     {
         icon: Users,
         title: 'Quản lý Team & RBAC',
         desc: 'Phân quyền chi tiết theo Role → Permission → Scope. Hỗ trợ multi-workspace, invite, assign, transfer.',
         iconClass: 'card-icon-violet',
+        image: '/images/feature-team.png',
     },
     {
         icon: Shield,
         title: 'Bảo mật Enterprise',
         desc: 'Rate limit, anti-spam, audit log, GDPR compliance, soft delete & retention policy, DSAR request.',
         iconClass: 'card-icon-primary',
+        image: '/images/feature-security.png',
     },
     {
         icon: Bot,
         title: 'AI & Tự động hoá',
         desc: 'Chatbot AI với RAG, auto-reply thông minh, confidence threshold, và tự động handover sang agent.',
         iconClass: 'card-icon-accent',
+        image: '/images/feature-ai.png',
     },
     {
         icon: BarChart3,
         title: 'Analytics & CSAT',
         desc: 'Đo lường hiệu suất team, khảo sát CSAT sau mỗi hội thoại, báo cáo chi tiết realtime.',
         iconClass: 'card-icon-violet',
+        image: '/images/feature-analytics.png',
     },
 ];
 
@@ -526,17 +688,62 @@ function Features() {
                         gap: 24,
                     }}
                 >
-                    {features.map((item, i) => (
-                        <div key={item.title} className="card" style={{ animationDelay: `${i * 0.1}s` }}>
-                            <div className={`card-icon ${item.iconClass}`}>
-                                <item.icon size={24} />
+                    {features.map((item, i) => {
+                        const gradients: Record<string, string> = {
+                            'card-icon-primary': 'linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(99,102,241,0.18) 100%)',
+                            'card-icon-accent': 'linear-gradient(135deg, rgba(6,182,212,0.08) 0%, rgba(6,182,212,0.18) 100%)',
+                            'card-icon-violet': 'linear-gradient(135deg, rgba(139,92,246,0.08) 0%, rgba(139,92,246,0.18) 100%)',
+                        };
+                        const glowColors: Record<string, string> = {
+                            'card-icon-primary': 'rgba(99,102,241,0.3)',
+                            'card-icon-accent': 'rgba(6,182,212,0.3)',
+                            'card-icon-violet': 'rgba(139,92,246,0.3)',
+                        };
+                        return (
+                            <div key={item.title} className="card" style={{ animationDelay: `${i * 0.1}s`, overflow: 'hidden', padding: 0 }}>
+                                <div style={{
+                                    height: 160,
+                                    overflow: 'hidden',
+                                    background: gradients[item.iconClass] || gradients['card-icon-primary'],
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    position: 'relative',
+                                }}>
+                                    {/* Decorative circles */}
+                                    <div style={{
+                                        position: 'absolute', top: -30, right: -30,
+                                        width: 100, height: 100, borderRadius: '50%',
+                                        background: glowColors[item.iconClass] || glowColors['card-icon-primary'],
+                                        filter: 'blur(30px)', opacity: 0.5,
+                                    }} />
+                                    <div style={{
+                                        position: 'absolute', bottom: -20, left: -20,
+                                        width: 80, height: 80, borderRadius: '50%',
+                                        background: glowColors[item.iconClass] || glowColors['card-icon-primary'],
+                                        filter: 'blur(25px)', opacity: 0.3,
+                                    }} />
+                                    {/* Large icon */}
+                                    <div className="feature-icon-hero" style={{
+                                        width: 72, height: 72, borderRadius: 18,
+                                        background: 'white',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        boxShadow: `0 8px 30px ${glowColors[item.iconClass] || glowColors['card-icon-primary']}`,
+                                        transition: 'transform 0.4s ease, box-shadow 0.4s ease',
+                                        position: 'relative', zIndex: 1,
+                                    }}>
+                                        <item.icon size={32} color={item.iconClass === 'card-icon-accent' ? '#06b6d4' : item.iconClass === 'card-icon-violet' ? '#8b5cf6' : '#6366f1'} />
+                                    </div>
+                                </div>
+                                <div style={{ padding: '24px' }}>
+                                    <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>{item.title}</h3>
+                                    <p style={{ color: 'var(--color-text-secondary)', fontSize: 14, lineHeight: 1.7 }}>
+                                        {item.desc}
+                                    </p>
+                                </div>
                             </div>
-                            <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>{item.title}</h3>
-                            <p style={{ color: 'var(--color-text-secondary)', fontSize: 14, lineHeight: 1.7 }}>
-                                {item.desc}
-                            </p>
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
             </div>
         </AnimatedSection>
@@ -1247,6 +1454,15 @@ export default function HomePage() {
                     content="NemarChat giúp doanh nghiệp quản lý hội thoại đa kênh, phân quyền team linh hoạt, và tự động hoá hỗ trợ khách hàng."
                 />
                 <meta name="viewport" content="width=device-width, initial-scale=1" />
+                <link rel="icon" href="/images/favicon.png" type="image/png" />
+                <meta property="og:title" content="NemarChat — Nền tảng Live Chat thế hệ mới" />
+                <meta property="og:description" content="NemarChat giúp doanh nghiệp quản lý hội thoại đa kênh, phân quyền team linh hoạt, và tự động hoá hỗ trợ khách hàng." />
+                <meta property="og:image" content="/images/og-image.png" />
+                <meta property="og:type" content="website" />
+                <meta name="twitter:card" content="summary_large_image" />
+                <meta name="twitter:title" content="NemarChat — Nền tảng Live Chat thế hệ mới" />
+                <meta name="twitter:description" content="Hệ thống live chat thông minh cho doanh nghiệp" />
+                <meta name="twitter:image" content="/images/og-image.png" />
             </Head>
 
             <Header />

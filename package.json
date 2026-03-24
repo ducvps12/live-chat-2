@@ -7,9 +7,9 @@
     "dev:server": "tsx watch src/bootstrap/index.ts",
     "dev": "concurrently \"npm run dev:next\" \"npm run dev:server\"",
     "build": "next build",
-    "start": "next start",
+    "start": "node --import tsx src/bootstrap/production.ts",
     "start:server": "node --import tsx src/bootstrap/index.ts",
-    "start:prod": "concurrently \"next start -p 3020\" \"npm run start:server\"",
+    "start:prod": "node --import tsx src/bootstrap/production.ts",
     "lint": "eslint"
   },
   "dependencies": {

@@ -30,15 +30,16 @@ export const zaloController = {
     }),
 
     /**
-     * Hủy kết nối
+     * Hủy kết nối (1 account hoặc tất cả)
      */
     disconnect: asyncHandler(async (req: Request, res: Response) => {
         const workspaceId = req.params.workspaceId as string;
-        await zaloService.disconnect(workspaceId);
+        const accountId = req.body?.accountId || req.query?.accountId as string;
+        await zaloService.disconnect(workspaceId, accountId);
 
         res.status(200).json({
             success: true,
-            message: 'Đã huỷ kết nối Zalo'
+            message: accountId ? 'Đã huỷ kết nối tài khoản Zalo' : 'Đã huỷ kết nối toàn bộ Zalo'
         });
     }),
 
@@ -235,6 +236,47 @@ export const zaloController = {
         res.status(200).json({
             success: true,
             data: summaries
+        });
+    }),
+
+    // ══════════════════════════════════════
+    // HISTORICAL SYNC
+    // ══════════════════════════════════════
+
+    /**
+     * Bắt đầu đồng bộ toàn bộ lịch sử Zalo
+     * POST /api/v1/workspaces/:workspaceId/zalo/sync
+     */
+    startSync: asyncHandler(async (req: Request, res: Response) => {
+        const workspaceId = req.params.workspaceId as string;
+        const result = await zaloService.syncAllHistory(workspaceId);
+
+        res.status(200).json({
+            success: true,
+            data: result,
+            message: 'Đã bắt đầu đồng bộ lịch sử. Dùng GET /sync/status để theo dõi tiến trình.'
+        });
+    }),
+
+    /**
+     * Lấy trạng thái sync hiện tại
+     * GET /api/v1/workspaces/:workspaceId/zalo/sync/status
+     */
+    getSyncStatus: asyncHandler(async (req: Request, res: Response) => {
+        const workspaceId = req.params.workspaceId as string;
+        const status = zaloService.getSyncStatus(workspaceId);
+
+        if (!status) {
+            res.status(200).json({
+                success: true,
+                data: { status: 'idle', message: 'Chưa có tiến trình đồng bộ nào.' }
+            });
+            return;
+        }
+
+        res.status(200).json({
+            success: true,
+            data: status
         });
     }),
 };

@@ -201,6 +201,9 @@ export default function InboxPage() {
 
     // Refs
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const messagesContainerRef = useRef<HTMLDivElement>(null);
+    const isAtBottomRef = useRef(true);
+    const [newMsgCount, setNewMsgCount] = useState(0);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const socketRef = useRef<Socket | null>(null);
     const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -360,10 +363,48 @@ export default function InboxPage() {
         }
     }, [selectedConvId, fetchMessages, workspaceId, router]);
 
-    // ── Auto-scroll ──
+    // ── Smart auto-scroll (only when user is at bottom) ──
+    const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+        messagesEndRef.current?.scrollIntoView({ behavior });
+        setNewMsgCount(0);
+    }, []);
+
+    const handleMessagesScroll = useCallback(() => {
+        const el = messagesContainerRef.current;
+        if (!el) return;
+        // Consider "at bottom" if within 80px of the bottom
+        const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        isAtBottomRef.current = atBottom;
+        if (atBottom) setNewMsgCount(0);
+    }, []);
+
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages, typingVisitor]);
+        if (isAtBottomRef.current) {
+            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        } else {
+            // Count new messages while scrolled up (only from non-self senders)
+            const lastMsg = messages[messages.length - 1];
+            if (lastMsg && lastMsg.sender?.type === 'visitor') {
+                setNewMsgCount(prev => prev + 1);
+            }
+        }
+    }, [messages]);
+
+    // Always scroll on typing indicator (lightweight)
+    useEffect(() => {
+        if (typingVisitor && isAtBottomRef.current) {
+            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }
+    }, [typingVisitor]);
+
+    // Scroll to bottom when switching conversations
+    useEffect(() => {
+        if (selectedConvId) {
+            isAtBottomRef.current = true;
+            setNewMsgCount(0);
+            setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'auto' }), 100);
+        }
+    }, [selectedConvId]);
 
     // ── Socket.IO connection ──
     useEffect(() => {
@@ -912,6 +953,12 @@ export default function InboxPage() {
             setConversations((prev) =>
                 prev.map((c) => c._id === convId ? { ...c, tags: [...(c.tags || []), tag] } : c)
             );
+            // Auto-register tag in workspace tags registry for future suggestions
+            if (!workspaceTags.includes(tag)) {
+                httpClient.post(`/workspaces/${workspaceId}/tags`, { tag })
+                    .then(() => setWorkspaceTags(prev => [...prev, tag]))
+                    .catch(() => { /* silent - tag registry is best-effort */ });
+            }
         } catch { message.error('Lỗi khi gắn tag'); }
     };
 
@@ -1162,12 +1209,21 @@ export default function InboxPage() {
                 <title>Inbox | NemarChat</title>
             </Head>
 
+            <style>{`
+                @media (min-width: 769px) {
+                    .inbox-sidebar { display: flex !important; flex-direction: column; }
+                    .inbox-chat-panel { display: flex !important; flex-direction: column; }
+                }
+                @media (max-width: 768px) {
+                    .inbox-sidebar.conv-selected { display: none !important; }
+                    .inbox-chat-panel:not(.conv-selected) { display: none !important; }
+                }
+            `}</style>
             <div style={styles.container}>
                 {/* ── Sidebar: Conversation List ── */}
-                <div style={{
-                    ...styles.sidebar,
-                    ...(selectedConvId ? { display: 'none' } : {}),
-                }} className="inbox-sidebar">
+                <div style={styles.sidebar}
+                    className={`inbox-sidebar${selectedConvId ? ' conv-selected' : ''}`}
+                >
                     {/* Header */}
                     <div style={styles.sidebarHeader}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1289,7 +1345,23 @@ export default function InboxPage() {
                                     onClick={() => setSelectedConvId(conv._id)}
                                 >
                                     <div style={styles.convAvatar}>
-                                        <User size={18} color="#6366f1" />
+                                        {conv.visitorInfo?.avatar ? (
+                                            <img
+                                                src={conv.visitorInfo.avatar}
+                                                alt=""
+                                                style={{ width: 42, height: 42, borderRadius: 14, objectFit: 'cover' }}
+                                                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling && ((e.target as HTMLImageElement).nextElementSibling as HTMLElement).style.removeProperty('display'); }}
+                                            />
+                                        ) : null}
+                                        <span style={{
+                                            display: conv.visitorInfo?.avatar ? 'none' : 'flex',
+                                            width: 42, height: 42, borderRadius: 14,
+                                            alignItems: 'center', justifyContent: 'center',
+                                            background: `hsl(${(visitorName(conv).charCodeAt(0) * 37) % 360}, 55%, 55%)`,
+                                            color: '#fff', fontWeight: 700, fontSize: 16,
+                                        }}>
+                                            {visitorName(conv).charAt(0).toUpperCase()}
+                                        </span>
                                     </div>
                                     <div style={{ flex: 1, minWidth: 0 }}>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1341,10 +1413,9 @@ export default function InboxPage() {
                 </div>
 
                 {/* ── Chat Panel ── */}
-                <div style={{
-                    ...styles.chatPanel,
-                    ...(selectedConvId ? {} : { display: 'none' }),
-                }} className="inbox-chat-panel">
+                <div style={styles.chatPanel}
+                    className={`inbox-chat-panel${selectedConvId ? ' conv-selected' : ''}`}
+                >
                     {selectedConvId && selectedConv ? (
                         <>
                             {/* Chat header */}
@@ -1358,7 +1429,22 @@ export default function InboxPage() {
                                     />
                                     <div style={{ position: 'relative' }}>
                                         <div style={styles.chatAvatar}>
-                                            <User size={18} color="#fff" />
+                                            {selectedConv.visitorInfo?.avatar ? (
+                                                <img
+                                                    src={selectedConv.visitorInfo.avatar}
+                                                    alt=""
+                                                    style={{ width: 38, height: 38, borderRadius: 14, objectFit: 'cover' }}
+                                                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling && ((e.target as HTMLImageElement).nextElementSibling as HTMLElement).style.removeProperty('display'); }}
+                                                />
+                                            ) : null}
+                                            <span style={{
+                                                display: selectedConv.visitorInfo?.avatar ? 'none' : 'flex',
+                                                width: 38, height: 38, borderRadius: 14,
+                                                alignItems: 'center', justifyContent: 'center',
+                                                color: '#fff', fontWeight: 700, fontSize: 15,
+                                            }}>
+                                                {visitorName(selectedConv).charAt(0).toUpperCase()}
+                                            </span>
                                         </div>
                                         {/* Visitor presence dot */}
                                         <span style={{
@@ -1522,7 +1608,7 @@ export default function InboxPage() {
                             </div>
 
                             {/* Messages */}
-                            <div style={styles.messagesArea}>
+                            <div ref={messagesContainerRef} onScroll={handleMessagesScroll} style={styles.messagesArea}>
                                 {loadingMsgs ? (
                                     <div style={{ textAlign: 'center', padding: 60 }}><Spin /></div>
                                 ) : messages.length === 0 ? (
@@ -1736,6 +1822,35 @@ export default function InboxPage() {
                                     </div>
                                 )}
                                 <div ref={messagesEndRef} />
+                                {/* Floating "New messages" button when scrolled up */}
+                                {newMsgCount > 0 && (
+                                    <div
+                                        onClick={() => scrollToBottom('smooth')}
+                                        style={{
+                                            position: 'sticky',
+                                            bottom: 8,
+                                            left: '50%',
+                                            transform: 'translateX(-50%)',
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: 6,
+                                            padding: '8px 16px',
+                                            borderRadius: 20,
+                                            background: 'var(--color-primary, #6366f1)',
+                                            color: '#fff',
+                                            fontSize: 13,
+                                            fontWeight: 600,
+                                            cursor: 'pointer',
+                                            boxShadow: '0 4px 16px rgba(99, 102, 241, 0.35)',
+                                            zIndex: 10,
+                                            transition: 'all 0.2s ease',
+                                            width: 'fit-content',
+                                            margin: '0 auto',
+                                        }}
+                                    >
+                                        ↓ {newMsgCount} tin nhắn mới
+                                    </div>
+                                )}
                             </div>
 
                             {/* Input area */}
@@ -1889,18 +2004,19 @@ export default function InboxPage() {
                                         icon={<Send size={16} />}
                                         onClick={handleSend}
                                         loading={sending}
-                                        style={{ borderRadius: 20, background: '#6366f1', border: 'none' }}
+                                        style={{ borderRadius: 20, background: 'var(--gradient-primary, #6366f1)', border: 'none', boxShadow: '0 4px 12px rgba(99, 102, 241, 0.3)' }}
                                     />
                                 </div>
                                 </div>
                             )}
                         </>
                     ) : (
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#bbb' }}>
-                            <div style={{ textAlign: 'center' }}>
-                                <MessageSquare size={48} color="#ddd" />
-                                <p style={{ marginTop: 12 }}>Chọn một cuộc hội thoại để bắt đầu</p>
+                        <div className="empty-state" style={{ height: '100%' }}>
+                            <div className="empty-state-icon" style={{ width: 96, height: 96, borderRadius: 28 }}>
+                                <MessageSquare size={40} strokeWidth={1.5} />
                             </div>
+                            <div className="empty-state-title" style={{ fontSize: 20 }}>Chọn cuộc hội thoại</div>
+                            <div className="empty-state-desc">Chọn một cuộc trò chuyện từ danh sách bên trái để xem và trả lời tin nhắn</div>
                         </div>
                     )}
                 </div>
@@ -1966,29 +2082,31 @@ const styles: Record<string, React.CSSProperties> = {
         position: 'absolute',
         inset: 0,
         display: 'flex',
-        background: '#f1f5f9',
+        background: 'var(--color-bg-muted, #f1f5f9)',
         overflow: 'hidden',
-        fontFamily: "'Inter', -apple-system, sans-serif",
+        fontFamily: "var(--font-sans, 'Inter', -apple-system, sans-serif)",
     },
     // Sidebar
     sidebar: {
-        width: 300,
-        background: '#f8fafc',
-        borderRight: '1px solid #e2e8f0',
+        width: 360,
+        background: 'var(--color-bg, #fff)',
+        borderRight: '1px solid var(--color-border, #e2e8f0)',
         display: 'flex',
         flexDirection: 'column',
         flexShrink: 0,
     },
     sidebarHeader: {
-        padding: '14px 16px',
-        borderBottom: '1px solid #f0f0f0',
+        padding: '16px 20px',
+        borderBottom: '1px solid var(--color-border, #e2e8f0)',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
+        background: 'var(--color-bg, #fff)',
     },
     searchArea: {
-        padding: '10px 16px',
-        borderBottom: '1px solid #f0f0f0',
+        padding: '12px 20px',
+        borderBottom: '1px solid var(--color-border-light, #f1f5f9)',
+        background: 'var(--color-bg, #fff)',
     },
     convList: {
         flex: 1,
@@ -1998,20 +2116,20 @@ const styles: Record<string, React.CSSProperties> = {
     convItem: {
         display: 'flex',
         gap: 12,
-        padding: '12px 16px',
+        padding: '14px 20px',
         cursor: 'pointer',
-        borderBottom: '1px solid #fafafa',
-        transition: 'background .15s',
+        borderBottom: '1px solid var(--color-border-light, #f8fafc)',
+        transition: 'all .15s ease',
     },
     convItemActive: {
-        background: '#f0f0ff',
-        borderLeft: '3px solid #6366f1',
+        background: 'var(--color-primary-bg, #eef2ff)',
+        borderLeft: '3px solid var(--color-primary, #6366f1)',
     },
     convAvatar: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        background: '#f0f0ff',
+        width: 42,
+        height: 42,
+        borderRadius: 14,
+        background: 'linear-gradient(135deg, var(--color-primary-50, #eef2ff) 0%, #f5f3ff 100%)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -2019,105 +2137,108 @@ const styles: Record<string, React.CSSProperties> = {
     },
     convName: {
         fontWeight: 600,
-        fontSize: 13,
-        color: '#222',
+        fontSize: 14,
+        color: 'var(--color-text, #0f172a)',
     },
     convTime: {
         fontSize: 11,
-        color: '#999',
+        color: 'var(--color-text-muted, #94a3b8)',
     },
     convPreview: {
-        fontSize: 12,
-        color: '#888',
+        fontSize: 13,
+        color: 'var(--color-text-secondary, #475569)',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap' as const,
-        maxWidth: 180,
+        maxWidth: 220,
     },
     // Chat panel
     chatPanel: {
         flex: 1,
         display: 'flex',
         flexDirection: 'column',
-        background: '#ffffff',
-        boxShadow: '-2px 0 8px rgba(0,0,0,0.02), 2px 0 8px rgba(0,0,0,0.02)',
+        background: 'var(--color-bg, #fff)',
+        boxShadow: '-1px 0 4px rgba(0,0,0,0.02)',
         zIndex: 1,
         minWidth: 0,
         minHeight: 0,
     },
     chatHeader: {
-        padding: '16px 20px',
-        background: '#ffffff',
-        borderBottom: '1px solid #e2e8f0',
+        padding: '16px 24px',
+        background: 'rgba(255, 255, 255, 0.9)',
+        backdropFilter: 'blur(12px)',
+        borderBottom: '1px solid var(--color-border, #e2e8f0)',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
     },
     chatAvatar: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        background: '#6366f1',
+        width: 38,
+        height: 38,
+        borderRadius: 14,
+        background: 'var(--gradient-primary, #6366f1)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
+        boxShadow: '0 4px 12px rgba(99, 102, 241, 0.2)',
     },
     messagesArea: {
         flex: 1,
         overflowY: 'auto' as const,
-        padding: '16px 20px',
+        padding: '20px 24px',
         minHeight: 0,
+        background: 'var(--color-bg-soft, #f8fafc)',
     },
     msgRow: {
         display: 'flex',
-        marginBottom: 8,
+        marginBottom: 10,
     },
     msgBubble: {
         maxWidth: '70%',
-        padding: '10px 14px',
-        borderRadius: 14,
-        fontSize: 13,
-        lineHeight: 1.5,
+        padding: '12px 16px',
+        borderRadius: 18,
+        fontSize: 14,
+        lineHeight: 1.55,
         wordBreak: 'break-word' as const,
     },
     msgAgent: {
-        background: 'var(--gradient-hero)',
+        background: 'var(--gradient-primary, #6366f1)',
         color: '#fff',
-        borderBottomRightRadius: 4,
-        boxShadow: '0 2px 6px rgba(99, 102, 241, 0.2)',
+        borderBottomRightRadius: 6,
+        boxShadow: '0 2px 8px rgba(99, 102, 241, 0.2)',
     },
     msgVisitor: {
-        background: '#fff',
-        border: '1px solid #e2e8f0',
-        color: '#1e293b',
-        borderBottomLeftRadius: 4,
-        boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
+        background: 'var(--color-bg, #fff)',
+        border: '1px solid var(--color-border, #e2e8f0)',
+        color: 'var(--color-text, #1e293b)',
+        borderBottomLeftRadius: 6,
+        boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
     },
     systemMsg: {
         textAlign: 'center' as const,
-        color: '#999',
+        color: 'var(--color-text-muted, #94a3b8)',
         fontSize: 12,
-        padding: '6px 0',
+        padding: '8px 0',
     },
     msgTime: {
         fontSize: 10,
-        opacity: 0.7,
+        opacity: 0.65,
         marginTop: 4,
         textAlign: 'right' as const,
     },
     msgImage: {
-        maxWidth: 220,
-        borderRadius: 8,
+        maxWidth: 240,
+        borderRadius: 12,
         cursor: 'pointer',
     },
     fileLink: {
-        color: '#6366f1',
+        color: 'var(--color-primary, #6366f1)',
         textDecoration: 'underline',
     },
     inputArea: {
-        padding: '16px 20px',
-        background: '#ffffff',
-        borderTop: '1px solid #e2e8f0',
+        padding: '16px 24px',
+        background: 'var(--color-bg, #fff)',
+        borderTop: '1px solid var(--color-border, #e2e8f0)',
         display: 'flex',
         gap: 12,
         alignItems: 'center',
@@ -2125,19 +2246,20 @@ const styles: Record<string, React.CSSProperties> = {
     textInput: {
         flex: 1,
         padding: '12px 20px',
-        border: '1px solid #cbd5e1',
+        border: '1.5px solid var(--color-border, #cbd5e1)',
         borderRadius: 24,
         fontSize: 14,
         outline: 'none',
         transition: 'all .2s',
         boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.02)',
+        background: 'var(--color-bg-soft, #f8fafc)',
     },
     closedBanner: {
-        padding: '14px 20px',
-        background: '#f5f5f5',
-        borderTop: '1px solid #e8e8e8',
+        padding: '16px 24px',
+        background: 'var(--color-bg-soft, #f8fafc)',
+        borderTop: '1px solid var(--color-border, #e2e8f0)',
         textAlign: 'center' as const,
-        color: '#999',
+        color: 'var(--color-text-muted, #94a3b8)',
         fontSize: 13,
     },
 };
