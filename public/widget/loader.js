@@ -446,46 +446,43 @@
             '#nchat-window{position:fixed;' + winPos + 'width:370px;max-width:calc(100vw - 24px);height:520px;max-height:min(520px,calc(100vh - 120px));border-radius:16px;overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,0.15),0 2px 8px rgba(0,0,0,0.06);z-index:2147483647;background:#fff;opacity:0;pointer-events:none;transition:all .3s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column}',
             '#nchat-window.nchat-open{transform:' + (isSide ? 'translateY(-50%)' : 'translateY(0)') + ' scale(1);opacity:1;pointer-events:auto}',
 
-            // ── Header (Subiz-inspired gradient with avatar) ──
-            '#nchat-hdr{background:' + bgVal + ';padding:18px 16px 16px;color:#fff;position:relative;flex-shrink:0}',
-            '#nchat-hdr-inner{display:flex;align-items:center;gap:12px}',
-            '#nchat-hdr-avatar{width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden;border:2px solid rgba(255,255,255,.3)}',
+            // ── Header (Premium Design) ──
+            '#nchat-hdr{background:linear-gradient(135deg, ' + color + ', ' + color + 'E6);padding:24px 20px 20px;color:#fff;position:relative;flex-shrink:0}',
+            '#nchat-hdr::after{content:"";position:absolute;top:0;left:0;right:0;bottom:0;background:url("data:image/svg+xml,%3Csvg width=\'100\' height=\'100\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cpath d=\'M0 0h100v100H0z\' fill=\'none\'/%3E%3Cpath fill=\'rgba(255,255,255,0.03)\' d=\'M0 100l50-50 50 50zM0 0l50 50 50-50z\'/%3E%3C/svg%3E") 0 0/200px 200px;opacity:0.6}',
+            '#nchat-hdr-inner{display:flex;align-items:center;gap:14px;position:relative;z-index:1}',
+            '#nchat-hdr-avatar{width:48px;height:48px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden;border:2px solid rgba(255,255,255,.4);box-shadow:0 4px 12px rgba(0,0,0,0.1)}',
             '#nchat-hdr-avatar img{width:100%;height:100%;object-fit:cover}',
-            '#nchat-hdr-avatar svg{width:22px;height:22px;fill:rgba(255,255,255,.8)}',
+            '#nchat-hdr-avatar svg{width:26px;height:26px;fill:rgba(255,255,255,.9)}',
             '#nchat-hdr-text{flex:1;min-width:0}',
-            '#nchat-hdr h4{margin:0;font-size:15px;font-weight:700;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-            '#nchat-hdr p{margin:2px 0 0;font-size:12px;opacity:.85;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-            '#nchat-hdr-close{position:absolute;top:16px;right:14px;background:rgba(255,255,255,.12);border:none;color:#fff;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;transition:background .2s;line-height:1}',
-            '#nchat-hdr-close:hover{background:rgba(255,255,255,.25)}',
+            '#nchat-hdr h4{margin:0;font-size:16px;font-weight:700;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+            '#nchat-hdr p{margin:4px 0 0;font-size:13px;opacity:.9;line-height:1.4;white-space:normal;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}',
+            '#nchat-hdr-close{position:absolute;top:16px;right:16px;background:rgba(255,255,255,.15);border:none;color:#fff;width:28px;height:28px;border-radius:50%;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;transition:all .2s;line-height:1;z-index:2}',
+            '#nchat-hdr-close:hover{background:rgba(255,255,255,.3);transform:rotate(90deg)}',
             '#nchat-hdr-close svg{width:16px;height:16px;fill:currentColor}',
-
-            // Online indicator in header
-            '.nchat-online{display:inline-flex;align-items:center;gap:5px;font-size:11px;margin-top:4px;opacity:.9}',
-            '.nchat-online-dot{width:7px;height:7px;border-radius:50%;background:#4ade80;display:inline-block;animation:nchat-pulse 2s infinite}',
+            '.nchat-online{display:inline-flex;align-items:center;gap:6px;font-size:12px;margin-top:6px;opacity:1;font-weight:500;background:rgba(0,0,0,0.1);padding:4px 10px;border-radius:12px}',
+            '.nchat-online-dot{width:8px;height:8px;border-radius:50%;background:#4ade80;display:inline-block;animation:nchat-pulse 2s infinite}',
             '@keyframes nchat-pulse{0%,100%{opacity:1}50%{opacity:.4}}',
-            '.nchat-offline-dot{width:7px;height:7px;border-radius:50%;background:#ef4444;display:inline-block}',
-
-            // Back button
+            '.nchat-offline-dot{width:8px;height:8px;border-radius:50%;background:#fca5a5;display:inline-block}',
             '#nchat-hdr-left{display:flex;align-items:center;gap:8px}',
-            '#nchat-hdr-back{background:transparent;border:none;color:#fff;width:28px;height:28px;border-radius:50%;cursor:pointer;display:none;align-items:center;justify-content:center;margin-left:-4px;transition:background 0.2s;flex-shrink:0}',
-            '#nchat-hdr-back:hover{background:rgba(255,255,255,.2)}',
-            '#nchat-hdr-back svg{width:20px;height:20px;fill:currentColor}',
+            '#nchat-hdr-back{background:transparent;border:none;color:#fff;width:32px;height:32px;border-radius:50%;cursor:pointer;display:none;align-items:center;justify-content:center;margin-left:-8px;transition:background 0.2s;flex-shrink:0}',
+            '#nchat-hdr-back:hover{background:rgba(255,255,255,.25)}',
+            '#nchat-hdr-back svg{width:22px;height:22px;fill:currentColor}',
             '#nchat-window.show-chat.has-list #nchat-hdr-back{display:flex}',
 
-            // ── List View ──
-            '#nchat-list-view{flex:1;overflow-y:auto;background:#f8f9fb;display:none;flex-direction:column;position:relative}',
-            '.nchat-list-items{flex:1;overflow-y:auto;padding:12px}',
-            '.nchat-list-item{background:#fff;border-radius:12px;padding:12px;margin-bottom:8px;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.04);border:1px solid #f0f0f0;transition:all 0.2s;display:flex;align-items:center;gap:12px}',
-            '.nchat-list-item:hover{border-color:' + color + ';box-shadow:0 2px 8px rgba(0,0,0,0.08);transform:translateY(-1px)}',
-            '.nchat-list-avatar{width:40px;height:40px;border-radius:50%;background:' + bgVal + ';color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;flex-shrink:0}',
-            '.nchat-list-info{flex:1;min-width:0}',
-            '.nchat-list-name{font-size:14px;font-weight:600;color:#1a1a2e;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-            '.nchat-list-msg{font-size:12px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-            '.nchat-list-time{font-size:11px;color:#94a3b8;flex-shrink:0}',
-            '.nchat-list-footer{padding:12px;background:#fff;border-top:1px solid #f0f0f5}',
-            '#nchat-new-conv{width:100%;padding:11px;background:' + bgVal + ';color:#fff;border:none;border-radius:10px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;font-size:13px;transition:all 0.2s}',
-            '#nchat-new-conv:hover{opacity:0.9;transform:translateY(-1px)}',
-            '#nchat-new-conv svg{width:16px;height:16px;fill:currentColor}',
+            // ── List View (Premium Design) ──
+            '#nchat-list-view{flex:1;overflow-y:auto;background:#fafafa;display:none;flex-direction:column;position:relative}',
+            '.nchat-list-items{flex:1;overflow-y:auto;padding:16px}',
+            '.nchat-list-item{background:#fff;border-radius:16px;padding:14px;margin-bottom:12px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.04);border:1px solid transparent;transition:all 0.25s cubic-bezier(0.16, 1, 0.3, 1);display:flex;align-items:center;gap:14px}',
+            '.nchat-list-item:hover{background:#f8fbff;border-color:' + color + '30;box-shadow:0 4px 12px rgba(0,0,0,0.06);transform:translateY(-2px)}',
+            '.nchat-list-avatar{width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg, ' + color + 'D0, ' + color + ');color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;flex-shrink:0;box-shadow:0 2px 6px ' + color + '40}',
+            '.nchat-list-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}',
+            '.nchat-list-name{font-size:15px;font-weight:600;color:#1e293b;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2}',
+            '.nchat-list-msg{font-size:13px;color:#64748b;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2}',
+            '.nchat-list-time{font-size:12px;color:#94a3b8;flex-shrink:0;font-weight:500}',
+            '.nchat-list-footer{padding:16px;background:linear-gradient(to top, #fff 80%, rgba(255,255,255,0));border-top:1px solid #f1f5f9}',
+            '#nchat-new-conv{width:100%;padding:14px;background:' + bgVal + ';color:#fff;border:none;border-radius:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;font-size:14px;transition:all 0.25s;box-shadow:0 4px 12px ' + color + '40}',
+            '#nchat-new-conv:hover{opacity:0.95;transform:translateY(-1px);box-shadow:0 6px 16px ' + color + '60}',
+            '#nchat-new-conv svg{width:18px;height:18px;fill:currentColor}',
 
             // View switching
             '#nchat-chat-view{flex:1;display:none;flex-direction:column;overflow:hidden}',
@@ -1019,7 +1016,9 @@
                                 + '<div class="nchat-list-info">'
                                 + '<div class="nchat-list-name">' + (lang === 'vi' ? 'Hỗ trợ CSKH' : 'Support') + '</div>'
                                 + '<div class="nchat-list-msg">' + snippet + '</div>'
-                                + '</div><div class="nchat-list-time">' + dateStr + '</div></div>';
+                                + '</div><div class="nchat-list-time">' + dateStr + '</div>'
+                                + '<div style="color:#cbd5e1;display:flex;align-items:center;margin-left:4px"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M9.29 15.88L13.17 12 9.29 8.12c-.39-.39-.39-1.02 0-1.41.39-.39 1.02-.39 1.41 0l4.59 4.59c.39.39.39 1.02 0 1.41L10.7 17.3c-.39.39-1.02.39-1.41 0-.38-.39-.39-1.03 0-1.42z"/></svg></div>'
+                                + '</div>';
                         }
                         var listContainer = win.querySelector('.nchat-list-items');
                         listContainer.innerHTML = listHtml;
