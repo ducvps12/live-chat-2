@@ -31,6 +31,7 @@ class ZaloService {
     private accountWorkspaceMap = new Map<string, string>();
     // Track msgIds sent from web UI to prevent duplicate inbox entries when Zalo listener catches self-messages
     private webSentMsgIds = new Set<string>();
+    private accountNameMap = new Map<string, string>(); // accountId -> Zalo Name
 
     /**
      * Khởi động lại toàn bộ ZaloSession cho các workspace đã kết nối
@@ -44,6 +45,7 @@ class ZaloService {
                 const workspaceId = account.workspaceId.toString();
                 const accountId = account._id.toString();
                 this.accountWorkspaceMap.set(accountId, workspaceId);
+                this.accountNameMap.set(accountId, account.name || 'Zalo App');
                 try {
                     // Use accountId as sessionId to support multiple accounts per workspace
                     await restoreZaloSession(
@@ -262,6 +264,7 @@ class ZaloService {
      * Gắn Listener: Khi có tin nhắn Zalo tới -> Đẩy vào hệ thống NemarkChat Socket/Conversation
      */
     private async handleMessage(workspaceId: string, message: ZaloIncomingMessage, accountId?: string) {
+        const accountName = accountId ? (this.accountNameMap.get(accountId) || 'Zalo App') : undefined;
         // ── Luôn lưu vào DB (kể cả tin nhắn tự gửi) ──
         try {
             await zaloMessageRepo.saveMessage({
@@ -414,6 +417,8 @@ class ZaloService {
                     msgType,
                     attachments,
                     message.msgId,
+                    accountId, // Optional
+                    accountName // Optional
                 );
             } else {
                 // ── Incoming from others: route as visitor message ──
@@ -427,6 +432,8 @@ class ZaloService {
                     attachments,
                     message.msgId,
                     isGroupMsg ? senderDisplayName : undefined, // pass sender name for group messages
+                    accountId, // Optional
+                    accountName // Optional
                 );
             }
         } catch (err) {
@@ -800,7 +807,8 @@ class ZaloService {
         // Iterate over ALL connected accounts
         for (const connectedAccount of connectedAccounts) {
             const accountId = (connectedAccount._id as unknown as string).toString();
-            console.log(`[ZaloService] Syncing account ${accountId} (${(connectedAccount as any).zaloName || 'unknown'})...`);
+            const accountName = (connectedAccount as any).name || 'Zalo App';
+            console.log(`[ZaloService] Syncing account ${accountId} (${accountName})...`);
 
             // 1. Get all conversations using accountId
             let conversations: Awaited<ReturnType<typeof getZaloConversations>>;
@@ -888,12 +896,14 @@ class ZaloService {
                             await conversationService.handleSelfZaloMessage(
                                 workspaceId, conversationKey, conversationName,
                                 conv.avatar || '', contentText, msgType, attachments, clientMsgId,
+                                accountId, accountName
                             );
                         } else {
                             await conversationService.handleIncomingZaloMessage(
                                 workspaceId, conversationKey, conversationName,
                                 conv.avatar || '', contentText, msgType, attachments, clientMsgId,
                                 isGroupMsg ? (m.senderName || `Thành viên ${senderId.slice(-6)}`) : undefined,
+                                accountId, accountName
                             );
                         }
                     } catch (err: any) {

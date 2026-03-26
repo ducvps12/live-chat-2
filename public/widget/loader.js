@@ -361,8 +361,8 @@
             if (!todaySchedule) return false; // no schedule for today = offline
 
             // Parse HH:mm to minutes
-            var startParts = todaySchedule.start.split(':');
-            var endParts = todaySchedule.end.split(':');
+            var startParts = (todaySchedule.startTime || todaySchedule.start || '00:00').split(':');
+            var endParts = (todaySchedule.endTime || todaySchedule.end || '23:59').split(':');
             var startMin = parseInt(startParts[0]) * 60 + parseInt(startParts[1] || 0);
             var endMin = parseInt(endParts[0]) * 60 + parseInt(endParts[1] || 0);
 

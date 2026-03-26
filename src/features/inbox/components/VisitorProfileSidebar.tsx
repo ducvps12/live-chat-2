@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Spin, Button, Form, Input, Divider, Typography, Empty, message, Tag, Select, Mentions } from 'antd';
-import { Edit2, ExternalLink, Mail, Phone, User, MonitorSmartphone, MapPin, Tag as TagIcon, StickyNote, Star, Target, Facebook, Image, FileText, Link as LinkIcon, ChevronDown, ChevronRight } from 'lucide-react';
+import { Edit2, ExternalLink, Mail, Phone, User, MonitorSmartphone, MapPin, Tag as TagIcon, StickyNote, Star, Target, Facebook, Image, FileText, Link as LinkIcon, ChevronDown, ChevronRight, MessageCircle } from 'lucide-react';
 import { useGetVisitor, useUpdateVisitor } from '../hooks/useVisitor';
 
 const { Text, Title } = Typography;
@@ -280,22 +280,28 @@ export const VisitorProfileSidebar: React.FC<VisitorProfileSidebarProps> = ({
                             />
                         </div>
 
-                        {/* ── Facebook Page Info ── */}
-                        {conversationChannel === 'facebook' && conversationMetadata?.pageName && (
+                        {/* ── Source OA/Page Info ── */}
+                        {(conversationChannel === 'facebook' || conversationChannel === 'zalo') && conversationMetadata?.pageName && (
                             <div style={styles.section}>
                                 <Title level={5} style={styles.sectionTitle}>
-                                    <Facebook size={14} style={{ marginRight: 6, verticalAlign: 'middle', color: '#1877F2' }} />
-                                    Trang cá nhân trên Facebook
+                                    {conversationChannel === 'facebook' ? (
+                                        <Facebook size={14} style={{ marginRight: 6, verticalAlign: 'middle', color: '#1877F2' }} />
+                                    ) : (
+                                        <MessageCircle size={14} style={{ marginRight: 6, verticalAlign: 'middle', color: '#0068ff' }} />
+                                    )}
+                                    {conversationChannel === 'facebook' ? 'Trang nhận tin (Facebook)' : 'Tài khoản nhận tin (Zalo)'}
                                 </Title>
-                                <div style={{ padding: '10px 12px', background: '#f0f7ff', borderRadius: 10, border: '1px solid #bfdbfe', display: 'flex', alignItems: 'center', gap: 10 }}>
-                                    <div style={{ width: 36, height: 36, borderRadius: 10, background: '#1877F2', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 16, flexShrink: 0 }}>
-                                        {conversationMetadata.pageName?.charAt(0) || 'F'}
+                                <div style={{ padding: '10px 12px', background: conversationChannel === 'facebook' ? '#f0f7ff' : '#eff6ff', borderRadius: 10, border: '1px solid #bfdbfe', display: 'flex', alignItems: 'center', gap: 10 }}>
+                                    <div style={{ width: 36, height: 36, borderRadius: 10, background: conversationChannel === 'facebook' ? '#1877F2' : '#0068ff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 16, flexShrink: 0 }}>
+                                        {conversationMetadata.pageName?.charAt(0) || (conversationChannel === 'facebook' ? 'F' : 'Z')}
                                     </div>
                                     <div style={{ flex: 1, minWidth: 0 }}>
                                         <div style={{ fontWeight: 600, fontSize: 13, color: '#1e3a5f', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                             {conversationMetadata.pageName}
                                         </div>
-                                        <div style={{ fontSize: 11, color: '#64748b' }}>Fanpage gốc</div>
+                                        <div style={{ fontSize: 11, color: '#64748b' }}>
+                                            {conversationChannel === 'facebook' ? 'Fanpage gốc' : 'Tài khoản Zalo'}
+                                        </div>
                                     </div>
                                 </div>
                             </div>

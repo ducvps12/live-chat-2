@@ -79,6 +79,8 @@ export const conversationService = {
         attachments: any[] = [],
         clientMessageId?: string,
         groupSenderName?: string, // For group messages: the individual sender's name
+        zaloAccountId?: string,
+        zaloAccountName?: string,
     ) {
         // Find a widget to associate the visitor with (we use the first active widget, or auto-create one for Zalo)
         let widgetList = await widgetRepo.findByWorkspace(workspaceId);
@@ -117,7 +119,7 @@ export const conversationService = {
             visitorId,
             widgetId,
             workspaceId,
-            { name: zaloUserName, avatar: zaloAvatar, attributes: { channel: 'zalo', zaloUserId } }
+            { name: zaloUserName, avatar: zaloAvatar, attributes: { channel: 'zalo', zaloUserId, ...(zaloAccountName ? { pageName: zaloAccountName } : {}) } }
         );
 
         // Find the LATEST conversation for this Zalo visitor (regardless of status)
@@ -135,7 +137,11 @@ export const conversationService = {
                 channel: 'zalo',
                 status: 'open',
                 lastMessageAt: new Date(),
-                metadata: { zaloUserId, ...(groupSenderName ? { threadType: 'group' } : {}) },
+                metadata: { 
+                    zaloUserId, 
+                    ...(groupSenderName ? { threadType: 'group' } : {}),
+                    ...(zaloAccountName ? { pageName: zaloAccountName, accountId: zaloAccountId } : {})
+                },
             });
             isNew = true;
             await visitorRepo.incrementConversations(visitorId, widgetId);
@@ -207,6 +213,8 @@ export const conversationService = {
         msgType: 'text' | 'image' | 'video' | 'file' = 'text',
         attachments: any[] = [],
         clientMessageId?: string,
+        zaloAccountId?: string,
+        zaloAccountName?: string,
     ) {
         // Find the existing conversation for this thread — don't create new one for self-messages
         const visitorId = `zalo_${zaloThreadId}`;
