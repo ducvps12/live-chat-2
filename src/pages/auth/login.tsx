@@ -1,4 +1,4 @@
-import Head from 'next/head';
+﻿import Head from 'next/head';
 import AuthLoginFeature from '../../features/auth/index';
 import AuthLayout from '../../components/layout/AuthLayout';
 
@@ -6,7 +6,7 @@ export default function LoginPage() {
     return (
         <AuthLayout>
             <Head>
-                <title>Đăng nhập | NemarChat</title>
+                <title>Đăng nhập | NemarkChat</title>
             </Head>
 
             <div

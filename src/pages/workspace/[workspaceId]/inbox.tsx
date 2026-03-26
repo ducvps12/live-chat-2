@@ -1,16 +1,18 @@
 import Head from 'next/head';
 import { useRouter } from 'next/router';
-import { useEffect, useState, useRef, useCallback } from 'react';
-import { Input, Badge, Spin, Empty, Tag, Button, message, Tooltip, Popover, Select, DatePicker, Form, Modal } from 'antd';
+import { useEffect, useState, useRef, useCallback, useMemo, Fragment } from 'react';
+import { Input, Badge, Spin, Empty, Tag, Button, message, Tooltip, Popover, Select, DatePicker, Form, Modal, Checkbox, Progress, Dropdown, ColorPicker } from 'antd';
 import {
     Search, Send, Paperclip, ArrowLeft, X as XIcon,
-    MessageSquare, Clock, User, Image as ImageIcon, RotateCw, Filter, Check, CheckCheck, UserCheck, UserX, Users, Zap, Reply, Edit2, Trash2, Globe
+    MessageSquare, Clock, User, Image as ImageIcon, RotateCw, Filter, Check, CheckCheck, UserCheck, UserX, Users, Zap, Reply, Edit2, Trash2, Globe, Forward, Bookmark, Plus, Settings, ChevronDown, Copy, Megaphone, MoreHorizontal
 } from 'lucide-react';
 import { useGetMe } from '../../../domains/auth/auth.hooks';
 import { httpClient } from '../../../lib/http/client';
 import io, { Socket } from 'socket.io-client';
 import { Conversation, Message } from '../../../types';
 import { VisitorProfileSidebar } from '../../../features/inbox/components/VisitorProfileSidebar';
+import ContactProfileModal from '../../../features/inbox/components/ContactProfileModal';
+import KnowledgeSuggestPanel from '../../../features/workspace/components/KnowledgeSuggestPanel';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTotalUnreadCount, conversationKeys, useAddInternalNote } from '../../../domains/conversation';
 import AppLayout from '../../../components/layout/AppLayout';
@@ -59,45 +61,62 @@ function getAssignedName(conv: Conversation): string | undefined {
     return undefined;
 }
 
-// ── Zalo image URL detection & rendering ──
-const IMAGE_URL_REGEX = /https?:\/\/[^\s]+\.(?:jpg|jpeg|png|gif|webp|bmp)(\?[^\s]*)?/gi;
-const ZALO_CDN_REGEX = /https?:\/\/photo-stal[\w-]*\.zdn\.vn\/[^\s]+/gi;
+// ── URL detection & rendering ──
+const URL_REGEX = /https?:\/\/[^\s<>"{}|\\^`\[\]]+/gi;
 
 function isImageUrl(url: string): boolean {
     return /\.(jpg|jpeg|png|gif|webp|bmp)(\?.*)?$/i.test(url) || /photo-stal[\w-]*\.zdn\.vn\//i.test(url);
 }
 
-function renderMessageContent(content: string, isAgent: boolean) {
+/** Decode common HTML entities that Zalo sometimes injects */
+function decodeHTMLEntities(text: string): string {
+    return text
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&#x2F;/g, '/')
+        .replace(/&#x27;/g, "'");
+}
+
+function renderMessageContent(content: string, isAgent: boolean, hasAttachments: boolean = false) {
     if (!content) return null;
 
-    // Combine both patterns
-    const combinedRegex = new RegExp(`(${IMAGE_URL_REGEX.source}|${ZALO_CDN_REGEX.source})`, 'gi');
-    const parts: Array<{ type: 'text' | 'image'; value: string }> = [];
-    let lastIndex = 0;
-    let match;
+    // First decode HTML entities
+    const decoded = decodeHTMLEntities(content);
 
-    // Reset regex state
-    combinedRegex.lastIndex = 0;
-    while ((match = combinedRegex.exec(content)) !== null) {
-        const url = match[0];
-        if (!isImageUrl(url)) continue;
+    // Find all URLs (images + regular links)
+    const parts: Array<{ type: 'text' | 'image' | 'link'; value: string }> = [];
+    let lastIndex = 0;
+
+    const urlRegex = new RegExp(URL_REGEX.source, 'gi');
+    urlRegex.lastIndex = 0;
+    let match;
+    while ((match = urlRegex.exec(decoded)) !== null) {
+        const url = match[0].replace(/[.,;:!?)]+$/, ''); // trim trailing punctuation
 
         if (match.index > lastIndex) {
-            const text = content.slice(lastIndex, match.index).trim();
+            const text = decoded.slice(lastIndex, match.index);
             if (text) parts.push({ type: 'text', value: text });
         }
-        parts.push({ type: 'image', value: url });
-        lastIndex = match.index + url.length;
+        // When message has attachments, treat image URLs as links to avoid duplicate rendering
+        if (isImageUrl(url) && !hasAttachments) {
+            parts.push({ type: 'image', value: url });
+        } else {
+            parts.push({ type: 'link', value: url });
+        }
+        lastIndex = match.index + match[0].length;
     }
 
-    if (lastIndex < content.length) {
-        const text = content.slice(lastIndex).trim();
+    if (lastIndex < decoded.length) {
+        const text = decoded.slice(lastIndex);
         if (text) parts.push({ type: 'text', value: text });
     }
 
-    // If no images found, render as plain text
+    // If no URLs found, render as plain text
     if (parts.every(p => p.type === 'text')) {
-        return <div>{content}</div>;
+        return <div style={{ whiteSpace: 'pre-wrap' }}>{decoded}</div>;
     }
 
     return (
@@ -119,7 +138,6 @@ function renderMessageContent(content: string, isAgent: boolean) {
                         }}
                         onClick={() => window.open(part.value, '_blank')}
                         onError={(e) => {
-                            // Fallback: show as link if image fails to load
                             const target = e.target as HTMLImageElement;
                             target.style.display = 'none';
                             const link = document.createElement('a');
@@ -132,8 +150,23 @@ function renderMessageContent(content: string, isAgent: boolean) {
                             target.parentElement?.insertBefore(link, target);
                         }}
                     />
+                ) : part.type === 'link' ? (
+                    <a
+                        key={i}
+                        href={part.value}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                            color: isAgent ? '#c7d2fe' : '#4f46e5',
+                            textDecoration: 'underline',
+                            wordBreak: 'break-all',
+                            fontSize: 'inherit',
+                        }}
+                    >
+                        {part.value.length > 60 ? part.value.slice(0, 60) + '…' : part.value}
+                    </a>
                 ) : (
-                    <div key={i}>{part.value}</div>
+                    <span key={i} style={{ whiteSpace: 'pre-wrap' }}>{part.value}</span>
                 )
             )}
         </div>
@@ -154,15 +187,19 @@ export default function InboxPage() {
 
     useEffect(() => {
         if (totalUnreadCount > 0) {
-            document.title = `(${totalUnreadCount}) Inbox | NemarChat`;
+            document.title = `(${totalUnreadCount}) Inbox | NemarkChat`;
         } else {
-            document.title = `Inbox | NemarChat`;
+            document.title = `Inbox | NemarkChat`;
         }
     }, [totalUnreadCount]);
 
     // State
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [loadingConvs, setLoadingConvs] = useState(true);
+    const [convPage, setConvPage] = useState(1);
+    const [convPerPage, setConvPerPage] = useState(50);
+    const [hasMoreConvs, setHasMoreConvs] = useState(true);
+    const [loadingMoreConvs, setLoadingMoreConvs] = useState(false);
     const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
     const [messages, setMessages] = useState<Message[]>([]);
     const [loadingMsgs, setLoadingMsgs] = useState(false);
@@ -178,6 +215,8 @@ export default function InboxPage() {
     const [filterSortBy, setFilterSortBy] = useState<'newest' | 'oldest'>('newest');
     const [filterDomain, setFilterDomain] = useState<string[]>([]);
     const [domainOptions, setDomainOptions] = useState<{label: string, value: string}[]>([]);
+    const [filterPageId, setFilterPageId] = useState<string>('all');
+    const [fbPages, setFbPages] = useState<Array<{ id: string; pageId: string; pageName: string; pageAvatar: string; status: string }>>([]);
 
     const [typingVisitor, setTypingVisitor] = useState<string | null>(null);
     const [msgPage, setMsgPage] = useState(1);
@@ -187,15 +226,46 @@ export default function InboxPage() {
 
     const isMemberOnly = workspaceMembers.find(m => m._id === me?.user?.id)?.role === 'member';
     const [workspaceTags, setWorkspaceTags] = useState<string[]>([]);
+    const [workspaceLabels, setWorkspaceLabels] = useState<Array<{ name: string; color: string }>>([]);
+    const [filterLabel, setFilterLabel] = useState<string | null>(null);
+    const [searchMatchMap, setSearchMatchMap] = useState<Record<string, { snippet: string; messageId: string }>>({});
+    const [searchResultIds, setSearchResultIds] = useState<string[] | null>(null);
+    const [searchingMessages, setSearchingMessages] = useState(false);
+    const [showLabelManager, setShowLabelManager] = useState(false);
+    const [newLabelName, setNewLabelName] = useState('');
+    const [newLabelColor, setNewLabelColor] = useState('#6366f1');
+    const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [noteText, setNoteText] = useState('');
     const [showNoteInput, setShowNoteInput] = useState(false);
     const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
     const [editingContent, setEditingContent] = useState('');
     const [macros, setMacros] = useState<MacroItem[]>([]);
     const [showMacroPopover, setShowMacroPopover] = useState(false);
+    const [macroSearchText, setMacroSearchText] = useState('');
+    const [showMacroSuggestions, setShowMacroSuggestions] = useState(false);
+    const [macroSuggestionIndex, setMacroSuggestionIndex] = useState(0);
     const [replyingTo, setReplyingTo] = useState<Message | null>(null);
     const [agentPresence, setAgentPresence] = useState<Record<string, 'online' | 'away' | 'offline'>>({});
     const [visitorOnlineMap, setVisitorOnlineMap] = useState<Record<string, 'online' | 'idle' | 'offline'>>({});
+    const [profileModalConv, setProfileModalConv] = useState<Conversation | null>(null);
+
+    // ── Context menu ──
+    const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; convId: string; showLabels: boolean } | null>(null);
+
+    // ── Forward/Broadcast mode ──
+    const [forwardMode, setForwardMode] = useState(false);
+    const [selectedMsgIds, setSelectedMsgIds] = useState<Set<string>>(new Set());
+    const [showForwardModal, setShowForwardModal] = useState(false);
+    const [forwardFriends, setForwardFriends] = useState<Array<{ threadId: string; displayName: string; avatar: string }>>([]);
+    const [forwardContacts, setForwardContacts] = useState<Array<{ threadId: string; displayName: string; avatar: string }>>([]);
+    const [forwardTab, setForwardTab] = useState<'friends' | 'contacts'>('friends');
+    const [forwardFriendsLoading, setForwardFriendsLoading] = useState(false);
+    const [forwardSearch, setForwardSearch] = useState('');
+    const [selectedRecipients, setSelectedRecipients] = useState<Set<string>>(new Set());
+    const [broadcasting, setBroadcasting] = useState(false);
+    const [broadcastProgress, setBroadcastProgress] = useState<{ current: number; total: number; successCount: number; failedCount: number; batchInfo?: string; status?: 'sending' | 'paused' | 'stopped' | 'completed' } | null>(null);
+    const broadcastPausedRef = useRef(false);
+    const broadcastCancelledRef = useRef(false);
 
     const addInternalNote = useAddInternalNote();
 
@@ -208,7 +278,9 @@ export default function InboxPage() {
     const socketRef = useRef<Socket | null>(null);
     const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const selectedConvIdRef = useRef<string | null>(null);
+    const convListRef = useRef<HTMLDivElement>(null);
     const messagesRef = useRef<Message[]>([]);
+    const chatInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         messagesRef.current = messages;
@@ -225,10 +297,14 @@ export default function InboxPage() {
         const currentWorkspaceId = workspaceId;
         try {
             setLoadingConvs(true);
+            setConvPage(1);
             const params = new URLSearchParams();
+            params.append('page', '1');
+            params.append('limit', String(convPerPage));
             if (filterStatus !== 'all') params.append('status', filterStatus);
             if (filterAssignee !== 'all') params.append('assignee', filterAssignee);
             if (filterChannel !== 'all') params.append('channel', filterChannel);
+            if (filterChannel === 'facebook' && filterPageId !== 'all') params.append('pageId', filterPageId);
             if (filterDateFrom) params.append('dateFrom', filterDateFrom);
             if (filterDateTo) params.append('dateTo', filterDateTo);
             if (filterDomain && filterDomain.length > 0) {
@@ -240,11 +316,51 @@ export default function InboxPage() {
             const res = await httpClient.get(`/conversations/workspace/${workspaceId}?${params.toString()}`);
             if (workspaceId !== currentWorkspaceId) return; // Prevent race conditions on workspace switch
             if (res.data?.success) {
-                setConversations(res.data.data.items || res.data.data || []);
+                const items = res.data.data.items || res.data.data || [];
+                const total = res.data.data.total || items.length;
+                setConversations(items);
+                setHasMoreConvs(items.length < total);
             }
         } catch { /* handled by interceptor */ }
         finally { setLoadingConvs(false); }
-    }, [workspaceId, filterStatus, filterAssignee, filterChannel, filterDateFrom, filterDateTo, filterTags, filterSortBy, filterDomain]);
+    }, [workspaceId, filterStatus, filterAssignee, filterChannel, filterPageId, filterDateFrom, filterDateTo, filterTags, filterSortBy, filterDomain, convPerPage]);
+
+    const loadMoreConversations = useCallback(async () => {
+        if (!workspaceId || !hasMoreConvs || loadingMoreConvs) return;
+        const nextPage = convPage + 1;
+        try {
+            setLoadingMoreConvs(true);
+            const params = new URLSearchParams();
+            params.append('page', String(nextPage));
+            params.append('limit', String(convPerPage));
+            if (filterStatus !== 'all') params.append('status', filterStatus);
+            if (filterAssignee !== 'all') params.append('assignee', filterAssignee);
+            if (filterChannel !== 'all') params.append('channel', filterChannel);
+            if (filterChannel === 'facebook' && filterPageId !== 'all') params.append('pageId', filterPageId);
+            if (filterDateFrom) params.append('dateFrom', filterDateFrom);
+            if (filterDateTo) params.append('dateTo', filterDateTo);
+            if (filterDomain && filterDomain.length > 0) {
+                filterDomain.forEach(d => params.append('domain', d));
+            }
+            filterTags.forEach(tag => params.append('tags', tag));
+            if (filterSortBy !== 'newest') params.append('sortBy', filterSortBy);
+
+            const res = await httpClient.get(`/conversations/workspace/${workspaceId}?${params.toString()}`);
+            if (res.data?.success) {
+                const items = res.data.data.items || res.data.data || [];
+                const total = res.data.data.total || 0;
+                setConversations(prev => {
+                    // Deduplicate
+                    const existingIds = new Set(prev.map(c => c._id));
+                    const newItems = items.filter((c: Conversation) => !existingIds.has(c._id));
+                    return [...prev, ...newItems];
+                });
+                setConvPage(nextPage);
+                setHasMoreConvs(nextPage * convPerPage < total);
+            }
+        } catch { /* silent */ }
+        finally { setLoadingMoreConvs(false); }
+    }, [workspaceId, convPage, hasMoreConvs, loadingMoreConvs, convPerPage, filterStatus, filterAssignee, filterChannel, filterPageId, filterDateFrom, filterDateTo, filterTags, filterSortBy, filterDomain]);
 
     useEffect(() => {
         setConversations([]);
@@ -254,11 +370,58 @@ export default function InboxPage() {
         fetchConversations();
     }, [workspaceId]); // Explicitly clear state on workspace switch so React does not persist it across route changes
 
-    // ── Fetch workspace tags ──
+    // ── Re-fetch when any filter changes ──
+    useEffect(() => {
+        if (!workspaceId) return;
+        fetchConversations();
+    }, [fetchConversations]);
+
+    // ── Auto-select Zalo conversation from friends page ──
+    useEffect(() => {
+        const zaloThread = router.query.zaloThread as string;
+        if (!zaloThread || conversations.length === 0) return;
+
+        // Find conversation matching this Zalo threadId
+        const match = conversations.find((c: any) =>
+            c.visitorId === `zalo_${zaloThread}` ||
+            c.metadata?.zaloUserId === zaloThread
+        );
+
+        if (match) {
+            setSelectedConvId(match._id);
+            // Clean up URL
+            const newQuery = { ...router.query };
+            delete newQuery.zaloThread;
+            delete newQuery.zaloName;
+            router.replace({ pathname: router.pathname, query: newQuery }, undefined, { shallow: true });
+        } else {
+            // No existing conversation — try fetching all statuses to find closed/pending ones
+            if (filterStatus !== 'all') {
+                // Switch to 'all' filter to find the conversation in any status
+                setFilterStatus('all');
+            } else {
+                // Still not found after fetching all — clean up and show inbox normally
+                const newQuery = { ...router.query };
+                delete newQuery.zaloThread;
+                delete newQuery.zaloName;
+                router.replace({ pathname: router.pathname, query: newQuery }, undefined, { shallow: true });
+                // Show a message that user needs to send a message first from Zalo
+                const friendName = router.query.zaloName as string;
+                if (friendName) {
+                    message.info(`Chưa có hội thoại với ${decodeURIComponent(friendName)}. Hãy gửi tin nhắn đầu tiên từ Zalo.`);
+                }
+            }
+        }
+    }, [conversations, router.query.zaloThread]);
+
+    // ── Fetch workspace tags & labels ──
     useEffect(() => {
         if (!workspaceId) return;
         httpClient.get(`/workspaces/${workspaceId}/tags`)
             .then(res => setWorkspaceTags(res.data?.data || []))
+            .catch(() => {});
+        httpClient.get(`/workspaces/${workspaceId}/labels`)
+            .then(res => setWorkspaceLabels(res.data?.data || []))
             .catch(() => {});
         // Also fetch macros
         httpClient.get(`/macros/workspace/${workspaceId}`)
@@ -268,7 +431,44 @@ export default function InboxPage() {
         httpClient.get(`/conversations/workspace/${workspaceId}/domains`)
             .then(res => setDomainOptions((res.data?.data || []).map((d: string) => ({ label: d, value: d }))))
             .catch(() => {});
+        // Fetch connected Facebook pages for fanpage filter
+        httpClient.get(`/workspaces/${workspaceId}/facebook/pages`)
+            .then(res => setFbPages(res.data?.data?.pages || []))
+            .catch(() => {});
     }, [workspaceId]);
+
+    // ── Debounced message content search ──
+    useEffect(() => {
+        if (!workspaceId) return;
+        if (!searchQuery || searchQuery.trim().length < 2) {
+            setSearchResultIds(null);
+            setSearchMatchMap({});
+            setSearchingMessages(false);
+            return;
+        }
+        setSearchingMessages(true);
+        if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+        searchTimerRef.current = setTimeout(async () => {
+            try {
+                const res = await httpClient.get(`/conversations/workspace/${workspaceId}/search`, {
+                    params: { q: searchQuery.trim(), status: filterStatus !== 'all' ? filterStatus : undefined }
+                });
+                if (res.data?.success) {
+                    const data = res.data.data;
+                    setSearchResultIds((data.items || []).map((c: any) => c._id));
+                    setSearchMatchMap(data.matchMap || {});
+                    // Also merge any NEW conversations from search that aren't in our list
+                    setConversations(prev => {
+                        const existingIds = new Set(prev.map(c => c._id));
+                        const newOnes = (data.items || []).filter((c: any) => !existingIds.has(c._id));
+                        return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
+                    });
+                }
+            } catch { /* silent */ }
+            finally { setSearchingMessages(false); }
+        }, 400);
+        return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
+    }, [searchQuery, workspaceId, filterStatus]);
 
     // ── Fetch messages for selected conversation ──
     const fetchMessages = useCallback(async (convId: string, jumpToMessageId?: string) => {
@@ -351,13 +551,19 @@ export default function InboxPage() {
 
             // Ensure agent is in this conversation's socket room
             socketRef.current?.emit('join:conversation', { conversationId: selectedConvId });
-            // Mark as read (reset unread count)
+            // Mark as read (reset unread count) — preserve scroll position
             httpClient.patch(`/conversations/workspace/${workspaceId}/${selectedConvId}/read`).then(() => {
                 queryClient.invalidateQueries({ queryKey: conversationKeys.unreadCount(workspaceId) });
             }).catch(() => { });
+            const scrollPos = convListRef.current?.scrollTop ?? 0;
             setConversations((prev) =>
                 prev.map((c) => c._id === selectedConvId ? { ...c, unreadCount: 0 } : c)
             );
+            requestAnimationFrame(() => {
+                if (convListRef.current) convListRef.current.scrollTop = scrollPos;
+                // Auto-focus chat input when conversation is selected
+                chatInputRef.current?.focus();
+            });
         } else {
             setMessages([]);
         }
@@ -530,23 +736,37 @@ export default function InboxPage() {
                 queryClient.invalidateQueries({ queryKey: conversationKeys.unreadCount(workspaceId) });
             }
 
-            setConversations((prev) =>
-                prev.map((c) =>
-                    c._id === data.conversationId
-                        ? {
-                            ...c,
-                            lastMessageAt: lm?.createdAt || new Date().toISOString(),
-                            lastMessagePreview: preview,
-                            unreadCount: (isFromVisitor && (!isTargetSelected || !isWindowFocused))
-                                ? (c.unreadCount || 0) + 1
-                                : ((isFromVisitor && isTargetSelected && isWindowFocused) ? 0 : c.unreadCount)
-                        }
-                        : c
-                ).sort((a, b) =>
-                    new Date(b.lastMessageAt || b.createdAt).getTime() -
-                    new Date(a.lastMessageAt || a.createdAt).getTime()
-                )
-            );
+            // Preserve scroll position across conversation list re-order
+            const scrollBefore = convListRef.current?.scrollTop ?? 0;
+            setConversations((prev) => {
+                const idx = prev.findIndex(c => c._id === data.conversationId);
+                if (idx === -1) return prev;
+
+                // Create updated conversation object
+                const updated = {
+                    ...prev[idx],
+                    lastMessageAt: lm?.createdAt || new Date().toISOString(),
+                    lastMessagePreview: preview,
+                    unreadCount: (isFromVisitor && (!isTargetSelected || !isWindowFocused))
+                        ? (prev[idx].unreadCount || 0) + 1
+                        : ((isFromVisitor && isTargetSelected && isWindowFocused) ? 0 : prev[idx].unreadCount)
+                };
+
+                // Only move to top if NOT the currently selected conversation
+                if (isTargetSelected) {
+                    return prev.map(c => c._id === data.conversationId ? updated : c);
+                }
+
+                // Move to top: remove from current position, insert at front
+                const next = [...prev];
+                next.splice(idx, 1);
+                next.unshift(updated);
+                return next;
+            });
+            // Restore scroll position after React re-render
+            requestAnimationFrame(() => {
+                if (convListRef.current) convListRef.current.scrollTop = scrollBefore;
+            });
         });
 
         // ── Conversation closed ──
@@ -802,6 +1022,8 @@ export default function InboxPage() {
             setMessages((prev) => prev.map((m) => m._id === tempMsg._id ? { ...m, status: 'error' } : m));
         }
         setSending(false);
+        // Re-focus input so user can keep typing
+        chatInputRef.current?.focus();
     };
 
     // ── Retry sending message ──
@@ -1125,21 +1347,81 @@ export default function InboxPage() {
     };
 
     // ── Filter + search ──
-    const filteredConvs = conversations.filter((c) => {
-        if (filterStatus !== 'all' && c.status !== filterStatus) return false;
-        if (searchQuery) {
-            const q = searchQuery.toLowerCase();
-            const name = visitorName(c).toLowerCase();
-            const email = (c.visitorInfo?.email || '').toLowerCase();
-            return name.includes(q) || email.includes(q) || c.visitorId.includes(q);
-        }
-        return true;
-    });
+    const filteredConvs = useMemo(() => {
+        const filtered = conversations.filter((c) => {
+            if (filterStatus !== 'all' && c.status !== filterStatus) return false;
+            // Label filter
+            if (filterLabel && !(c.tags || []).includes(filterLabel)) return false;
+            if (searchQuery && searchQuery.trim().length >= 2) {
+                const q = searchQuery.toLowerCase();
+                const name = visitorName(c).toLowerCase();
+                const email = (c.visitorInfo?.email || '').toLowerCase();
+                const phone = (c.visitorInfo?.phone || '').toLowerCase();
+                const visitorIdFull = (c.visitorId || '').toLowerCase();
+                const ip = (c.metadata?.ip || '').toLowerCase();
+                const domain = (c.metadata?.domain || '').toLowerCase();
+                const snippet = (c.lastMessageSnippet || c.lastMessagePreview || '').toLowerCase();
+                const tagMatch = (c.tags || []).some(t => t.toLowerCase().includes(q));
+                const metaMatch = name.includes(q) || email.includes(q) || phone.includes(q)
+                    || visitorIdFull.includes(q) || ip.includes(q) || domain.includes(q)
+                    || snippet.includes(q) || tagMatch;
+                const serverMatch = searchResultIds?.includes(c._id);
+                return metaMatch || serverMatch;
+            }
+            if (searchQuery && searchQuery.trim().length > 0 && searchQuery.trim().length < 2) {
+                const q = searchQuery.toLowerCase();
+                const name = visitorName(c).toLowerCase();
+                return name.includes(q);
+            }
+            return true;
+        });
+        // Sort: pinned first, then by lastMessageAt
+        filtered.sort((a, b) => {
+            const aPinned = a.isPinned ? 1 : 0;
+            const bPinned = b.isPinned ? 1 : 0;
+            if (aPinned !== bPinned) return bPinned - aPinned;
+            return 0; // keep existing order within same pin status
+        });
+        return filtered;
+    }, [conversations, filterStatus, filterLabel, searchQuery, searchResultIds]);
 
     const selectedConv = conversations.find((c) => c._id === selectedConvId);
 
+    // ── Context menu handlers ──
+    const handleCtxPin = async (convId: string) => {
+        try {
+            const res = await httpClient.patch(`/conversations/workspace/${workspaceId}/${convId}/pin`);
+            setConversations(prev => prev.map(c => c._id === convId ? { ...c, isPinned: res.data?.data?.isPinned } : c));
+            message.success(res.data?.data?.isPinned ? 'Đã ghim hội thoại' : 'Đã bỏ ghim');
+        } catch { message.error('Lỗi ghim'); }
+        setCtxMenu(null);
+    };
+
+    const handleCtxLabel = async (convId: string, labelName: string) => {
+        const conv = conversations.find(c => c._id === convId);
+        const tags = conv?.tags || [];
+        try {
+            if (tags.includes(labelName)) {
+                await httpClient.delete(`/conversations/workspace/${workspaceId}/${convId}/tags`, { data: { tag: labelName } });
+                setConversations(prev => prev.map(c => c._id === convId ? { ...c, tags: (c.tags || []).filter(t => t !== labelName) } : c));
+            } else {
+                await httpClient.post(`/conversations/workspace/${workspaceId}/${convId}/tags`, { tag: labelName });
+                setConversations(prev => prev.map(c => c._id === convId ? { ...c, tags: [...(c.tags || []), labelName] } : c));
+            }
+        } catch { message.error('Lỗi phân loại'); }
+    };
+
+    const handleCtxMarkUnread = async (convId: string) => {
+        try {
+            await httpClient.patch(`/conversations/workspace/${workspaceId}/${convId}/mark-unread`);
+            setConversations(prev => prev.map(c => c._id === convId ? { ...c, unreadCount: 1 } : c));
+            message.success('Đã đánh dấu chưa đọc');
+        } catch { message.error('Lỗi'); }
+        setCtxMenu(null);
+    };
+
     const advancedFilterContent = (
-        <Form layout="vertical" style={{ width: 250 }}>
+        <Form layout="vertical" style={{ width: 260 }}>
             <Form.Item label="Sắp xếp hoạt động" style={{ marginBottom: 12 }}>
                 <Select
                     value={filterSortBy}
@@ -1167,9 +1449,39 @@ export default function InboxPage() {
                     onChange={setFilterChannel}
                     options={[
                         { label: 'Tất cả', value: 'all' },
-                        { label: 'Live Chat (Widget)', value: 'widget' },
+                        { label: '🌐 Live Chat (Widget)', value: 'widget' },
+                        { label: '💬 Zalo', value: 'zalo' },
+                        { label: '📘 Facebook', value: 'facebook' },
                     ]}
                 />
+            </Form.Item>
+            <Form.Item label={<span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Bookmark size={13} /> Nhãn phân loại</span>} style={{ marginBottom: 12 }}>
+                <Select
+                    value={filterLabel || undefined}
+                    onChange={(v) => setFilterLabel(v || null)}
+                    allowClear
+                    placeholder="Tất cả nhãn"
+                    style={{ width: '100%' }}
+                    dropdownRender={(menu) => (
+                        <>
+                            {menu}
+                            <div style={{ padding: '6px 8px', borderTop: '1px solid #f0f0f0' }}>
+                                <Button type="link" size="small" icon={<Settings size={11} />} onClick={() => setShowLabelManager(true)} style={{ padding: 0, fontSize: 12 }}>
+                                    Quản lý nhãn
+                                </Button>
+                            </div>
+                        </>
+                    )}
+                >
+                    {workspaceLabels.map(lb => (
+                        <Select.Option key={lb.name} value={lb.name}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ width: 10, height: 10, borderRadius: '50%', background: lb.color, flexShrink: 0 }} />
+                                {lb.name}
+                            </span>
+                        </Select.Option>
+                    ))}
+                </Select>
             </Form.Item>
             <Form.Item label="Thẻ (Tags)" style={{ marginBottom: 12 }}>
                 <Select
@@ -1206,7 +1518,7 @@ export default function InboxPage() {
     return (
         <AppLayout hideHeader={true}>
             <Head>
-                <title>Inbox | NemarChat</title>
+                <title>Inbox | NemarkChat</title>
             </Head>
 
             <style>{`
@@ -1239,34 +1551,74 @@ export default function InboxPage() {
                                 <Badge count={inboxUnreadCount} style={{ marginLeft: 8 }} />
                             </h2>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <Tooltip title="Zalo Cá nhân">
-                                <Button
-                                    size="small"
-                                    onClick={() => router.push(`/workspace/${workspaceId}/remote-session`)}
-                                    style={{
-                                        background: '#0068ff',
-                                        borderColor: '#0068ff',
-                                        color: '#fff',
-                                        fontWeight: 600,
-                                        fontSize: 12,
-                                        borderRadius: 6,
-                                        padding: '2px 10px',
-                                        height: 26,
-                                    }}
-                                >
-                                    Zalo
-                                </Button>
-                            </Tooltip>
-                            <Badge count={zaloUnreadCount} overflowCount={99} />
-                            <Tooltip title="Xóa hết tin nhắn">
-                                <Button
-                                    size="small"
-                                    danger
-                                    icon={<Trash2 size={13} />}
+                        <div style={{
+                            display: 'flex', alignItems: 'center', gap: 6,
+                            background: '#f1f5f9', borderRadius: 10, padding: 3,
+                        }}>
+                            {/* Zalo channel pill */}
+                            <button
+                                onClick={() => router.push(`/workspace/${workspaceId}/remote-session`)}
+                                style={{
+                                    display: 'flex', alignItems: 'center', gap: 5,
+                                    padding: '5px 12px', borderRadius: 8,
+                                    border: 'none', cursor: 'pointer',
+                                    background: '#0068ff',
+                                    color: '#fff',
+                                    fontSize: 12, fontWeight: 600,
+                                    transition: 'all 0.2s ease',
+                                    whiteSpace: 'nowrap',
+                                }}
+                                onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
+                                onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+                            >
+                                <svg width="14" height="14" viewBox="0 0 48 48" fill="none"><path d="M24 4C12.95 4 4 12.95 4 24s8.95 20 20 20 20-8.95 20-20S35.05 4 24 4z" fill="currentColor" opacity=".2"/><path d="M24 8c-8.84 0-16 7.16-16 16 0 5.02 2.32 9.5 5.94 12.44V42l5.22-2.87c1.49.41 3.07.63 4.7.63h.14c8.84 0 16-7.16 16-16S32.84 8 24 8z" fill="currentColor"/></svg>
+                                Zalo
+                                {zaloUnreadCount > 0 && (
+                                    <span style={{
+                                        background: '#fff', color: '#0068ff',
+                                        fontSize: 10, fontWeight: 700,
+                                        padding: '1px 6px', borderRadius: 10,
+                                        lineHeight: '16px', minWidth: 18, textAlign: 'center',
+                                    }}>
+                                        {zaloUnreadCount > 99 ? '99+' : zaloUnreadCount}
+                                    </span>
+                                )}
+                            </button>
+                            {/* Facebook channel pill */}
+                            <button
+                                onClick={() => setFilterChannel(filterChannel === 'facebook' ? 'all' : 'facebook')}
+                                style={{
+                                    display: 'flex', alignItems: 'center', gap: 5,
+                                    padding: '5px 12px', borderRadius: 8,
+                                    border: 'none', cursor: 'pointer',
+                                    background: filterChannel === 'facebook' ? '#1877F2' : 'transparent',
+                                    color: filterChannel === 'facebook' ? '#fff' : '#64748b',
+                                    fontSize: 12, fontWeight: 600,
+                                    transition: 'all 0.2s ease',
+                                    whiteSpace: 'nowrap',
+                                }}
+                                onMouseEnter={e => { if (filterChannel !== 'facebook') e.currentTarget.style.background = '#e2e8f0'; }}
+                                onMouseLeave={e => { if (filterChannel !== 'facebook') e.currentTarget.style.background = 'transparent'; }}
+                            >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
+                                FB
+                            </button>
+                            {/* Reset messages btn — very small, icon only */}
+                            <Tooltip title="Xóa hết tin nhắn" placement="bottom">
+                                <button
                                     onClick={handleResetAllMessages}
-                                    style={{ height: 26, padding: '2px 8px', borderRadius: 6 }}
-                                />
+                                    style={{
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        width: 28, height: 28, borderRadius: 8,
+                                        border: 'none', cursor: 'pointer',
+                                        background: 'transparent', color: '#94a3b8',
+                                        transition: 'all 0.15s',
+                                    }}
+                                    onMouseEnter={e => { e.currentTarget.style.background = '#fee2e2'; e.currentTarget.style.color = '#ef4444'; }}
+                                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#94a3b8'; }}
+                                >
+                                    <Trash2 size={13} />
+                                </button>
                             </Tooltip>
                         </div>
                     </div>
@@ -1276,7 +1628,7 @@ export default function InboxPage() {
                         <div style={{ display: 'flex', gap: 8, flexDirection: 'column' }}>
                             <Input
                                 prefix={<Search size={14} color="#999" />}
-                                placeholder="Tìm theo tên, email..."
+                                placeholder="Tìm theo tên, email, IP, SĐT..."
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 style={{ borderRadius: 8 }}
@@ -1293,7 +1645,7 @@ export default function InboxPage() {
                             />
                         </div>
                         <div style={{ display: 'flex', gap: 4, marginTop: 8, alignItems: 'center', justifyContent: 'space-between' }}>
-                            <div style={{ display: 'flex', gap: 4 }}>
+                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                                 {(['all', 'open', 'pending', 'closed'] as const).map((s) => (
                                     <Tag
                                         key={s}
@@ -1305,21 +1657,260 @@ export default function InboxPage() {
                                     </Tag>
                                 ))}
                             </div>
-                            <Popover content={advancedFilterContent} title="Lọc nâng cao" trigger="click" placement="bottomRight">
-                                <Button
-                                    type="text"
+                            {/* ── Channel source tabs ── */}
+                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                {[
+                                    { key: 'all', label: 'Tất cả', icon: '📋' },
+                                    { key: 'widget', label: 'Website', icon: '🌐' },
+                                    { key: 'zalo', label: 'Zalo', icon: '💬' },
+                                    { key: 'facebook', label: 'Facebook', icon: '📘' },
+                                ].map((ch) => (
+                                    <Tag
+                                        key={ch.key}
+                                        color={filterChannel === ch.key ? '#1877F2' : undefined}
+                                        onClick={() => setFilterChannel(ch.key)}
+                                        style={{ cursor: 'pointer', borderRadius: 12, padding: '2px 10px', margin: 0, fontSize: 12 }}
+                                    >
+                                        {ch.icon} {ch.label}
+                                    </Tag>
+                                ))}
+                            </div>
+                            {/* Fanpage sub-filter (visible when channel=facebook) */}
+                            {filterChannel === 'facebook' && fbPages.length > 0 && (
+                                <Select
                                     size="small"
-                                    icon={<Filter size={14} />}
-                                    style={{
-                                        color: (filterAssignee !== 'all' || filterChannel !== 'all' || filterTags.length > 0 || filterDateFrom) ? '#6366f1' : '#ccc'
-                                    }}
+                                    value={filterPageId}
+                                    onChange={(v) => setFilterPageId(v)}
+                                    style={{ minWidth: 140, fontSize: 11 }}
+                                    popupMatchSelectWidth={false}
+                                    options={[
+                                        { label: '📘 Tất cả Fanpage', value: 'all' },
+                                        ...fbPages.filter(p => p.status === 'active').map(p => ({
+                                            label: p.pageName,
+                                            value: p.pageId,
+                                        })),
+                                    ]}
                                 />
-                            </Popover>
+                            )}
+                            {/* Page size selector */}
+                            <Select
+                                size="small"
+                                value={convPerPage}
+                                onChange={(v) => setConvPerPage(v)}
+                                style={{ width: 90, fontSize: 11 }}
+                                options={[
+                                    { label: '50/trang', value: 50 },
+                                    { label: '100/trang', value: 100 },
+                                    { label: '500/trang', value: 500 },
+                                    { label: '1000/trang', value: 1000 },
+                                ]}
+                            />
+                            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                                {/* Label filter dropdown */}
+                                <Popover
+                                    trigger="click"
+                                    placement="bottomRight"
+                                    title={
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <span>Phân loại</span>
+                                            <Button type="link" size="small" icon={<Settings size={12} />} onClick={() => setShowLabelManager(true)}>Quản lý</Button>
+                                        </div>
+                                    }
+                                    content={
+                                        <div style={{ width: 200 }}>
+                                            <div
+                                                onClick={() => setFilterLabel(null)}
+                                                style={{
+                                                    padding: '6px 8px', cursor: 'pointer', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8,
+                                                    background: !filterLabel ? '#f0f0ff' : 'transparent',
+                                                    fontWeight: !filterLabel ? 600 : 400,
+                                                }}
+                                            >
+                                                <Bookmark size={14} color="#999" /> Tất cả
+                                            </div>
+                                            {workspaceLabels.map(lb => (
+                                                <div
+                                                    key={lb.name}
+                                                    onClick={() => setFilterLabel(filterLabel === lb.name ? null : lb.name)}
+                                                    style={{
+                                                        padding: '6px 8px', cursor: 'pointer', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8,
+                                                        background: filterLabel === lb.name ? '#f0f0ff' : 'transparent',
+                                                        fontWeight: filterLabel === lb.name ? 600 : 400,
+                                                    }}
+                                                >
+                                                    <span style={{ width: 12, height: 12, borderRadius: '50%', background: lb.color, display: 'inline-block', flexShrink: 0 }} />
+                                                    {lb.name}
+                                                </div>
+                                            ))}
+                                            {workspaceLabels.length === 0 && (
+                                                <div style={{ padding: '12px 8px', color: '#999', fontSize: 12, textAlign: 'center' }}>Chưa có nhãn. Bấm Quản lý để tạo.</div>
+                                            )}
+                                        </div>
+                                    }
+                                >
+                                    <Tooltip title="Phân loại">
+                                        <Button
+                                            type="text"
+                                            size="small"
+                                            icon={<Bookmark size={14} />}
+                                            style={{ color: filterLabel ? '#6366f1' : '#ccc' }}
+                                        />
+                                    </Tooltip>
+                                </Popover>
+                                {searchingMessages && <Spin size="small" />}
+                                <Popover content={advancedFilterContent} title="Lọc nâng cao" trigger="click" placement="bottomRight">
+                                    <Button
+                                        type="text"
+                                        size="small"
+                                        icon={<Filter size={14} />}
+                                        style={{
+                                            color: (filterAssignee !== 'all' || filterChannel !== 'all' || filterTags.length > 0 || filterDateFrom) ? '#6366f1' : '#ccc'
+                                        }}
+                                    />
+                                </Popover>
+                            </div>
                         </div>
                     </div>
 
+                    {/* Label Manager Modal */}
+                    <Modal
+                        open={showLabelManager}
+                        onCancel={() => setShowLabelManager(false)}
+                        title={
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <Bookmark size={18} style={{ color: '#6366f1' }} />
+                                Quản lý nhãn phân loại
+                            </span>
+                        }
+                        footer={null}
+                        width={440}
+                    >
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            {workspaceLabels.length === 0 && (
+                                <div style={{ textAlign: 'center', padding: '20px 0 12px', color: '#999' }}>
+                                    <Bookmark size={32} style={{ color: '#d1d5db', marginBottom: 8 }} />
+                                    <div style={{ fontSize: 13 }}>Chưa có nhãn nào. Tạo nhãn đầu tiên bên dưới.</div>
+                                </div>
+                            )}
+                            {workspaceLabels.map(lb => (
+                                <div key={lb.name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, border: '1px solid #f0f0f0', background: '#fafafa', transition: 'all .15s' }}>
+                                    <ColorPicker
+                                        size="small"
+                                        value={lb.color}
+                                        onChange={async (c) => {
+                                            try {
+                                                const res = await httpClient.put(`/workspaces/${workspaceId}/labels`, { oldName: lb.name, name: lb.name, color: c.toHexString() });
+                                                setWorkspaceLabels(res.data?.data || []);
+                                            } catch { message.error('Lỗi khi đổi màu'); }
+                                        }}
+                                        presets={[{
+                                            label: 'Mặc định',
+                                            colors: ['#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#6366f1', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#f97316'],
+                                        }]}
+                                    />
+                                    <span style={{
+                                        flex: 1, fontWeight: 500, fontSize: 13,
+                                        padding: '2px 8px', borderRadius: 14,
+                                        background: lb.color + '15', color: lb.color,
+                                        border: `1px solid ${lb.color}30`,
+                                        display: 'inline-flex', alignItems: 'center', gap: 4,
+                                    }}>
+                                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: lb.color }} />
+                                        {lb.name}
+                                    </span>
+                                    <Tooltip title="Đổi tên">
+                                        <Button
+                                            size="small"
+                                            type="text"
+                                            icon={<Edit2 size={12} />}
+                                            onClick={() => {
+                                                const newName = prompt('Nhập tên mới cho nhãn:', lb.name);
+                                                if (newName && newName.trim() && newName.trim() !== lb.name) {
+                                                    httpClient.put(`/workspaces/${workspaceId}/labels`, { oldName: lb.name, name: newName.trim(), color: lb.color })
+                                                        .then(res => {
+                                                            setWorkspaceLabels(res.data?.data || []);
+                                                            if (filterLabel === lb.name) setFilterLabel(newName.trim());
+                                                            message.success('Đã đổi tên nhãn');
+                                                        })
+                                                        .catch(() => message.error('Lỗi đổi tên'));
+                                                }
+                                            }}
+                                            style={{ color: '#999' }}
+                                        />
+                                    </Tooltip>
+                                    <Tooltip title="Xóa nhãn">
+                                        <Button
+                                            size="small"
+                                            danger
+                                            type="text"
+                                            icon={<Trash2 size={12} />}
+                                            onClick={async () => {
+                                                try {
+                                                    const res = await httpClient.delete(`/workspaces/${workspaceId}/labels`, { data: { name: lb.name } });
+                                                    setWorkspaceLabels(res.data?.data || []);
+                                                    if (filterLabel === lb.name) setFilterLabel(null);
+                                                    message.success('Đã xóa nhãn');
+                                                } catch { message.error('Lỗi'); }
+                                            }}
+                                        />
+                                    </Tooltip>
+                                </div>
+                            ))}
+                            {/* Create new label */}
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 12, padding: '8px 10px', borderRadius: 8, border: '1px dashed #d1d5db', background: '#f9fafb' }}>
+                                <ColorPicker
+                                    size="small"
+                                    value={newLabelColor}
+                                    onChange={(c) => setNewLabelColor(c.toHexString())}
+                                    presets={[{
+                                        label: 'Mặc định',
+                                        colors: ['#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#6366f1', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#f97316'],
+                                    }]}
+                                />
+                                <Input
+                                    size="small"
+                                    placeholder="Tên nhãn mới..."
+                                    value={newLabelName}
+                                    onChange={e => setNewLabelName(e.target.value)}
+                                    style={{ flex: 1, borderRadius: 6 }}
+                                    onPressEnter={async () => {
+                                        if (!newLabelName.trim()) return;
+                                        try {
+                                            const res = await httpClient.post(`/workspaces/${workspaceId}/labels`, { name: newLabelName.trim(), color: newLabelColor });
+                                            setWorkspaceLabels(res.data?.data || []);
+                                            setNewLabelName('');
+                                            message.success('Đã thêm nhãn');
+                                        } catch { message.error('Lỗi khi thêm nhãn'); }
+                                    }}
+                                />
+                                <Button
+                                    size="small"
+                                    type="primary"
+                                    icon={<Plus size={12} />}
+                                    style={{ background: newLabelColor, borderColor: newLabelColor, borderRadius: 6 }}
+                                    onClick={async () => {
+                                        if (!newLabelName.trim()) return;
+                                        try {
+                                            const res = await httpClient.post(`/workspaces/${workspaceId}/labels`, { name: newLabelName.trim(), color: newLabelColor });
+                                            setWorkspaceLabels(res.data?.data || []);
+                                            setNewLabelName('');
+                                            message.success('Đã thêm nhãn');
+                                        } catch { message.error('Lỗi khi thêm nhãn'); }
+                                    }}
+                                >
+                                    Thêm
+                                </Button>
+                            </div>
+                        </div>
+                    </Modal>
+
                     {/* Conversation list */}
-                    <div style={styles.convList}>
+                    <div ref={convListRef} style={styles.convList} onScroll={(e) => {
+                        const el = e.currentTarget;
+                        if (el.scrollTop + el.clientHeight >= el.scrollHeight - 80) {
+                            loadMoreConversations();
+                        }
+                    }}>
                         {loadingConvs ? (
                             <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
                         ) : filteredConvs.length === 0 ? (
@@ -1343,8 +1934,12 @@ export default function InboxPage() {
                                             : undefined,
                                     }}
                                     onClick={() => setSelectedConvId(conv._id)}
+                                    onContextMenu={(e) => {
+                                        e.preventDefault();
+                                        setCtxMenu({ x: e.clientX, y: e.clientY, convId: conv._id, showLabels: false });
+                                    }}
                                 >
-                                    <div style={styles.convAvatar}>
+                                    <div style={{ ...styles.convAvatar, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); setProfileModalConv(conv); }}>
                                         {conv.visitorInfo?.avatar ? (
                                             <img
                                                 src={conv.visitorInfo.avatar}
@@ -1365,14 +1960,46 @@ export default function InboxPage() {
                                     </div>
                                     <div style={{ flex: 1, minWidth: 0 }}>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                            <span style={styles.convName}>{visitorName(conv)}</span>
+                                            <span style={styles.convName}>
+                                                {conv.isPinned && <span title="Đã ghim" style={{ marginRight: 4, fontSize: 11 }}>📌</span>}
+                                                {(conv as any).channel === 'facebook' && (
+                                                    <span style={{
+                                                        display: 'inline-flex', alignItems: 'center', gap: 2,
+                                                        fontSize: 9, fontWeight: 700, color: '#fff',
+                                                        background: '#1877F2', borderRadius: 4,
+                                                        padding: '1px 5px', marginRight: 5, lineHeight: '14px',
+                                                        verticalAlign: 'middle',
+                                                    }}>FB</span>
+                                                )}
+                                                {(conv as any).channel === 'zalo' && (
+                                                    <span style={{
+                                                        display: 'inline-flex', alignItems: 'center', gap: 2,
+                                                        fontSize: 9, fontWeight: 700, color: '#fff',
+                                                        background: '#0068ff', borderRadius: 4,
+                                                        padding: '1px 5px', marginRight: 5, lineHeight: '14px',
+                                                        verticalAlign: 'middle',
+                                                    }}>Zalo</span>
+                                                )}
+                                                {(!(conv as any).channel || (conv as any).channel === 'widget') && (
+                                                    <span style={{
+                                                        display: 'inline-flex', alignItems: 'center', gap: 2,
+                                                        fontSize: 9, fontWeight: 700, color: '#fff',
+                                                        background: '#10b981', borderRadius: 4,
+                                                        padding: '1px 5px', marginRight: 5, lineHeight: '14px',
+                                                        verticalAlign: 'middle',
+                                                    }}>Web</span>
+                                                )}
+                                                {visitorName(conv)}
+                                            </span>
                                             <span style={styles.convTime}>
                                                 {conv.lastMessageAt ? timeAgo(conv.lastMessageAt) : timeAgo(conv.createdAt)}
                                             </span>
                                         </div>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
                                             <span style={{ ...styles.convPreview, fontWeight: conv.unreadCount ? 600 : 400, color: conv.unreadCount ? '#111' : '#666' }}>
-                                                {conv.lastMessagePreview || conv.lastMessageSnippet || conv.visitorInfo?.email || 'Cuộc hội thoại mới'}
+                                                {searchMatchMap[conv._id]
+                                                    ? <><Search size={10} style={{ marginRight: 3, verticalAlign: 'middle', color: '#6366f1' }} />{searchMatchMap[conv._id].snippet}</>
+                                                    : (conv.lastMessagePreview || conv.lastMessageSnippet || conv.visitorInfo?.email || 'Cuộc hội thoại mới')}
                                             </span>
                                             {conv.unreadCount ? (
                                                 <Badge count={conv.unreadCount} style={{ backgroundColor: '#ef4444' }} />
@@ -1396,20 +2023,186 @@ export default function InboxPage() {
                                                 {getAssignedName(conv)}
                                             </div>
                                         )}
-                                        {/* Tags on conversation item */}
+                                        {/* Tags/Labels on conversation item */}
                                         {conv.tags && conv.tags.length > 0 && (
-                                            <div style={{ display: 'flex', gap: 2, marginTop: 3, flexWrap: 'wrap' }}>
-                                                {conv.tags.slice(0, 3).map(t => (
-                                                    <Tag key={t} style={{ fontSize: 9, lineHeight: '14px', padding: '0 4px', borderRadius: 6, margin: 0 }}>{t}</Tag>
-                                                ))}
-                                                {conv.tags.length > 3 && <span style={{ fontSize: 9, color: '#999' }}>+{conv.tags.length - 3}</span>}
+                                            <div style={{ display: 'flex', gap: 3, marginTop: 3, flexWrap: 'wrap', alignItems: 'center' }}>
+                                                {conv.tags.slice(0, 4).map(t => {
+                                                    const label = workspaceLabels.find(l => l.name === t);
+                                                    return label ? (
+                                                        <span key={t} style={{
+                                                            fontSize: 9, lineHeight: '16px', padding: '0 6px', borderRadius: 8, margin: 0,
+                                                            background: label.color + '18', color: label.color, border: `1px solid ${label.color}40`,
+                                                            fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: 3,
+                                                        }}>
+                                                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: label.color }} />
+                                                            {t}
+                                                        </span>
+                                                    ) : (
+                                                        <Tag key={t} style={{ fontSize: 9, lineHeight: '14px', padding: '0 4px', borderRadius: 6, margin: 0 }}>{t}</Tag>
+                                                    );
+                                                })}
+                                                {conv.tags.length > 4 && <span style={{ fontSize: 9, color: '#999' }}>+{conv.tags.length - 4}</span>}
                                             </div>
                                         )}
                                     </div>
                                 </div>
                             ))
                         )}
+                        {/* Load more indicator */}
+                        {loadingMoreConvs && (
+                            <div style={{ textAlign: 'center', padding: '12px 0' }}><Spin size="small" /><span style={{ marginLeft: 8, fontSize: 12, color: '#999' }}>Đang tải thêm...</span></div>
+                        )}
+                        {!loadingConvs && !loadingMoreConvs && hasMoreConvs && filteredConvs.length > 0 && (
+                            <div style={{ textAlign: 'center', padding: '8px 0', fontSize: 11, color: '#aaa', cursor: 'pointer' }} onClick={loadMoreConversations}>↓ Kéo xuống để tải thêm</div>
+                        )}
                     </div>
+
+                    {/* Right-click context menu */}
+                    {ctxMenu && (
+                        <>
+                            <div
+                                style={{ position: 'fixed', inset: 0, zIndex: 9998 }}
+                                onClick={() => setCtxMenu(null)}
+                                onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null); }}
+                            />
+                            <div
+                                style={{
+                                    position: 'fixed',
+                                    top: ctxMenu.y,
+                                    left: ctxMenu.x,
+                                    zIndex: 9999,
+                                    background: '#fff',
+                                    borderRadius: 10,
+                                    boxShadow: '0 6px 24px rgba(0,0,0,.18)',
+                                    padding: '6px 0',
+                                    minWidth: 200,
+                                    border: '1px solid #e5e7eb',
+                                    animation: 'fadeIn .12s ease-out',
+                                }}
+                            >
+                                {/* Pin */}
+                                <div
+                                    style={ctxMenuItemStyle}
+                                    onClick={() => handleCtxPin(ctxMenu.convId)}
+                                    onMouseEnter={(e) => (e.currentTarget.style.background = '#f3f4f6')}
+                                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                                >
+                                    <Bookmark size={15} style={{ color: '#6366f1' }} />
+                                    <span>{conversations.find(c => c._id === ctxMenu.convId)?.isPinned ? 'Bỏ ghim hội thoại' : 'Ghim hội thoại'}</span>
+                                </div>
+
+                                {/* Labels submenu */}
+                                <div
+                                    style={{ ...ctxMenuItemStyle, justifyContent: 'space-between' }}
+                                    onClick={() => setCtxMenu(m => m ? { ...m, showLabels: !m.showLabels } : null)}
+                                    onMouseEnter={(e) => (e.currentTarget.style.background = '#f3f4f6')}
+                                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                                >
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <Tag color="purple" style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>●</Tag>
+                                        <span>Phân loại</span>
+                                    </span>
+                                    <ChevronDown size={14} style={{ transform: ctxMenu.showLabels ? 'rotate(180deg)' : 'none', transition: 'transform .15s', color: '#999' }} />
+                                </div>
+                                {ctxMenu.showLabels && (
+                                    <div style={{ padding: '4px 8px', maxHeight: 260, overflowY: 'auto' }}>
+                                        {workspaceLabels.map(label => {
+                                            const ctxConvTags = conversations.find(c => c._id === ctxMenu.convId)?.tags || [];
+                                            const isChecked = ctxConvTags.includes(label.name);
+                                            return (
+                                                <div
+                                                    key={label.name}
+                                                    style={{
+                                                        display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px',
+                                                        borderRadius: 6, cursor: 'pointer', fontSize: 13, color: '#333',
+                                                        background: isChecked ? label.color + '10' : 'transparent',
+                                                    }}
+                                                    onClick={() => handleCtxLabel(ctxMenu.convId, label.name)}
+                                                    onMouseEnter={(e) => (e.currentTarget.style.background = label.color + '18')}
+                                                    onMouseLeave={(e) => (e.currentTarget.style.background = isChecked ? label.color + '10' : 'transparent')}
+                                                >
+                                                    <Checkbox checked={isChecked} style={{ pointerEvents: 'none' }} />
+                                                    <span style={{ width: 10, height: 10, borderRadius: '50%', background: label.color, flexShrink: 0 }} />
+                                                    <span>{label.name}</span>
+                                                </div>
+                                            );
+                                        })}
+                                        {/* Inline label creation in context menu */}
+                                        <div style={{ borderTop: workspaceLabels.length > 0 ? '1px solid #f0f0f0' : 'none', marginTop: workspaceLabels.length > 0 ? 6 : 0, paddingTop: 6 }}>
+                                            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                                                <ColorPicker
+                                                    size="small"
+                                                    value={newLabelColor}
+                                                    onChange={(c) => setNewLabelColor(c.toHexString())}
+                                                    presets={[{
+                                                        label: 'Mặc định',
+                                                        colors: ['#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#6366f1', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#f97316'],
+                                                    }]}
+                                                />
+                                                <Input
+                                                    size="small"
+                                                    placeholder="Tạo nhãn mới..."
+                                                    value={newLabelName}
+                                                    onChange={e => setNewLabelName(e.target.value)}
+                                                    style={{ flex: 1, fontSize: 12, borderRadius: 6 }}
+                                                    onPressEnter={async (e) => {
+                                                        e.stopPropagation();
+                                                        if (!newLabelName.trim()) return;
+                                                        try {
+                                                            const res = await httpClient.post(`/workspaces/${workspaceId}/labels`, { name: newLabelName.trim(), color: newLabelColor });
+                                                            setWorkspaceLabels(res.data?.data || []);
+                                                            setNewLabelName('');
+                                                            message.success('Đã thêm nhãn');
+                                                        } catch { message.error('Lỗi khi thêm nhãn'); }
+                                                    }}
+                                                    onClick={e => e.stopPropagation()}
+                                                />
+                                                <Button
+                                                    size="small"
+                                                    type="primary"
+                                                    icon={<Plus size={10} />}
+                                                    style={{ background: newLabelColor, borderColor: newLabelColor, minWidth: 28, padding: '0 4px', height: 24, borderRadius: 6 }}
+                                                    onClick={async (e) => {
+                                                        e.stopPropagation();
+                                                        if (!newLabelName.trim()) return;
+                                                        try {
+                                                            const res = await httpClient.post(`/workspaces/${workspaceId}/labels`, { name: newLabelName.trim(), color: newLabelColor });
+                                                            setWorkspaceLabels(res.data?.data || []);
+                                                            setNewLabelName('');
+                                                            message.success('Đã thêm nhãn');
+                                                        } catch { message.error('Lỗi khi thêm nhãn'); }
+                                                    }}
+                                                />
+                                            </div>
+                                            <Button
+                                                type="link"
+                                                size="small"
+                                                icon={<Settings size={11} />}
+                                                onClick={(e) => { e.stopPropagation(); setShowLabelManager(true); setCtxMenu(null); }}
+                                                style={{ padding: '4px 0 0 0', fontSize: 11, color: '#999' }}
+                                            >
+                                                Quản lý nhãn
+                                            </Button>
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div style={{ height: 1, background: '#f0f0f0', margin: '4px 0' }} />
+
+                                {/* Mark unread */}
+                                <div
+                                    style={ctxMenuItemStyle}
+                                    onClick={() => handleCtxMarkUnread(ctxMenu.convId)}
+                                    onMouseEnter={(e) => (e.currentTarget.style.background = '#f3f4f6')}
+                                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                                >
+                                    <MessageSquare size={15} style={{ color: '#f59e0b' }} />
+                                    <span>Đánh dấu chưa đọc</span>
+                                </div>
+                            </div>
+                        </>
+                    )}
+
                 </div>
 
                 {/* ── Chat Panel ── */}
@@ -1418,37 +2211,45 @@ export default function InboxPage() {
                 >
                     {selectedConvId && selectedConv ? (
                         <>
-                            {/* Chat header */}
+                            {/* Chat header — clean minimal */}
                             <div style={styles.chatHeader}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 }}>
                                     <Button
                                         type="text"
                                         icon={<ArrowLeft size={18} />}
                                         onClick={() => setSelectedConvId(null)}
                                         className="mobile-back-btn"
+                                        style={{ padding: 4, height: 32, width: 32, borderRadius: 10 }}
                                     />
-                                    <div style={{ position: 'relative' }}>
-                                        <div style={styles.chatAvatar}>
+                                    <div style={{ position: 'relative', flexShrink: 0 }}>
+                                        <div
+                                            style={{
+                                                width: 36, height: 36, borderRadius: 12,
+                                                background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                cursor: 'pointer', overflow: 'hidden',
+                                            }}
+                                            onClick={() => setProfileModalConv(selectedConv)}
+                                        >
                                             {selectedConv.visitorInfo?.avatar ? (
                                                 <img
                                                     src={selectedConv.visitorInfo.avatar}
                                                     alt=""
-                                                    style={{ width: 38, height: 38, borderRadius: 14, objectFit: 'cover' }}
+                                                    style={{ width: 36, height: 36, borderRadius: 12, objectFit: 'cover' }}
                                                     onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling && ((e.target as HTMLImageElement).nextElementSibling as HTMLElement).style.removeProperty('display'); }}
                                                 />
                                             ) : null}
                                             <span style={{
                                                 display: selectedConv.visitorInfo?.avatar ? 'none' : 'flex',
-                                                width: 38, height: 38, borderRadius: 14,
+                                                width: 36, height: 36, borderRadius: 12,
                                                 alignItems: 'center', justifyContent: 'center',
-                                                color: '#fff', fontWeight: 700, fontSize: 15,
+                                                color: '#fff', fontWeight: 600, fontSize: 14, letterSpacing: 0.3,
                                             }}>
                                                 {visitorName(selectedConv).charAt(0).toUpperCase()}
                                             </span>
                                         </div>
-                                        {/* Visitor presence dot */}
                                         <span style={{
-                                            position: 'absolute', bottom: 0, right: 0,
+                                            position: 'absolute', bottom: -1, right: -1,
                                             width: 10, height: 10, borderRadius: '50%',
                                             border: '2px solid #fff',
                                             background: visitorOnlineMap[selectedConv?.visitorId || ''] === 'online' ? '#22c55e'
@@ -1456,153 +2257,211 @@ export default function InboxPage() {
                                                     : '#d1d5db',
                                         }} />
                                     </div>
-                                    <div>
-                                        <div style={{ fontWeight: 600, fontSize: 14 }}>{visitorName(selectedConv)}</div>
-                                        <div style={{ fontSize: 11, color: '#888' }}>
-                                            {selectedConv.visitorInfo?.email || selectedConv.visitorId?.slice(0, 12)}
+                                    <div style={{ minWidth: 0 }}>
+                                        <div style={{ fontWeight: 600, fontSize: 14, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                            {visitorName(selectedConv)}
                                         </div>
-                                        {selectedConv.metadata?.domain && (
-                                            <div style={{ fontSize: 11, color: '#6366f1', display: 'flex', alignItems: 'center', marginTop: 1 }}>
-                                                {selectedConv.metadata.domain}
-                                            </div>
-                                        )}
-                                        {getAssignedName(selectedConv) && (
-                                            <div style={{ fontSize: 11, color: '#10b981', display: 'flex', alignItems: 'center', gap: 3, marginTop: 1 }}>
-                                                <UserCheck size={11} />
-                                                {getAssignedName(selectedConv)}
-                                            </div>
-                                        )}
+                                        <div style={{ fontSize: 11, color: '#9ca3af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                            {selectedConv.channel === 'zalo' ? 'Zalo' : selectedConv.channel === 'facebook' ? 'Facebook' : selectedConv.metadata?.domain || selectedConv.visitorInfo?.email || ''}
+                                            {getAssignedName(selectedConv) && <> · <span style={{ color: '#6366f1' }}>{getAssignedName(selectedConv)}</span></>}
+                                        </div>
                                     </div>
                                 </div>
-                                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                                    {!isMemberOnly && (
-                                        <>
-                                            {/* Assign to me / Unassign */}
-                                            {getAssignedId(selectedConv) === me?.user?.id ? (
-                                        <Tooltip title="Trả về hàng đợi">
-                                            <Button
-                                                size="small"
-                                                icon={<UserX size={14} />}
-                                                onClick={() => handleUnassign(selectedConv._id)}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                                    {/* Forward mode controls */}
+                                    {forwardMode && (
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 4 }}>
+                                            <span style={{ fontSize: 12, color: '#6366f1', fontWeight: 500 }}>{selectedMsgIds.size} đã chọn</span>
+                                            {selectedMsgIds.size > 0 && (
+                                                <>
+                                                    <button
+                                                        onClick={async () => {
+                                                            setForwardFriendsLoading(true);
+                                                            setShowForwardModal(true);
+                                                            setSelectedRecipients(new Set());
+                                                            setForwardSearch('');
+                                                            setForwardTab('friends');
+                                                            try {
+                                                                const [friendsRes, contactsRes] = await Promise.all([
+                                                                    httpClient.get(`/workspaces/${workspaceId}/zalo/friends`, { params: { limit: 500 } }),
+                                                                    httpClient.get(`/workspaces/${workspaceId}/zalo/contacts`, { params: { limit: 5000 } }),
+                                                                ]);
+                                                                setForwardFriends(friendsRes.data?.data?.items || []);
+                                                                const contactItems = (contactsRes.data?.data?.items || contactsRes.data?.data || []).map((c: any) => ({
+                                                                    threadId: c.zaloUserId || c.threadId || c._id,
+                                                                    displayName: c.displayName || c.name || 'Unknown',
+                                                                    avatar: c.avatar || '',
+                                                                }));
+                                                                setForwardContacts(contactItems);
+                                                            } catch { setForwardFriends([]); setForwardContacts([]); }
+                                                            finally { setForwardFriendsLoading(false); }
+                                                        }}
+                                                        style={{
+                                                            height: 30, padding: '0 12px', borderRadius: 8,
+                                                            background: '#6366f1', color: '#fff', border: 'none',
+                                                            fontSize: 12, fontWeight: 500, cursor: 'pointer',
+                                                            display: 'flex', alignItems: 'center', gap: 4,
+                                                        }}
+                                                    >
+                                                        <Send size={12} /> Gửi
+                                                    </button>
+                                                    <button
+                                                        onClick={async () => {
+                                                            const selectedTexts = messages
+                                                                .filter(m => selectedMsgIds.has(m._id))
+                                                                .map(m => {
+                                                                    const time = new Date(m.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+                                                                    const name = m.sender?.name || (m.sender?.type === 'agent' ? 'Agent' : 'Khách');
+                                                                    return `[${time}] ${name}: ${m.content || '[Đính kèm]'}`;
+                                                                })
+                                                                .join('\n');
+                                                            try {
+                                                                await navigator.clipboard.writeText(selectedTexts);
+                                                                message.success(`Đã sao chép ${selectedMsgIds.size} tin nhắn`);
+                                                            } catch {
+                                                                message.error('Không thể sao chép');
+                                                            }
+                                                        }}
+                                                        style={{
+                                                            height: 30, padding: '0 10px', borderRadius: 8,
+                                                            background: '#fff', color: '#6366f1', border: '1px solid #c7d2fe',
+                                                            fontSize: 12, fontWeight: 500, cursor: 'pointer',
+                                                            display: 'flex', alignItems: 'center', gap: 4,
+                                                        }}
+                                                    >
+                                                        Sao chép
+                                                    </button>
+                                                    {messages.some(m => selectedMsgIds.has(m._id) && m.sender?.type === 'agent' && m.sender?.id === me?.user?.id && !m.isDeleted) && (
+                                                        <button
+                                                            onClick={() => {
+                                                                const recallableIds = messages
+                                                                    .filter(m => selectedMsgIds.has(m._id) && m.sender?.type === 'agent' && m.sender?.id === me?.user?.id && !m.isDeleted)
+                                                                    .map(m => m._id);
+                                                                if (recallableIds.length === 0) { message.warning('Không có tin nhắn nào có thể thu hồi'); return; }
+                                                                Modal.confirm({
+                                                                    title: `Thu hồi ${recallableIds.length} tin nhắn?`,
+                                                                    content: `Bạn sẽ thu hồi ${recallableIds.length} tin nhắn đã gửi. Hành động này không thể hoàn tác.`,
+                                                                    okText: 'Thu hồi',
+                                                                    okType: 'danger',
+                                                                    cancelText: 'Hủy',
+                                                                    onOk: async () => {
+                                                                        let success = 0;
+                                                                        for (const id of recallableIds) {
+                                                                            try { await handleRecall(id); success++; } catch { /* skip */ }
+                                                                        }
+                                                                        message.success(`Đã thu hồi ${success}/${recallableIds.length} tin nhắn`);
+                                                                        setForwardMode(false);
+                                                                        setSelectedMsgIds(new Set());
+                                                                    },
+                                                                });
+                                                            }}
+                                                            style={{
+                                                                height: 30, padding: '0 10px', borderRadius: 8,
+                                                                background: '#fff', color: '#ef4444', border: '1px solid #fca5a5',
+                                                                fontSize: 12, fontWeight: 500, cursor: 'pointer',
+                                                            }}
+                                                        >
+                                                            Thu hồi
+                                                        </button>
+                                                    )}
+                                                </>
+                                            )}
+                                            <button
+                                                onClick={() => { setForwardMode(false); setSelectedMsgIds(new Set()); }}
+                                                style={{
+                                                    height: 30, width: 30, borderRadius: 8,
+                                                    background: '#f3f4f6', border: 'none', cursor: 'pointer',
+                                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                }}
                                             >
-                                                Bỏ nhận
-                                            </Button>
-                                        </Tooltip>
-                                    ) : !getAssignedId(selectedConv) ? (
-                                        <Tooltip title="Nhận cuộc hội thoại về mình">
-                                            <Button
-                                                size="small"
-                                                type="primary"
-                                                style={{ background: '#10b981', border: 'none' }}
-                                                icon={<UserCheck size={14} />}
-                                                onClick={() => handleAssign(selectedConv._id)}
+                                                <XIcon size={14} color="#6b7280" />
+                                            </button>
+                                        </div>
+                                    )}
+                                    {/* Status pill */}
+                                    {!forwardMode && (
+                                        <span style={{
+                                            fontSize: 11, fontWeight: 500, padding: '3px 10px', borderRadius: 20,
+                                            background: selectedConv.status === 'open' ? '#ecfdf5' : selectedConv.status === 'pending' ? '#fffbeb' : '#f3f4f6',
+                                            color: selectedConv.status === 'open' ? '#059669' : selectedConv.status === 'pending' ? '#d97706' : '#6b7280',
+                                        }}>
+                                            {selectedConv.status === 'open' ? 'Đang mở' : selectedConv.status === 'pending' ? 'Chờ xử lý' : 'Đã đóng'}
+                                        </span>
+                                    )}
+                                    {/* Overflow menu */}
+                                    {!forwardMode && !isMemberOnly && (
+                                        <Dropdown
+                                            trigger={['click']}
+                                            placement="bottomRight"
+                                            menu={{
+                                                items: [
+                                                    ...(getAssignedId(selectedConv) === me?.user?.id ? [{
+                                                        key: 'unassign',
+                                                        label: 'Bỏ nhận cuộc hội thoại',
+                                                        onClick: () => handleUnassign(selectedConv._id),
+                                                    }] : !getAssignedId(selectedConv) ? [{
+                                                        key: 'assign',
+                                                        label: 'Nhận cuộc hội thoại',
+                                                        onClick: () => handleAssign(selectedConv._id),
+                                                    }] : [{
+                                                        key: 'unassign-other',
+                                                        label: 'Trả về hàng đợi',
+                                                        onClick: () => handleUnassign(selectedConv._id),
+                                                    }]),
+                                                    {
+                                                        key: 'transfer',
+                                                        label: 'Chuyển cho agent khác',
+                                                        children: workspaceMembers
+                                                            .filter(m => m._id !== getAssignedId(selectedConv))
+                                                            .map(m => ({
+                                                                key: `transfer-${m._id}`,
+                                                                label: m.name,
+                                                                onClick: () => handleAssignToAgent(selectedConv._id, m._id, m.name),
+                                                            })),
+                                                    },
+                                                    { type: 'divider' as const },
+                                                    {
+                                                        key: 'forward',
+                                                        label: 'Chuyển tiếp tin nhắn',
+                                                        onClick: () => { setForwardMode(true); setSelectedMsgIds(new Set()); },
+                                                    },
+                                                    { type: 'divider' as const },
+                                                    ...(selectedConv.status === 'open' ? [
+                                                        { key: 'pending', label: 'Đánh dấu chờ xử lý', onClick: () => handleSetPending(selectedConv._id) },
+                                                        { key: 'close', label: 'Đóng cuộc hội thoại', danger: true, onClick: () => handleClose(selectedConv._id) },
+                                                    ] : selectedConv.status === 'pending' ? [
+                                                        { key: 'reopen', label: 'Mở lại cuộc hội thoại', onClick: () => handleReopen(selectedConv._id) },
+                                                        { key: 'close', label: 'Đóng cuộc hội thoại', danger: true, onClick: () => handleClose(selectedConv._id) },
+                                                    ] : [
+                                                        { key: 'reopen', label: 'Mở lại cuộc hội thoại', onClick: () => handleReopen(selectedConv._id) },
+                                                    ]),
+                                                    { type: 'divider' as const },
+                                                    ...(selectedConv.status !== 'closed' ? [{
+                                                        key: 'priority',
+                                                        label: 'Độ ưu tiên',
+                                                        children: [
+                                                            { key: 'p-urgent', label: '🔴 Khẩn cấp', onClick: () => handleSetPriority(selectedConv._id, 'urgent') },
+                                                            { key: 'p-high', label: '🟠 Cao', onClick: () => handleSetPriority(selectedConv._id, 'high') },
+                                                            { key: 'p-normal', label: '🟢 Bình thường', onClick: () => handleSetPriority(selectedConv._id, 'normal') },
+                                                            { key: 'p-low', label: '⚪ Thấp', onClick: () => handleSetPriority(selectedConv._id, 'low') },
+                                                        ],
+                                                    }] : []),
+                                                ],
+                                            }}
+                                        >
+                                            <button
+                                                style={{
+                                                    width: 34, height: 34, borderRadius: 10,
+                                                    border: '1px solid #e5e7eb', background: '#fff',
+                                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                    cursor: 'pointer', transition: 'all 0.15s',
+                                                }}
+                                                onMouseEnter={e => { e.currentTarget.style.background = '#f9fafb'; e.currentTarget.style.borderColor = '#d1d5db'; }}
+                                                onMouseLeave={e => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.borderColor = '#e5e7eb'; }}
                                             >
-                                                Nhận
-                                            </Button>
-                                        </Tooltip>
-                                    ) : null}
-                                    {/* Assign/Transfer to specific agent dropdown */}
-                                    <Select
-                                        size="small"
-                                        placeholder={<span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Users size={12} /> {getAssignedId(selectedConv) === me?.user?.id ? 'Chuyển cho...' : 'Gán cho...'}</span>}
-                                        style={{ minWidth: 130 }}
-                                        value={undefined}
-                                        onChange={(agentId: string) => {
-                                            const agent = workspaceMembers.find(m => m._id === agentId);
-                                            if (agent) handleAssignToAgent(selectedConv._id, agent._id, agent.name);
-                                        }}
-                                        options={workspaceMembers
-                                            .filter(m => m._id !== getAssignedId(selectedConv))
-                                            .map(m => ({ label: m.name, value: m._id }))}
-                                        allowClear={false}
-                                        popupMatchSelectWidth={false}
-                                    />
-                                    {/* Unassign (if assigned to someone else) */}
-                                    {getAssignedId(selectedConv) && getAssignedId(selectedConv) !== me?.user?.id && (
-                                        <Tooltip title="Trả về hàng đợi">
-                                            <Button
-                                                size="small"
-                                                icon={<UserX size={14} />}
-                                                onClick={() => handleUnassign(selectedConv._id)}
-                                            />
-                                        </Tooltip>
-                                    )}
-                                    {selectedConv.status === 'open' && (
-                                        <>
-                                            <Tooltip title="Chờ xử lý">
-                                                <Button
-                                                    size="small"
-                                                    style={{ color: '#f59e0b', borderColor: '#f59e0b' }}
-                                                    icon={<Clock size={14} />}
-                                                    onClick={() => handleSetPending(selectedConv._id)}
-                                                >
-                                                    Chờ
-                                                </Button>
-                                            </Tooltip>
-                                            <Tooltip title="Đóng cuộc hội thoại">
-                                                <Button
-                                                    size="small"
-                                                    danger
-                                                    icon={<XIcon size={14} />}
-                                                    onClick={() => handleClose(selectedConv._id)}
-                                                >
-                                                    Đóng
-                                                </Button>
-                                            </Tooltip>
-                                        </>
-                                    )}
-                                    {selectedConv.status === 'pending' && (
-                                        <>
-                                            <Tooltip title="Mở lại (đang xử lý)">
-                                                <Button
-                                                    size="small"
-                                                    type="primary"
-                                                    style={{ background: '#10b981', border: 'none' }}
-                                                    onClick={() => handleReopen(selectedConv._id)}
-                                                >
-                                                    Mở lại
-                                                </Button>
-                                            </Tooltip>
-                                            <Tooltip title="Đóng cuộc hội thoại">
-                                                <Button
-                                                    size="small"
-                                                    danger
-                                                    icon={<XIcon size={14} />}
-                                                    onClick={() => handleClose(selectedConv._id)}
-                                                >
-                                                    Đóng
-                                                </Button>
-                                            </Tooltip>
-                                        </>
-                                    )}
-                                    {selectedConv.status === 'closed' && (
-                                        <Tooltip title="Mở lại cuộc hội thoại">
-                                            <Button
-                                                size="small"
-                                                type="primary"
-                                                onClick={() => handleReopen(selectedConv._id)}
-                                            >
-                                                Mở lại
-                                            </Button>
-                                        </Tooltip>
-                                    )}
-                                    {/* Priority selector */}
-                                    {selectedConv.status !== 'closed' && (
-                                        <Select
-                                            size="small"
-                                            value={(selectedConv as any).priority || 'normal'}
-                                            style={{ minWidth: 110 }}
-                                            onChange={(val: string) => handleSetPriority(selectedConv._id, val)}
-                                            options={[
-                                                { label: '🔴 Khẩn cấp', value: 'urgent' },
-                                                { label: '🟠 Cao', value: 'high' },
-                                                { label: '🟢 Bình thường', value: 'normal' },
-                                                { label: '⚪ Thấp', value: 'low' },
-                                            ]}
-                                            popupMatchSelectWidth={false}
-                                        />
-                                    )}
-                                        </>
+                                                <MoreHorizontal size={16} color="#6b7280" />
+                                            </button>
+                                        </Dropdown>
                                     )}
                                 </div>
                             </div>
@@ -1622,54 +2481,225 @@ export default function InboxPage() {
                                                 </Button>
                                             </div>
                                         )}
-                                        {messages.map((msg) => {
+                                        {messages.map((msg, msgIdx) => {
                                             const isAgent = msg.sender.type === 'agent';
                                             const isSystem = msg.sender.type === 'system';
                                             const isNote = msg.isInternal === true;
 
+                                            // Date separator header
+                                            let showDateHeader = false;
+                                            let dateLabel = '';
+                                            const msgDate = new Date(msg.createdAt);
+                                            const msgDay = msgDate.toDateString();
+                                            if (msgIdx === 0) {
+                                                showDateHeader = true;
+                                            } else {
+                                                const prevDate = new Date(messages[msgIdx - 1].createdAt);
+                                                if (prevDate.toDateString() !== msgDay) showDateHeader = true;
+                                            }
+                                            if (showDateHeader) {
+                                                const now = new Date();
+                                                const yesterday = new Date(); yesterday.setDate(now.getDate() - 1);
+                                                if (msgDay === now.toDateString()) dateLabel = 'Hôm nay';
+                                                else if (msgDay === yesterday.toDateString()) dateLabel = 'Hôm qua';
+                                                else dateLabel = msgDate.toLocaleDateString('vi-VN', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' });
+                                            }
+
                                             if (isSystem) {
                                                 return (
-                                                    <div key={msg._id} id={`msg-${msg._id}`} style={styles.systemMsg}>
-                                                        {msg.content}
-                                                    </div>
+                                                    <Fragment key={msg._id}>
+                                                        {showDateHeader && (
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '16px 16px 8px', userSelect: 'none' }}>
+                                                                <div style={{ flex: 1, borderTop: '1px solid #e5e7eb' }} />
+                                                                <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 500, whiteSpace: 'nowrap', background: '#f8fafc', padding: '2px 10px', borderRadius: 10, border: '1px solid #e5e7eb' }}>{dateLabel}</span>
+                                                                <div style={{ flex: 1, borderTop: '1px solid #e5e7eb' }} />
+                                                            </div>
+                                                        )}
+                                                        <div id={`msg-${msg._id}`} style={styles.systemMsg}>
+                                                            {msg.content}
+                                                        </div>
+                                                    </Fragment>
                                                 );
                                             }
 
                                             // Internal note — distinct yellow style
                                             if (isNote) {
+                                                const dateHeaderNode = showDateHeader ? (
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '16px 16px 8px', userSelect: 'none' }}>
+                                                        <div style={{ flex: 1, borderTop: '1px solid #e5e7eb' }} />
+                                                        <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 500, whiteSpace: 'nowrap', background: '#f8fafc', padding: '2px 10px', borderRadius: 10, border: '1px solid #e5e7eb' }}>{dateLabel}</span>
+                                                        <div style={{ flex: 1, borderTop: '1px solid #e5e7eb' }} />
+                                                    </div>
+                                                ) : null;
                                                 return (
-                                                    <div key={msg._id} id={`msg-${msg._id}`} style={{ display: 'flex', justifyContent: 'center', margin: '6px 0' }}>
-                                                        <div style={{
-                                                            background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10,
-                                                            padding: '8px 14px', maxWidth: '75%', fontSize: 13,
-                                                        }}>
-                                                            <div style={{ fontSize: 10, color: '#b45309', fontWeight: 600, marginBottom: 3, display: 'flex', alignItems: 'center', gap: 4 }}>
-                                                                📝 Ghi chú nội bộ · {msg.sender.name || 'Agent'}
-                                                            </div>
-                                                            <div style={{ color: '#78350f' }}>{msg.content}</div>
-                                                            <div style={{ fontSize: 10, color: '#d97706', marginTop: 3 }}>
-                                                                {new Date(msg.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                                                    <Fragment key={msg._id}>
+                                                        {dateHeaderNode}
+                                                        <div id={`msg-${msg._id}`} style={{ display: 'flex', justifyContent: 'center', margin: '6px 0' }}>
+                                                            <div style={{
+                                                                background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10,
+                                                                padding: '8px 14px', maxWidth: '75%', fontSize: 13,
+                                                            }}>
+                                                                <div style={{ fontSize: 10, color: '#b45309', fontWeight: 600, marginBottom: 3, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                                    📝 Ghi chú nội bộ · {msg.sender.name || 'Agent'}
+                                                                </div>
+                                                                <div style={{ color: '#78350f' }}>{msg.content}</div>
+                                                                <div style={{ fontSize: 10, color: '#d97706', marginTop: 3 }}>
+                                                                    {new Date(msg.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                                                                </div>
                                                             </div>
                                                         </div>
-                                                    </div>
+                                                    </Fragment>
                                                 );
                                             }
+                                            const dateHeaderElement = showDateHeader ? (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '16px 16px 8px', userSelect: 'none' }}>
+                                                    <div style={{ flex: 1, borderTop: '1px solid #e5e7eb' }} />
+                                                    <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 500, whiteSpace: 'nowrap', background: '#f8fafc', padding: '2px 10px', borderRadius: 10, border: '1px solid #e5e7eb' }}>{dateLabel}</span>
+                                                    <div style={{ flex: 1, borderTop: '1px solid #e5e7eb' }} />
+                                                </div>
+                                            ) : null;
 
                                             return (
+                                                <Fragment key={msg._id}>
+                                                {dateHeaderElement}
+                                                <Dropdown
+                                                    trigger={['contextMenu']}
+                                                    menu={{
+                                                        items: [
+                                                            {
+                                                                key: 'quick-forward',
+                                                                icon: <Forward size={14} />,
+                                                                label: 'Chuyển tiếp nhanh',
+                                                                onClick: async () => {
+                                                                    setSelectedMsgIds(new Set([msg._id]));
+                                                                    setForwardFriendsLoading(true);
+                                                                    setShowForwardModal(true);
+                                                                    setSelectedRecipients(new Set());
+                                                                    setForwardSearch('');
+                                                                    setForwardTab('friends');
+                                                                    try {
+                                                                        const [friendsRes, contactsRes] = await Promise.all([
+                                                                            httpClient.get(`/workspaces/${workspaceId}/zalo/friends`, { params: { limit: 500 } }),
+                                                                            httpClient.get(`/workspaces/${workspaceId}/zalo/contacts`, { params: { limit: 5000 } }),
+                                                                        ]);
+                                                                        setForwardFriends(friendsRes.data?.data?.items || []);
+                                                                        const contactItems = (contactsRes.data?.data?.items || contactsRes.data?.data || []).map((c: any) => ({
+                                                                            threadId: c.zaloUserId || c.threadId || c._id,
+                                                                            displayName: c.displayName || c.name || 'Unknown',
+                                                                            avatar: c.avatar || '',
+                                                                        }));
+                                                                        setForwardContacts(contactItems);
+                                                                    } catch { setForwardFriends([]); setForwardContacts([]); }
+                                                                    finally { setForwardFriendsLoading(false); }
+                                                                },
+                                                            },
+                                                            {
+                                                                key: 'copy',
+                                                                icon: <Copy size={14} />,
+                                                                label: 'Copy nội dung',
+                                                                onClick: () => {
+                                                                    if (msg.content) {
+                                                                        navigator.clipboard.writeText(msg.content);
+                                                                        message.success('Đã copy nội dung');
+                                                                    }
+                                                                },
+                                                            },
+                                                            {
+                                                                key: 'reply',
+                                                                icon: <Reply size={14} />,
+                                                                label: 'Trả lời',
+                                                                onClick: () => {
+                                                                    setReplyingTo(msg);
+                                                                    setTimeout(() => document.getElementById('chat-input')?.focus(), 100);
+                                                                },
+                                                            },
+                                                            ...(isAgent && msg.sender.id === me?.user?.id && !msg.isDeleted && !msg._id.startsWith('tmp_') ? [
+                                                                { type: 'divider' as const },
+                                                                {
+                                                                    key: 'edit',
+                                                                    icon: <Edit2 size={14} />,
+                                                                    label: 'Sửa tin nhắn',
+                                                                    onClick: () => {
+                                                                        setEditingMessageId(msg._id);
+                                                                        setEditingContent(msg.content);
+                                                                    },
+                                                                },
+                                                                {
+                                                                    key: 'recall',
+                                                                    icon: <Trash2 size={14} />,
+                                                                    label: 'Thu hồi',
+                                                                    danger: true,
+                                                                    onClick: () => handleRecall(msg._id),
+                                                                },
+                                                            ] : []),
+                                                        ],
+                                                    }}
+                                                >
                                                 <div
-                                                    key={msg._id}
                                                     id={`msg-${msg._id}`}
                                                     className="msg-row"
                                                     style={{
                                                         ...styles.msgRow,
                                                         justifyContent: isAgent ? 'flex-end' : 'flex-start',
+                                                        position: 'relative',
                                                     }}
                                                 >
+                                                    {forwardMode && (
+                                                        <div style={{
+                                                            position: 'absolute', left: 4, top: '50%', transform: 'translateY(-50%)',
+                                                            zIndex: 2,
+                                                        }}>
+                                                            <Checkbox
+                                                                checked={selectedMsgIds.has(msg._id)}
+                                                                onChange={(e) => {
+                                                                    setSelectedMsgIds(prev => {
+                                                                        const next = new Set(prev);
+                                                                        if (e.target.checked) next.add(msg._id);
+                                                                        else next.delete(msg._id);
+                                                                        return next;
+                                                                    });
+                                                                }}
+                                                            />
+                                                        </div>
+                                                    )}
+                                                    <div style={{ display: 'flex', flexDirection: 'column', maxWidth: '70%', alignItems: isAgent ? 'flex-end' : 'flex-start' }}>
+                                                    {/* Group chat: show sender name above bubble when sender changes */}
+                                                    {!isAgent && msg.sender.name && (() => {
+                                                        // Detect group: visitorId pattern for Zalo groups or multiple visitor senders
+                                                        const isZaloGroup = selectedConv?.metadata?.threadType === 'group';
+                                                        const visitorNames = new Set(messages.filter(m => m.sender.type === 'visitor' && m.sender.name).map(m => m.sender.name));
+                                                        const isGroupChat = isZaloGroup || visitorNames.size > 1;
+                                                        if (!isGroupChat) return null;
+                                                        // Show name when sender differs from previous visitor message
+                                                        const prevVisitorMsg = messages.slice(0, msgIdx).reverse().find(m => m.sender.type === 'visitor');
+                                                        const isDiffSender = !prevVisitorMsg || prevVisitorMsg.sender.name !== msg.sender.name;
+                                                        if (!isDiffSender) return null;
+                                                        const nameHash = (msg.sender.name || '').split('').reduce((a: number, c: string) => a + c.charCodeAt(0), 0);
+                                                        const hue = nameHash % 360;
+                                                        return (
+                                                            <div style={{
+                                                                fontSize: 12, fontWeight: 600,
+                                                                color: `hsl(${hue}, 65%, 45%)`,
+                                                                marginBottom: 2, marginLeft: 4,
+                                                                maxWidth: 200, overflow: 'hidden',
+                                                                textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                                            }}>
+                                                                {msg.sender.name}
+                                                            </div>
+                                                        );
+                                                    })()}
                                                     <div
                                                         style={{
                                                             ...styles.msgBubble,
                                                             ...(isAgent ? styles.msgAgent : styles.msgVisitor),
                                                             ...(msg._id.startsWith('tmp_') ? { opacity: 0.6 } : {}),
+                                                            // Image/file-only messages: transparent bubble
+                                                            ...(!msg.content && msg.attachments?.length ? {
+                                                                background: 'transparent',
+                                                                boxShadow: 'none',
+                                                                border: 'none',
+                                                                padding: '4px 0',
+                                                            } : {}),
                                                         }}
                                                     >
                                                         {/* Reply Block */}
@@ -1701,6 +2731,18 @@ export default function InboxPage() {
                                                                             alt={att.filename || 'Image'}
                                                                             style={styles.msgImage}
                                                                             onClick={() => window.open(src, '_blank')}
+                                                                            onError={(e) => {
+                                                                                const target = e.target as HTMLImageElement;
+                                                                                target.style.display = 'none';
+                                                                                const link = document.createElement('a');
+                                                                                link.href = src || '#';
+                                                                                link.target = '_blank';
+                                                                                link.textContent = `📎 ${att.filename || 'Tải ảnh'}`;
+                                                                                link.style.color = isAgent ? '#e0e7ff' : '#6366f1';
+                                                                                link.style.fontSize = '13px';
+                                                                                link.style.wordBreak = 'break-all';
+                                                                                target.parentElement?.appendChild(link);
+                                                                            }}
                                                                         />
                                                                     ) : (
                                                                         <a href={src} download={att.filename} style={{...styles.fileLink, display: 'block', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
@@ -1733,13 +2775,17 @@ export default function InboxPage() {
                                                             </div>
                                                         ) : (
                                                             <div>
-                                                                {msg.content && renderMessageContent(msg.content, isAgent)}
+                                                                {msg.content && renderMessageContent(msg.content, isAgent, !!(msg.attachments?.length))}
                                                                 {msg.editedAt && <div style={{ fontSize: 10, opacity: 0.6, marginTop: 2 }}>(Đã chỉnh sửa)</div>}
                                                             </div>
                                                         )}
                                                         {/* Time + Status */}
                                                         <div style={styles.msgTime}>
-                                                            {new Date(msg.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                                                            <Tooltip title={new Date(msg.createdAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })}>
+                                                                <span style={{ cursor: 'default' }}>
+                                                                    {new Date(msg.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                                                                </span>
+                                                            </Tooltip>
                                                             {isAgent && msg.sender.name && (
                                                                 <span> · {msg.sender.name}</span>
                                                             )}
@@ -1767,6 +2813,7 @@ export default function InboxPage() {
                                                             )}
                                                         </div>
                                                     </div>
+                                                    </div>{/* end group sender wrapper */}
                                                     {/* Message Actions (Reply) */}
                                                     <div className="msg-actions" style={{
                                                         display: 'flex', alignItems: 'center', opacity: 0, transition: 'opacity 0.2s', padding: '0 8px'
@@ -1809,6 +2856,8 @@ export default function InboxPage() {
                                                         )}
                                                     </div>
                                                 </div>
+                                                </Dropdown>
+                                                </Fragment>
                                             );
                                         })}
                                     </>
@@ -1869,144 +2918,351 @@ export default function InboxPage() {
                                     Cuộc hội thoại đang được {getAssignedName(selectedConv) || 'agent khác'} phụ trách. Bạn không thể nhắn tin.
                                 </div>
                             ) : (
-                                <div style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', width: '100%', flexShrink: 0 }}>
                                     {/* Quote Preview */}
                                     {replyingTo && (
                                         <div style={{
-                                            padding: '8px 12px', background: '#f3f4f6', borderLeft: '3px solid #8b5cf6',
+                                            padding: '8px 16px', background: '#f9fafb', borderLeft: '3px solid #6366f1',
                                             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                                            borderTop: '1px solid #e5e7eb',
+                                            borderTop: '1px solid #f3f4f6',
                                         }}>
-                                            <div style={{ overflow: 'hidden' }}>
-                                                <div style={{ fontSize: 12, fontWeight: 600, color: '#8b5cf6', marginBottom: 2 }}>
-                                                    Đang trả lời {replyingTo.sender.name || (replyingTo.sender.type === 'visitor' ? 'Khách' : 'Agent')}
+                                            <div style={{ overflow: 'hidden', minWidth: 0 }}>
+                                                <div style={{ fontSize: 11, fontWeight: 600, color: '#6366f1', marginBottom: 1 }}>
+                                                    Trả lời {replyingTo.sender.name || (replyingTo.sender.type === 'visitor' ? 'Khách' : 'Agent')}
                                                 </div>
-                                                <div style={{ fontSize: 12, color: '#6b7280', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                <div style={{ fontSize: 12, color: '#9ca3af', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                                     {replyingTo.content || 'Hình ảnh/File đính kèm'}
                                                 </div>
                                             </div>
-                                            <Button type="text" size="small" icon={<XIcon size={16} />} onClick={() => setReplyingTo(null)} />
+                                            <button
+                                                onClick={() => setReplyingTo(null)}
+                                                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, borderRadius: 6, flexShrink: 0 }}
+                                            >
+                                                <XIcon size={14} color="#9ca3af" />
+                                            </button>
                                         </div>
                                     )}
-                                    <div style={styles.inputArea}>
+                                    {/* iMessage-style input bar */}
+                                    <div style={{
+                                        padding: '10px 12px',
+                                        background: '#fff',
+                                        borderTop: '1px solid #f3f4f6',
+                                        flexShrink: 0,
+                                    }}>
                                         <input
-                                        type="file"
-                                        ref={fileInputRef}
-                                        onChange={handleFileUpload}
-                                        style={{ display: 'none' }}
-                                        accept="image/*,.pdf,.doc,.docx,.txt"
-                                    />
-                                    <Button
-                                        type="text"
-                                        icon={<Paperclip size={18} color="#666" />}
-                                        onClick={() => fileInputRef.current?.click()}
-                                        style={{ padding: '4px 8px' }}
-                                    />
-                                    {/* Macro selector */}
-                                    <Popover
-                                        open={showMacroPopover}
-                                        onOpenChange={setShowMacroPopover}
-                                        trigger="click"
-                                        placement="topLeft"
-                                        content={
-                                            <div style={{ width: 300, maxHeight: 350, overflowY: 'auto' }}>
-                                                <div style={{ fontWeight: 600, padding: '4px 0 8px', borderBottom: '1px solid #f0f0f0', marginBottom: 8, fontSize: 13 }}>
-                                                    ⚡ Chọn Macro
-                                                </div>
-                                                {macros.length === 0 ? (
-                                                    <Empty description="Chưa có macro" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-                                                ) : (
-                                                    <>
-                                                        {['team', 'personal'].map(scope => {
-                                                            const scopeMacros = macros.filter(m => m.scope === scope);
-                                                            if (scopeMacros.length === 0) return null;
-                                                            return (
-                                                                <div key={scope} style={{ marginBottom: 8 }}>
-                                                                    <div style={{ fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', padding: '4px 0' }}>
-                                                                        {scope === 'team' ? '👥 Team' : '👤 Cá nhân'}
-                                                                    </div>
-                                                                    {scopeMacros.map(m => (
-                                                                        <div
-                                                                            key={m._id}
-                                                                            onClick={() => {
-                                                                                const visitor = selectedConv?.visitorInfo;
-                                                                                const visitorName = visitor?.name || visitor?.email || 'Khách';
-                                                                                const agentName = me?.user?.name || 'Agent';
-                                                                                const filled = m.content
-                                                                                    .replace(/\{\{customer_name\}\}/g, visitorName)
-                                                                                    .replace(/\{\{agent_name\}\}/g, agentName)
-                                                                                    .replace(/\{\{order_id\}\}/g, '[order_id]');
-                                                                                setInputText(prev => prev + filled);
-                                                                                setShowMacroPopover(false);
-                                                                            }}
-                                                                            style={{
-                                                                                padding: '8px 10px',
-                                                                                cursor: 'pointer',
-                                                                                borderRadius: 6,
-                                                                                transition: 'background 0.15s',
-                                                                            }}
-                                                                            onMouseEnter={e => (e.currentTarget.style.background = '#f5f3ff')}
-                                                                            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                                                                        >
-                                                                            <div style={{ fontWeight: 500, fontSize: 13 }}>
-                                                                                {m.title}
-                                                                                {m.shortcut && <Tag color="purple" style={{ marginLeft: 6, fontSize: 11 }}>{m.shortcut}</Tag>}
-                                                                                {m.category && <Tag style={{ marginLeft: 4, fontSize: 11 }}>{m.category}</Tag>}
-                                                                            </div>
-                                                                            <div style={{ fontSize: 12, color: '#888', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                                                                {m.content.slice(0, 80)}{m.content.length > 80 ? '...' : ''}
-                                                                            </div>
-                                                                        </div>
-                                                                    ))}
-                                                                </div>
-                                                            );
-                                                        })}
-                                                    </>
-                                                )}
-                                            </div>
-                                        }
-                                    >
-                                        <Button
-                                            type="text"
-                                            icon={<Zap size={18} color="#8b5cf6" />}
-                                            style={{ padding: '4px 8px' }}
+                                            type="file"
+                                            ref={fileInputRef}
+                                            onChange={handleFileUpload}
+                                            style={{ display: 'none' }}
+                                            accept="image/*,.pdf,.doc,.docx,.txt"
                                         />
-                                    </Popover>
-                                    <input
-                                        id="chat-input"
-                                        style={styles.textInput}
-                                        placeholder="Nhập tin nhắn..."
-                                        value={inputText}
-                                        onChange={(e) => { setInputText(e.target.value); handleTyping(); }}
-                                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-                                        onPaste={(e) => {
-                                            const items = e.clipboardData?.items;
-                                            if (!items) return;
-                                            for (let i = 0; i < items.length; i++) {
-                                                if (items[i].type.startsWith('image/')) {
-                                                    const file = items[i].getAsFile();
-                                                    if (file) {
-                                                        e.preventDefault();
-                                                        const dt = new DataTransfer();
-                                                        dt.items.add(file);
-                                                        if (fileInputRef.current) {
-                                                            fileInputRef.current.files = dt.files;
-                                                            fileInputRef.current.dispatchEvent(new Event('change', { bubbles: true }));
-                                                        }
-                                                    }
-                                                    break;
-                                                }
-                                            }
+                                        <div style={{
+                                            display: 'flex', alignItems: 'flex-end',
+                                            background: '#f3f4f6', borderRadius: 22,
+                                            padding: '4px 4px 4px 14px',
+                                            transition: 'all 0.2s',
+                                            border: '1.5px solid transparent',
                                         }}
-                                    />
-                                    <Button
-                                        type="primary"
-                                        icon={<Send size={16} />}
-                                        onClick={handleSend}
-                                        loading={sending}
-                                        style={{ borderRadius: 20, background: 'var(--gradient-primary, #6366f1)', border: 'none', boxShadow: '0 4px 12px rgba(99, 102, 241, 0.3)' }}
-                                    />
-                                </div>
+                                            onFocusCapture={e => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.borderColor = '#6366f1'; }}
+                                            onBlurCapture={e => { e.currentTarget.style.background = '#f3f4f6'; e.currentTarget.style.borderColor = 'transparent'; }}
+                                        >
+                                            {/* Attachment button — inside the input bar */}
+                                            <button
+                                                onClick={() => fileInputRef.current?.click()}
+                                                style={{
+                                                    background: 'none', border: 'none', cursor: 'pointer',
+                                                    padding: '6px 2px', display: 'flex', alignItems: 'center',
+                                                    opacity: 0.5, transition: 'opacity 0.15s', flexShrink: 0,
+                                                }}
+                                                onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                                                onMouseLeave={e => e.currentTarget.style.opacity = '0.5'}
+                                            >
+                                                <Paperclip size={18} color="#6b7280" />
+                                            </button>
+                                            {/* Macro button — subtle, inside input */}
+                                            <Popover
+                                                open={showMacroPopover}
+                                                onOpenChange={(open) => { setShowMacroPopover(open); if (!open) setMacroSearchText(''); }}
+                                                trigger="click"
+                                                placement="topLeft"
+                                                content={
+                                                    <div style={{ width: 320, maxHeight: 380, display: 'flex', flexDirection: 'column' }}>
+                                                        <div style={{ fontWeight: 600, padding: '10px 14px', borderBottom: '1px solid #f0f0f0', fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                            <span>Macro</span>
+                                                            <a
+                                                                href={`/workspace/${workspaceId}/settings?tab=templates`}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                style={{ fontSize: 11, color: '#6366f1', fontWeight: 500 }}
+                                                            >
+                                                                Quản lý
+                                                            </a>
+                                                        </div>
+                                                        <div style={{ padding: '8px 12px', borderBottom: '1px solid #f5f5f5' }}>
+                                                            <Input
+                                                                size="small"
+                                                                placeholder="Tìm macro..."
+                                                                prefix={<Search size={14} color="#aaa" />}
+                                                                value={macroSearchText}
+                                                                onChange={e => setMacroSearchText(e.target.value)}
+                                                                allowClear
+                                                                style={{ borderRadius: 8 }}
+                                                            />
+                                                        </div>
+                                                        <div style={{ overflowY: 'auto', flex: 1, padding: '4px 0' }}>
+                                                            {(() => {
+                                                                const q = macroSearchText.toLowerCase().trim();
+                                                                const filtered = q
+                                                                    ? macros.filter(m => m.title.toLowerCase().includes(q) || m.content.toLowerCase().includes(q) || m.shortcut?.toLowerCase().includes(q) || m.category?.toLowerCase().includes(q))
+                                                                    : macros;
+                                                                if (filtered.length === 0) return <Empty description={macros.length === 0 ? 'Chưa có macro' : 'Không tìm thấy'} image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ padding: '20px 0' }} />;
+                                                                return ['team', 'personal'].map(scope => {
+                                                                    const scopeMacros = filtered.filter(m => m.scope === scope);
+                                                                    if (scopeMacros.length === 0) return null;
+                                                                    return (
+                                                                        <div key={scope} style={{ marginBottom: 4 }}>
+                                                                            <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', padding: '6px 14px 2px', letterSpacing: 0.5 }}>
+                                                                                {scope === 'team' ? 'Team' : 'Cá nhân'}
+                                                                            </div>
+                                                                            {scopeMacros.map(m => (
+                                                                                <Tooltip
+                                                                                    key={m._id}
+                                                                                    placement="right"
+                                                                                    title={
+                                                                                        <div style={{ maxWidth: 260, fontSize: 12, whiteSpace: 'pre-wrap' }}>
+                                                                                            <div style={{ fontWeight: 600, marginBottom: 4 }}>{m.title}</div>
+                                                                                            {m.content}
+                                                                                        </div>
+                                                                                    }
+                                                                                    mouseEnterDelay={0.4}
+                                                                                >
+                                                                                    <div
+                                                                                        onClick={() => {
+                                                                                            const visitor = selectedConv?.visitorInfo;
+                                                                                            const vName = visitor?.name || visitor?.email || 'Khách';
+                                                                                            const agentName = me?.user?.name || 'Agent';
+                                                                                            const now = new Date();
+                                                                                            const channel = selectedConv?.channel || 'widget';
+                                                                                            const filled = m.content
+                                                                                                .replace(/\{\{customer_name\}\}/g, vName)
+                                                                                                .replace(/\{\{agent_name\}\}/g, agentName)
+                                                                                                .replace(/\{\{order_id\}\}/g, '[order_id]')
+                                                                                                .replace(/\{\{date\}\}/g, now.toLocaleDateString('vi-VN'))
+                                                                                                .replace(/\{\{time\}\}/g, now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }))
+                                                                                                .replace(/\{\{channel\}\}/g, channel);
+                                                                                            setInputText(prev => prev + filled);
+                                                                                            setShowMacroPopover(false);
+                                                                                            setMacroSearchText('');
+                                                                                            httpClient.post(`/macros/workspace/${workspaceId}/${m._id}/use`).catch(() => {});
+                                                                                            chatInputRef.current?.focus();
+                                                                                        }}
+                                                                                        style={{ padding: '8px 14px', cursor: 'pointer', borderRadius: 6, transition: 'background 0.15s', margin: '0 4px' }}
+                                                                                        onMouseEnter={e => (e.currentTarget.style.background = '#f5f3ff')}
+                                                                                        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                                                                                    >
+                                                                                        <div style={{ fontWeight: 500, fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                                                            {m.title}
+                                                                                            {m.shortcut && <Tag color="purple" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', marginLeft: 4 }}>{m.shortcut}</Tag>}
+                                                                                        </div>
+                                                                                        <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                                                            {m.content.slice(0, 80)}{m.content.length > 80 ? '…' : ''}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </Tooltip>
+                                                                            ))}
+                                                                        </div>
+                                                                    );
+                                                                });
+                                                            })()}
+                                                        </div>
+                                                    </div>
+                                                }
+                                            >
+                                                <button
+                                                    style={{
+                                                        background: 'none', border: 'none', cursor: 'pointer',
+                                                        padding: '6px 4px', display: 'flex', alignItems: 'center',
+                                                        opacity: 0.5, transition: 'opacity 0.15s', flexShrink: 0,
+                                                    }}
+                                                    onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                                                    onMouseLeave={e => e.currentTarget.style.opacity = '0.5'}
+                                                >
+                                                    <Zap size={16} color="#6b7280" />
+                                                </button>
+                                            </Popover>
+                                            {/* Textarea — main input */}
+                                            <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+                                                {/* Macro shortcut suggestions dropdown */}
+                                                {showMacroSuggestions && (() => {
+                                                    const slashMatch = inputText.match(/\/([\w]*)$/);
+                                                    const slashQuery = slashMatch ? slashMatch[1].toLowerCase() : '';
+                                                    const suggestions = macros.filter(m => m.shortcut && m.shortcut.toLowerCase().startsWith('/' + slashQuery));
+                                                    if (suggestions.length === 0) return null;
+                                                    return (
+                                                        <div style={{
+                                                            position: 'absolute', bottom: '100%', left: 0, right: 0,
+                                                            background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12,
+                                                            boxShadow: '0 -4px 24px rgba(0,0,0,0.08)', zIndex: 100,
+                                                            maxHeight: 200, overflowY: 'auto', marginBottom: 6,
+                                                        }}>
+                                                            <div style={{ padding: '6px 12px', fontSize: 10, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, borderBottom: '1px solid #f3f4f6' }}>Macro</div>
+                                                            {suggestions.map((m, idx) => (
+                                                                <div
+                                                                    key={m._id}
+                                                                    onClick={() => {
+                                                                        const visitor = selectedConv?.visitorInfo;
+                                                                        const vName = visitor?.name || visitor?.email || 'Khách';
+                                                                        const agentName = me?.user?.name || 'Agent';
+                                                                        const now = new Date();
+                                                                        const channel = selectedConv?.channel || 'widget';
+                                                                        const filled = m.content
+                                                                            .replace(/\{\{customer_name\}\}/g, vName)
+                                                                            .replace(/\{\{agent_name\}\}/g, agentName)
+                                                                            .replace(/\{\{order_id\}\}/g, '[order_id]')
+                                                                            .replace(/\{\{date\}\}/g, now.toLocaleDateString('vi-VN'))
+                                                                            .replace(/\{\{time\}\}/g, now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }))
+                                                                            .replace(/\{\{channel\}\}/g, channel);
+                                                                        const newText = inputText.replace(/\/[\w]*$/, filled);
+                                                                        setInputText(newText);
+                                                                        setShowMacroSuggestions(false);
+                                                                        httpClient.post(`/macros/workspace/${workspaceId}/${m._id}/use`).catch(() => {});
+                                                                        chatInputRef.current?.focus();
+                                                                    }}
+                                                                    style={{
+                                                                        padding: '8px 12px', cursor: 'pointer', transition: 'background 0.15s',
+                                                                        background: idx === macroSuggestionIndex ? '#f5f3ff' : 'transparent',
+                                                                    }}
+                                                                    onMouseEnter={e => { e.currentTarget.style.background = '#f5f3ff'; setMacroSuggestionIndex(idx); }}
+                                                                    onMouseLeave={e => { if (idx !== macroSuggestionIndex) e.currentTarget.style.background = 'transparent'; }}
+                                                                >
+                                                                    <div style={{ fontWeight: 500, fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                                        <Tag color="purple" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>{m.shortcut}</Tag>
+                                                                        {m.title}
+                                                                    </div>
+                                                                    <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                                        {m.content.slice(0, 80)}{m.content.length > 80 ? '…' : ''}
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    );
+                                                })()}
+                                                <textarea
+                                                    id="chat-input"
+                                                    ref={chatInputRef as any}
+                                                    style={{
+                                                        width: '100%', border: 'none', outline: 'none',
+                                                        background: 'transparent', resize: 'none',
+                                                        fontSize: 14, lineHeight: '20px',
+                                                        padding: '6px 4px', minHeight: 32, maxHeight: 120,
+                                                        overflow: 'hidden',
+                                                        fontFamily: "var(--font-sans, 'Inter', -apple-system, sans-serif)",
+                                                    }}
+                                                    placeholder="Nhập tin nhắn..."
+                                                    rows={1}
+                                                    value={inputText}
+                                                    onChange={(e) => {
+                                                        const val = e.target.value;
+                                                        setInputText(val);
+                                                        handleTyping();
+                                                        e.target.style.height = 'auto';
+                                                        e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+                                                        const slashMatch = val.match(/\/([\w]*)$/);
+                                                        if (slashMatch && macros.some(m => m.shortcut)) {
+                                                            setShowMacroSuggestions(true);
+                                                            setMacroSuggestionIndex(0);
+                                                        } else {
+                                                            setShowMacroSuggestions(false);
+                                                        }
+                                                    }}
+                                                    onKeyDown={(e) => {
+                                                        if (showMacroSuggestions) {
+                                                            const slashMatch = inputText.match(/\/([\w]*)$/);
+                                                            const slashQuery = slashMatch ? slashMatch[1].toLowerCase() : '';
+                                                            const suggestions = macros.filter(m => m.shortcut && m.shortcut.toLowerCase().startsWith('/' + slashQuery));
+                                                            if (suggestions.length > 0) {
+                                                                if (e.key === 'ArrowDown') { e.preventDefault(); setMacroSuggestionIndex(prev => Math.min(prev + 1, suggestions.length - 1)); return; }
+                                                                if (e.key === 'ArrowUp') { e.preventDefault(); setMacroSuggestionIndex(prev => Math.max(prev - 1, 0)); return; }
+                                                                if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+                                                                    e.preventDefault();
+                                                                    const m = suggestions[macroSuggestionIndex];
+                                                                    if (m) {
+                                                                        const visitor = selectedConv?.visitorInfo;
+                                                                        const vName = visitor?.name || visitor?.email || 'Khách';
+                                                                        const agentName = me?.user?.name || 'Agent';
+                                                                        const now = new Date();
+                                                                        const channel = selectedConv?.channel || 'widget';
+                                                                        const filled = m.content
+                                                                            .replace(/\{\{customer_name\}\}/g, vName)
+                                                                            .replace(/\{\{agent_name\}\}/g, agentName)
+                                                                            .replace(/\{\{order_id\}\}/g, '[order_id]')
+                                                                            .replace(/\{\{date\}\}/g, now.toLocaleDateString('vi-VN'))
+                                                                            .replace(/\{\{time\}\}/g, now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }))
+                                                                            .replace(/\{\{channel\}\}/g, channel);
+                                                                        const newText = inputText.replace(/\/[\w]*$/, filled);
+                                                                        setInputText(newText);
+                                                                        setShowMacroSuggestions(false);
+                                                                        httpClient.post(`/macros/workspace/${workspaceId}/${m._id}/use`).catch(() => {});
+                                                                    }
+                                                                    return;
+                                                                }
+                                                                if (e.key === 'Escape') { e.preventDefault(); setShowMacroSuggestions(false); return; }
+                                                            }
+                                                        }
+                                                        if (e.key === 'Enter' && e.altKey) {
+                                                            e.preventDefault();
+                                                            const target = e.target as HTMLTextAreaElement;
+                                                            const start = target.selectionStart;
+                                                            const end = target.selectionEnd;
+                                                            const newValue = inputText.substring(0, start) + '\n' + inputText.substring(end);
+                                                            setInputText(newValue);
+                                                            setTimeout(() => {
+                                                                target.selectionStart = target.selectionEnd = start + 1;
+                                                                target.style.height = 'auto';
+                                                                target.style.height = Math.min(target.scrollHeight, 120) + 'px';
+                                                            }, 0);
+                                                        } else if (e.key === 'Enter' && !e.shiftKey) {
+                                                            e.preventDefault();
+                                                            handleSend();
+                                                        }
+                                                    }}
+                                                    onPaste={(e) => {
+                                                        const items = e.clipboardData?.items;
+                                                        if (!items) return;
+                                                        for (let i = 0; i < items.length; i++) {
+                                                            if (items[i].type.startsWith('image/')) {
+                                                                const file = items[i].getAsFile();
+                                                                if (file) {
+                                                                    e.preventDefault();
+                                                                    const dt = new DataTransfer();
+                                                                    dt.items.add(file);
+                                                                    if (fileInputRef.current) {
+                                                                        fileInputRef.current.files = dt.files;
+                                                                        fileInputRef.current.dispatchEvent(new Event('change', { bubbles: true }));
+                                                                    }
+                                                                }
+                                                                break;
+                                                            }
+                                                        }
+                                                    }}
+                                                />
+                                            </div>
+                                            {/* Send button — integrated pill */}
+                                            <button
+                                                onClick={handleSend}
+                                                disabled={sending || !inputText.trim()}
+                                                style={{
+                                                    width: 34, height: 34, borderRadius: 18,
+                                                    background: inputText.trim() ? '#6366f1' : '#e5e7eb',
+                                                    border: 'none', cursor: inputText.trim() ? 'pointer' : 'default',
+                                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                    transition: 'all 0.2s', flexShrink: 0,
+                                                }}
+                                            >
+                                                <Send size={16} color={inputText.trim() ? '#fff' : '#9ca3af'} style={{ marginLeft: 1 }} />
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
                             )}
                         </>
@@ -2023,12 +3279,30 @@ export default function InboxPage() {
 
                 {/* Visitor Profile Sidebar */}
                 {selectedConvId && (
-                    <div className="visitor-profile-sidebar">
+                    <div className="visitor-profile-sidebar" style={{
+                        width: 300,
+                        flexShrink: 0,
+                        overflowY: 'auto',
+                        background: '#fff',
+                        borderLeft: '1px solid var(--color-border, #e2e8f0)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                    }}>
+                        {/* Knowledge Base Smart Suggest */}
+                        <KnowledgeSuggestPanel
+                            workspaceId={workspaceId as string}
+                            lastCustomerMessage={(() => {
+                                const visitorMsgs = messages.filter(m => m.sender?.type === 'visitor' && !m.isDeleted);
+                                return visitorMsgs.length > 0 ? visitorMsgs[visitorMsgs.length - 1].content : undefined;
+                            })()}
+                            onInsertReply={(text) => setInputText(text)}
+                        />
                         <VisitorProfileSidebar
                             workspaceId={workspaceId}
                             visitorId={selectedConv?.visitorId || null}
                             conversationTags={selectedConv?.tags || []}
                             workspaceTags={workspaceTags}
+                            workspaceLabels={workspaceLabels}
                             workspaceMembers={workspaceMembers}
                             onAddTag={(tag) => !isMemberOnly && selectedConv && handleAddTag(selectedConv._id, tag)}
                             onRemoveTag={(tag) => !isMemberOnly && selectedConv && handleRemoveTag(selectedConv._id, tag)}
@@ -2038,6 +3312,7 @@ export default function InboxPage() {
                                     .then(() => message.success('Ghi chú nội bộ đã thêm'))
                                     .catch(() => message.error('Lỗi khi thêm ghi chú'));
                             }}
+                            messages={messages}
                         />
                     </div>
                 )}
@@ -2051,6 +3326,13 @@ export default function InboxPage() {
 
                 .msg-row:hover .msg-actions {
                     opacity: 1 !important;
+                }
+
+                /* Medium screens — hide visitor sidebar to give chat more room */
+                @media (max-width: 1400px) {
+                    .visitor-profile-sidebar {
+                        display: none !important;
+                    }
                 }
 
                 @media (max-width: 768px) {
@@ -2072,11 +3354,354 @@ export default function InboxPage() {
                     }
                 }
             `}</style>
+
+            {/* ── Forward/Broadcast Modal ── */}
+            <Modal
+                title={null}
+                open={showForwardModal}
+                onCancel={() => { if (!broadcasting) { setShowForwardModal(false); } }}
+                footer={null}
+                width={520}
+                styles={{ body: { padding: 0 } }}
+                closable={!broadcasting}
+            >
+                <div style={{ padding: '20px 24px 0' }}>
+                    <h3 style={{ margin: '0 0 4px', fontSize: 17, fontWeight: 700, color: '#111827' }}>
+                        <Forward size={18} style={{ verticalAlign: 'middle', marginRight: 8, color: '#6366f1' }} />
+                        Chuyển tiếp tin nhắn
+                    </h3>
+                    <p style={{ color: '#6b7280', fontSize: 13, margin: '0 0 14px' }}>
+                        {selectedMsgIds.size} tin nhắn → chọn người nhận
+                    </p>
+
+                    {/* Selected messages preview */}
+                    <div style={{
+                        background: '#f9fafb', borderRadius: 10, padding: '10px 14px',
+                        marginBottom: 14, maxHeight: 100, overflow: 'auto',
+                        border: '1px solid #e5e7eb', fontSize: 12.5, color: '#374151',
+                    }}>
+                        {messages.filter(m => selectedMsgIds.has(m._id)).map((m, i) => (
+                            <div key={m._id} style={{ marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                <span style={{ color: '#9ca3af' }}>{i + 1}.</span> {m.content?.slice(0, 80)}{(m.content?.length || 0) > 80 ? '...' : ''}
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Tabs: Friends vs Contacts */}
+                    <div style={{ display: 'flex', gap: 0, marginBottom: 12, borderRadius: 10, overflow: 'hidden', border: '1px solid #e5e7eb' }}>
+                        {(['friends', 'contacts'] as const).map(tab => (
+                            <div
+                                key={tab}
+                                onClick={() => { setForwardTab(tab); setSelectedRecipients(new Set()); setForwardSearch(''); }}
+                                style={{
+                                    flex: 1, padding: '8px 12px', textAlign: 'center', cursor: 'pointer',
+                                    fontSize: 12.5, fontWeight: 600, transition: 'all 0.2s',
+                                    background: forwardTab === tab ? '#6366f1' : '#fff',
+                                    color: forwardTab === tab ? '#fff' : '#6b7280',
+                                }}
+                            >
+                                {tab === 'friends' ? `👤 Bạn bè (${forwardFriends.length})` : `💬 Đã nhắn tin (${forwardContacts.length})`}
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Search */}
+                    <Input
+                        prefix={<Search size={14} color="#9ca3af" />}
+                        placeholder={forwardTab === 'friends' ? 'Tìm bạn bè Zalo...' : 'Tìm người đã nhắn tin...'}
+                        value={forwardSearch}
+                        onChange={e => setForwardSearch(e.target.value)}
+                        allowClear
+                        style={{ borderRadius: 8, marginBottom: 10, height: 36 }}
+                    />
+
+                    {/* Select all / count */}
+                    {!forwardFriendsLoading && (() => {
+                        const sourceList = forwardTab === 'friends' ? forwardFriends : forwardContacts;
+                        const visibleList = sourceList.filter(f => !forwardSearch || f.displayName.toLowerCase().includes(forwardSearch.toLowerCase()));
+                        if (visibleList.length === 0) return null;
+                        return (
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                <Checkbox
+                                    checked={visibleList.length > 0 && visibleList.every(f => selectedRecipients.has(f.threadId))}
+                                    indeterminate={visibleList.some(f => selectedRecipients.has(f.threadId)) && !visibleList.every(f => selectedRecipients.has(f.threadId))}
+                                    onChange={(e) => {
+                                        if (e.target.checked) {
+                                            setSelectedRecipients(prev => {
+                                                const next = new Set(prev);
+                                                visibleList.forEach(f => next.add(f.threadId));
+                                                return next;
+                                            });
+                                        } else {
+                                            setSelectedRecipients(prev => {
+                                                const next = new Set(prev);
+                                                visibleList.forEach(f => next.delete(f.threadId));
+                                                return next;
+                                            });
+                                        }
+                                    }}
+                                >
+                                    <span style={{ fontSize: 12.5, color: '#6b7280' }}>Chọn tất cả ({visibleList.length})</span>
+                                </Checkbox>
+                                <span style={{ fontSize: 12, color: '#6366f1', fontWeight: 600 }}>
+                                    {selectedRecipients.size} đã chọn
+                                    {selectedRecipients.size > 50 && (
+                                        <span style={{ color: '#f59e0b', fontWeight: 400, marginLeft: 6 }}>→ {Math.ceil(selectedRecipients.size / 50)} đợt</span>
+                                    )}
+                                </span>
+                            </div>
+                        );
+                    })()}
+                </div>
+
+                {/* Recipients list */}
+                <div style={{ maxHeight: 300, overflow: 'auto', padding: '0 24px' }}>
+                    {forwardFriendsLoading ? (
+                        <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+                    ) : (() => {
+                        const sourceList = forwardTab === 'friends' ? forwardFriends : forwardContacts;
+                        const filtered = sourceList.filter(f => !forwardSearch || f.displayName.toLowerCase().includes(forwardSearch.toLowerCase()));
+                        if (filtered.length === 0) return <Empty description={forwardTab === 'friends' ? 'Không tìm thấy bạn bè' : 'Không có liên hệ nào'} style={{ padding: 30 }} />;
+                        return filtered.map(person => (
+                            <div
+                                key={person.threadId}
+                                style={{
+                                    display: 'flex', alignItems: 'center', gap: 10,
+                                    padding: '8px 0', borderBottom: '1px solid #f3f4f6',
+                                    cursor: 'pointer',
+                                }}
+                                onClick={() => {
+                                    setSelectedRecipients(prev => {
+                                        const next = new Set(prev);
+                                        if (next.has(person.threadId)) next.delete(person.threadId);
+                                        else next.add(person.threadId);
+                                        return next;
+                                    });
+                                }}
+                            >
+                                <Checkbox checked={selectedRecipients.has(person.threadId)} />
+                                {person.avatar ? (
+                                    <img src={person.avatar} alt="" style={{ width: 36, height: 36, borderRadius: 10, objectFit: 'cover' }} />
+                                ) : (
+                                    <div style={{
+                                        width: 36, height: 36, borderRadius: 10,
+                                        background: `hsl(${(person.displayName.charCodeAt(0) * 37) % 360}, 50%, 55%)`,
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        color: '#fff', fontWeight: 600, fontSize: 14,
+                                    }}>
+                                        {person.displayName[0]?.toUpperCase()}
+                                    </div>
+                                )}
+                                <div style={{ flex: 1, fontSize: 13.5, fontWeight: 500, color: '#1f2937' }}>
+                                    {person.displayName}
+                                </div>
+                            </div>
+                        ));
+                    })()}
+                </div>
+
+                {/* Broadcast progress */}
+                {broadcastProgress && (
+                    <div style={{ padding: '14px 24px', background: broadcastProgress.status === 'paused' ? '#fffbeb' : broadcastProgress.status === 'stopped' ? '#fef2f2' : '#f0fdf4', borderTop: '1px solid #e5e7eb', transition: 'background 0.3s' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                            <div style={{ fontSize: 12.5, fontWeight: 600, color: broadcastProgress.status === 'paused' ? '#92400e' : broadcastProgress.status === 'stopped' ? '#991b1b' : '#166534' }}>
+                                {broadcastProgress.status === 'paused' ? '⏸ Đã tạm ngưng' : broadcastProgress.status === 'stopped' ? '⬛ Đã dừng' : broadcastProgress.status === 'completed' ? '✅ Hoàn thành' : `⏳ Đang gửi... ${broadcastProgress.current}/${broadcastProgress.total}`}
+                                <span style={{ color: '#6b7280', fontWeight: 400, marginLeft: 8 }}>
+                                    ✓{broadcastProgress.successCount} ✗{broadcastProgress.failedCount}
+                                </span>
+                            </div>
+                            {broadcasting && (
+                                <div style={{ display: 'flex', gap: 6 }}>
+                                    {broadcastProgress.status !== 'paused' ? (
+                                        <button
+                                            onClick={() => { broadcastPausedRef.current = true; setBroadcastProgress(p => p ? { ...p, status: 'paused' } : p); }}
+                                            style={{
+                                                height: 28, padding: '0 12px', borderRadius: 7,
+                                                border: '1.5px solid #f59e0b', background: '#fffbeb',
+                                                fontSize: 11.5, fontWeight: 600, color: '#d97706',
+                                                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+                                                transition: 'all 0.15s',
+                                            }}
+                                        >
+                                            ⏸ Tạm ngưng
+                                        </button>
+                                    ) : (
+                                        <button
+                                            onClick={() => { broadcastPausedRef.current = false; setBroadcastProgress(p => p ? { ...p, status: 'sending' } : p); }}
+                                            style={{
+                                                height: 28, padding: '0 12px', borderRadius: 7,
+                                                border: 'none', background: 'linear-gradient(135deg, #10b981, #059669)',
+                                                fontSize: 11.5, fontWeight: 600, color: 'white',
+                                                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+                                                boxShadow: '0 2px 8px rgba(16,185,129,0.3)',
+                                                transition: 'all 0.15s',
+                                            }}
+                                        >
+                                            ▶ Tiếp tục
+                                        </button>
+                                    )}
+                                    <button
+                                        onClick={() => { broadcastCancelledRef.current = true; broadcastPausedRef.current = false; setBroadcastProgress(p => p ? { ...p, status: 'stopped' } : p); }}
+                                        style={{
+                                            height: 28, padding: '0 12px', borderRadius: 7,
+                                            border: '1.5px solid #ef4444', background: '#fef2f2',
+                                            fontSize: 11.5, fontWeight: 600, color: '#dc2626',
+                                            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+                                            transition: 'all 0.15s',
+                                        }}
+                                    >
+                                        ⬛ Dừng
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                        <Progress
+                            percent={Math.round((broadcastProgress.current / broadcastProgress.total) * 100)}
+                            strokeColor={broadcastProgress.status === 'paused' ? '#f59e0b' : broadcastProgress.status === 'stopped' ? '#ef4444' : '#10b981'}
+                            size="small"
+                        />
+                    </div>
+                )}
+
+                {/* Footer */}
+                <div style={{
+                    padding: '14px 24px', borderTop: '1px solid #e5e7eb',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                }}>
+                    <div style={{ fontSize: 11.5, color: '#9ca3af' }}>
+                        ⏱ Delay 3s/người · Tự chia 50 người/đợt
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                        <Button
+                            onClick={() => { setShowForwardModal(false); setForwardMode(false); setSelectedMsgIds(new Set()); setBroadcastProgress(null); }}
+                            disabled={broadcasting}
+                            style={{ borderRadius: 8 }}
+                        >
+                            {!broadcasting && broadcastProgress ? 'Đóng' : 'Hủy'}
+                        </Button>
+                        {!broadcastProgress && (
+                            <Button
+                                type="primary"
+                                disabled={selectedRecipients.size === 0 || broadcasting}
+                                loading={broadcasting}
+                                onClick={async () => {
+                                if (selectedRecipients.size === 0) return;
+                                setBroadcasting(true);
+                                broadcastPausedRef.current = false;
+                                broadcastCancelledRef.current = false;
+
+                                const recipientList = Array.from(selectedRecipients);
+                                const msgContents = messages
+                                    .filter(m => selectedMsgIds.has(m._id))
+                                    .map(m => m.content || '')
+                                    .filter(Boolean);
+
+                                let successCount = 0;
+                                let failedCount = 0;
+                                setBroadcastProgress({ current: 0, total: recipientList.length, successCount: 0, failedCount: 0, status: 'sending' });
+
+                                const DELAY_MS = 3000;
+                                const BATCH_SIZE = 50;
+                                const BATCH_COOLDOWN = 30000;
+
+                                for (let i = 0; i < recipientList.length; i++) {
+                                    // Check cancel
+                                    if (broadcastCancelledRef.current) break;
+
+                                    // Check pause — wait until resumed
+                                    while (broadcastPausedRef.current && !broadcastCancelledRef.current) {
+                                        await new Promise(r => setTimeout(r, 300));
+                                    }
+                                    if (broadcastCancelledRef.current) break;
+
+                                    // Batch cooldown
+                                    if (i > 0 && i % BATCH_SIZE === 0) {
+                                        setBroadcastProgress(p => p ? { ...p, batchInfo: `Nghỉ ${BATCH_COOLDOWN / 1000}s giữa đợt...` } : p);
+                                        await new Promise(r => setTimeout(r, BATCH_COOLDOWN));
+                                        setBroadcastProgress(p => p ? { ...p, batchInfo: undefined } : p);
+                                    }
+
+                                    // Send to this recipient
+                                    try {
+                                        await httpClient.post(`/workspaces/${workspaceId}/zalo/broadcast`, {
+                                            messages: msgContents,
+                                            recipientIds: [recipientList[i]],
+                                            delayMs: 1000,
+                                        });
+                                        successCount++;
+                                    } catch {
+                                        failedCount++;
+                                    }
+
+                                    setBroadcastProgress({
+                                        current: i + 1,
+                                        total: recipientList.length,
+                                        successCount,
+                                        failedCount,
+                                        status: broadcastCancelledRef.current ? 'stopped' : 'sending',
+                                    });
+
+                                    // Delay between recipients (anti-spam)
+                                    if (i < recipientList.length - 1 && !broadcastCancelledRef.current) {
+                                        await new Promise(r => setTimeout(r, DELAY_MS));
+                                    }
+                                }
+
+                                // Final status
+                                const finalStatus = broadcastCancelledRef.current ? 'stopped' : 'completed';
+                                setBroadcastProgress(p => p ? { ...p, status: finalStatus } : p);
+
+                                if (finalStatus === 'completed') {
+                                    message.success(`Đã gửi thành công ${successCount}/${recipientList.length} người!`);
+                                } else {
+                                    message.warning(`Đã dừng: gửi ${successCount} thành công, ${failedCount} thất bại`);
+                                }
+
+                                setBroadcasting(false);
+                                // Auto-close after 2s if completed
+                                if (finalStatus === 'completed') {
+                                    setTimeout(() => {
+                                        setShowForwardModal(false);
+                                        setForwardMode(false);
+                                        setSelectedMsgIds(new Set());
+                                        setBroadcastProgress(null);
+                                    }, 2000);
+                                }
+                            }}
+                            style={{ borderRadius: 8, background: '#6366f1', border: 'none', minWidth: 120 }}
+                            icon={<Send size={14} />}
+                        >
+                            Gửi đến {selectedRecipients.size} người
+                        </Button>
+                        )}
+                    </div>
+                </div>
+            </Modal>
+
+            {/* ── Contact Profile Popup ── */}
+            <ContactProfileModal
+                open={!!profileModalConv}
+                onClose={() => setProfileModalConv(null)}
+                workspaceId={workspaceId}
+                conversation={profileModalConv}
+                onSendMessage={() => {
+                    if (profileModalConv) {
+                        setSelectedConvId(profileModalConv._id);
+                        setProfileModalConv(null);
+                        chatInputRef.current?.focus();
+                    }
+                }}
+            />
         </AppLayout>
     );
 }
 
 // ── Styles ──
+const ctxMenuItemStyle: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px',
+    cursor: 'pointer', fontSize: 13, color: '#333', transition: 'background .1s',
+};
+
 const styles: Record<string, React.CSSProperties> = {
     container: {
         position: 'absolute',
@@ -2088,7 +3713,7 @@ const styles: Record<string, React.CSSProperties> = {
     },
     // Sidebar
     sidebar: {
-        width: 360,
+        width: 300,
         background: 'var(--color-bg, #fff)',
         borderRight: '1px solid var(--color-border, #e2e8f0)',
         display: 'flex',
@@ -2150,7 +3775,7 @@ const styles: Record<string, React.CSSProperties> = {
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap' as const,
-        maxWidth: 220,
+        maxWidth: 200,
     },
     // Chat panel
     chatPanel: {
@@ -2162,15 +3787,19 @@ const styles: Record<string, React.CSSProperties> = {
         zIndex: 1,
         minWidth: 0,
         minHeight: 0,
+        overflow: 'hidden',
     },
     chatHeader: {
-        padding: '16px 24px',
-        background: 'rgba(255, 255, 255, 0.9)',
-        backdropFilter: 'blur(12px)',
-        borderBottom: '1px solid var(--color-border, #e2e8f0)',
+        padding: '10px 16px',
+        background: '#fff',
+        borderBottom: '1px solid #f3f4f6',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
+        position: 'relative' as const,
+        zIndex: 2,
+        flexShrink: 0,
+        minHeight: 56,
     },
     chatAvatar: {
         width: 38,
@@ -2194,7 +3823,6 @@ const styles: Record<string, React.CSSProperties> = {
         marginBottom: 10,
     },
     msgBubble: {
-        maxWidth: '70%',
         padding: '12px 16px',
         borderRadius: 18,
         fontSize: 14,
@@ -2236,12 +3864,13 @@ const styles: Record<string, React.CSSProperties> = {
         textDecoration: 'underline',
     },
     inputArea: {
-        padding: '16px 24px',
+        padding: '12px 14px',
         background: 'var(--color-bg, #fff)',
         borderTop: '1px solid var(--color-border, #e2e8f0)',
         display: 'flex',
-        gap: 12,
+        gap: 8,
         alignItems: 'center',
+        flexShrink: 0,
     },
     textInput: {
         flex: 1,

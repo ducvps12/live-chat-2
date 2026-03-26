@@ -135,7 +135,7 @@ export const conversationService = {
                 channel: 'zalo',
                 status: 'open',
                 lastMessageAt: new Date(),
-                metadata: { zaloUserId },
+                metadata: { zaloUserId, ...(groupSenderName ? { threadType: 'group' } : {}) },
             });
             isNew = true;
             await visitorRepo.incrementConversations(visitorId, widgetId);
@@ -157,12 +157,79 @@ export const conversationService = {
             } catch { /* socket may not be initialized */ }
         }
 
+        // Update visitorInfo avatar/name if we have them now (always overwrite to keep fresh)
+        if (conversation && !isNew && zaloAvatar) {
+            const currentAvatar = conversation.visitorInfo?.avatar || '';
+            const currentName = conversation.visitorInfo?.name || '';
+            const needsUpdate = (zaloAvatar && zaloAvatar !== currentAvatar)
+                || (zaloUserName && zaloUserName !== currentName);
+            if (needsUpdate) {
+                const updateFields: Record<string, any> = {};
+                if (zaloAvatar) {
+                    updateFields['visitorInfo.avatar'] = zaloAvatar;
+                }
+                if (zaloUserName && zaloUserName !== currentName) {
+                    updateFields['visitorInfo.name'] = zaloUserName;
+                }
+                try {
+                    const ConvModel = (await import('./repos/conversation.model')).ConversationModel;
+                    await ConvModel.updateOne({ _id: conversation._id }, { $set: updateFields });
+                    // Also update in-memory object
+                    if (!conversation.visitorInfo) (conversation as any).visitorInfo = {};
+                    if (zaloAvatar) (conversation.visitorInfo as any).avatar = zaloAvatar;
+                    if (zaloUserName) conversation.visitorInfo.name = zaloUserName;
+                } catch { /* silent */ }
+            }
+        }
+
         // Add message to conversation
         // For group messages: use individual sender name instead of group name
         const messageSenderName = groupSenderName || zaloUserName;
         return this.addMessage(
             (conversation._id as any).toString(),
             { type: 'visitor', id: visitorId, name: messageSenderName },
+            content,
+            msgType as any,
+            attachments,
+            clientMessageId
+        );
+    },
+
+    /**
+     * Handle self-sent Zalo messages (sent from Zalo app) — route as agent message for 2-way sync
+     */
+    async handleSelfZaloMessage(
+        workspaceId: string,
+        zaloThreadId: string,
+        conversationName: string,
+        zaloAvatar: string,
+        content: string,
+        msgType: 'text' | 'image' | 'video' | 'file' = 'text',
+        attachments: any[] = [],
+        clientMessageId?: string,
+    ) {
+        // Find the existing conversation for this thread — don't create new one for self-messages
+        const visitorId = `zalo_${zaloThreadId}`;
+        const widgetList = await widgetRepo.findByWorkspace(workspaceId);
+        if (!widgetList || widgetList.length === 0) return; // no widget = no conversation possible
+
+        const widgetId = (widgetList[0]._id as any).toString();
+        const conversation = await conversationRepo.findLatestByVisitor(visitorId, widgetId);
+        if (!conversation) {
+            console.log(`[ConvService] No existing conversation for self-msg thread ${zaloThreadId}, skipping`);
+            return;
+        }
+
+        // Reopen if closed so the message can be added
+        if (conversation.status === 'closed') {
+            await conversationRepo.updateStatus((conversation._id as any).toString(), 'open');
+            conversation.status = 'open';
+        }
+
+        // Add message as 'agent' type (it was sent by us from the Zalo app)
+        return this.addMessage(
+            (conversation._id as any).toString(),
+            { type: 'agent', id: 'zalo_self', name: '📱 Zalo App' },
             content,
             msgType as any,
             attachments,
@@ -220,6 +287,14 @@ export const conversationService = {
             { name: fbUserName, avatar: fbAvatar, attributes: { channel: 'facebook', fbUserId, pageId, pageName } }
         );
 
+        // Update visitor profile if we now have better data (e.g. avatar fetched later)
+        if (fbAvatar) {
+            await visitorRepo.enrichProfile(visitorId, widgetId, {
+                name: fbUserName,
+                attributes: { avatar: fbAvatar, channel: 'facebook', fbUserId, pageId, pageName },
+            });
+        }
+
         // Find/create conversation
         let conversation = await conversationRepo.findLatestByVisitor(visitorId, widgetId);
         let isNew = false;
@@ -254,9 +329,85 @@ export const conversationService = {
             } catch { /* socket may not be initialized */ }
         }
 
+        // Update visitorInfo on existing conversation if we now have avatar/name
+        if (conversation && !isNew) {
+            const hasNewAvatar = fbAvatar && (!conversation.visitorInfo?.avatar || conversation.visitorInfo.avatar === '');
+            const hasNewName = fbUserName && conversation.visitorInfo?.name !== fbUserName && fbUserName !== `FB User ${fbUserId.slice(-4)}`;
+            if (hasNewAvatar || hasNewName) {
+                try {
+                    await conversationRepo.updateVisitorInfo((conversation._id as any).toString(), {
+                        ...(hasNewAvatar ? { avatar: fbAvatar } : {}),
+                        ...(hasNewName ? { name: fbUserName } : {}),
+                    });
+                } catch { /* silent */ }
+            }
+        }
+
         return this.addMessage(
             (conversation._id as any).toString(),
             { type: 'visitor', id: visitorId, name: fbUserName },
+            content,
+            msgType as any,
+            attachments,
+            clientMessageId
+        );
+    },
+
+    /**
+     * Handle self-sent Facebook messages (sent from the page) — route as agent message for 2-way sync
+     */
+    async handleSelfFacebookMessage(
+        workspaceId: string,
+        fbUserId: string,
+        fbUserName: string,
+        fbAvatar: string,
+        content: string,
+        msgType: 'text' | 'image' | 'video' | 'file' = 'text',
+        attachments: any[] = [],
+        clientMessageId?: string,
+        pageId?: string,
+        pageName?: string,
+    ) {
+        // Skip empty self-messages
+        if (!content && (!attachments || attachments.length === 0)) return;
+
+        const visitorId = `fb_${fbUserId}`;
+        const widgetList = await widgetRepo.findByWorkspace(workspaceId);
+        if (!widgetList || widgetList.length === 0) return;
+
+        const targetWidget = widgetList.find(w => (w as any).name === 'Facebook') || widgetList[0];
+        const widgetId = (targetWidget._id as any).toString();
+
+        // Upsert visitor (without creating a message)
+        await visitorRepo.findOrCreate(
+            visitorId, widgetId, workspaceId,
+            { name: fbUserName, avatar: fbAvatar, attributes: { channel: 'facebook', fbUserId, pageId, pageName } }
+        );
+
+        // Find or create conversation without sending an empty message
+        let conversation = await conversationRepo.findLatestByVisitor(visitorId, widgetId);
+        if (!conversation) {
+            conversation = await conversationRepo.create({
+                workspaceId: workspaceId as any,
+                widgetId: targetWidget._id as any,
+                visitorId,
+                visitorInfo: { name: fbUserName, avatar: fbAvatar },
+                channel: 'facebook',
+                status: 'open',
+                lastMessageAt: new Date(),
+                metadata: { fbUserId, pageId, pageName },
+            });
+            await visitorRepo.incrementConversations(visitorId, widgetId);
+        }
+
+        if (conversation.status === 'closed') {
+            await conversationRepo.updateStatus((conversation._id as any).toString(), 'open');
+            conversation.status = 'open';
+        }
+
+        return this.addMessage(
+            (conversation._id as any).toString(),
+            { type: 'agent', id: 'fb_page', name: pageName || 'Facebook Page' },
             content,
             msgType as any,
             attachments,
@@ -291,7 +442,7 @@ export const conversationService = {
         sender: { type: 'visitor' | 'agent' | 'system'; id: string; name?: string },
         content: string,
         msgType: 'text' | 'image' | 'file' | 'system' = 'text',
-        attachments?: Array<{ data: string; filename: string; mimeType: string; size: number }>,
+        attachments?: Array<{ data: string; url?: string; filename: string; mimeType: string; size: number }>,
         clientMessageId?: string,
         replyTo?: { messageId: string; content: string; senderName: string }
     ) {
@@ -336,7 +487,8 @@ export const conversationService = {
         // ── Sanitize attachment filenames ──
         const safeAttachments = (attachments || []).map((att) => ({
             ...att,
-            filename: sanitizeFilename(att.filename),
+            filename: sanitizeFilename(att.filename || (att as any).name || 'attachment'),
+            url: att.url || undefined,
         }));
 
         const message = await messageRepo.create({
@@ -370,6 +522,80 @@ export const conversationService = {
                 conversationId, lastMessage: { content: sanitizedContent, sender, type: msgType, createdAt: message.createdAt },
             });
         } catch (e) { console.error('Socket emit error:', e); }
+
+        // ── Chatbot Auto-Reply Hook ──
+        // Only trigger for visitor messages (not agent/system/bot)
+        if (sender.type === 'visitor' && content && content.length > 1) {
+            try {
+                const { chatbotService: botService } = await import('../chatbot/chatbot.service');
+                const wsId = (conversation.workspaceId as any).toString();
+                const channel = (conversation as any).channel || 'website';
+
+                // Build conversation history for AI context
+                let conversationHistory: Array<{ role: string; content: string }> = [];
+                try {
+                    const recentMsgs = await messageRepo.getLatest(conversationId, 10);
+                    conversationHistory = recentMsgs
+                        .filter(m => !m.isDeleted && m.content && m.type === 'text')
+                        .reverse() // chronological order
+                        .map(m => ({
+                            role: m.sender.type === 'visitor' ? 'user' : 'assistant',
+                            content: m.content,
+                        }));
+                    // Remove the last one (current message) since we pass it separately
+                    if (conversationHistory.length > 0 && conversationHistory[conversationHistory.length - 1].content === content) {
+                        conversationHistory.pop();
+                    }
+                } catch { /* skip history if not available */ }
+
+                const botResult = await botService.processIncomingMessage(wsId, content, channel, conversationHistory);
+
+                if (botResult) {
+                    // Send bot reply as a new message (async, non-blocking)
+                    setTimeout(async () => {
+                        try {
+                            await this.addMessage(
+                                conversationId,
+                                { type: 'agent', id: `bot_${botResult.botId}`, name: `🤖 ${botResult.botName}` },
+                                botResult.response,
+                                'text'
+                            );
+                            console.log(`[Chatbot] Auto-replied in conv ${conversationId} by bot ${botResult.botName}`);
+
+                            // Route bot reply to external platform
+                            if (channel === 'facebook') {
+                                try {
+                                    const { facebookService } = await import('../facebook/facebook.service');
+                                    const fbUserId = (conversation as any).metadata?.fbUserId;
+                                    const pageId = (conversation as any).metadata?.pageId;
+                                    if (fbUserId && pageId) {
+                                        await facebookService.sendMessage(wsId, fbUserId, botResult.response, pageId);
+                                        console.log(`[Chatbot] ✅ Bot reply sent to Facebook user ${fbUserId}`);
+                                    }
+                                } catch (fbErr) {
+                                    console.error('[Chatbot] Failed to send bot reply to Facebook:', fbErr);
+                                }
+                            } else if (channel === 'zalo') {
+                                try {
+                                    const { zaloService } = await import('../zalo/zalo.service');
+                                    const zaloUserId = (conversation as any).visitorId;
+                                    if (zaloUserId) {
+                                        await zaloService.sendMessage(wsId, zaloUserId, botResult.response);
+                                        console.log(`[Chatbot] ✅ Bot reply sent to Zalo user ${zaloUserId}`);
+                                    }
+                                } catch (zaloErr) {
+                                    console.error('[Chatbot] Failed to send bot reply to Zalo:', zaloErr);
+                                }
+                            }
+                        } catch (err) {
+                            console.error('[Chatbot] Auto-reply failed:', err);
+                        }
+                    }, 1200); // Slightly longer delay for AI response natural feel
+                }
+            } catch (err) {
+                console.error('[Chatbot] Hook error:', err);
+            }
+        }
 
         return message;
     },
@@ -751,6 +977,7 @@ export const conversationService = {
             assignee?: string;
             tags?: string | string[];
             channel?: string;
+            pageId?: string;
             dateFrom?: string;
             dateTo?: string;
             sortBy?: string;
@@ -1012,5 +1239,16 @@ export const conversationService = {
             deletedZaloMessages: zaloResult.deletedCount || 0,
             resetConversations: convResult.modifiedCount || 0,
         };
+    },
+
+    /**
+     * Search conversations by message content.
+     */
+    async searchByMessageContent(
+        workspaceId: string,
+        query: string,
+        options?: { status?: string; limit?: number }
+    ) {
+        return conversationRepo.searchByMessageContent(workspaceId, query, options);
     },
 };

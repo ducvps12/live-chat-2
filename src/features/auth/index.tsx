@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { Form, Input, Button, Alert, message } from 'antd';
 import { Mail, Lock } from 'lucide-react';
 import { useLogin } from '../../domains/auth/auth.hooks';
@@ -31,7 +31,7 @@ export default function AuthLoginFeature() {
                     Chào mừng trở lại
                 </h1>
                 <p style={{ color: 'var(--color-text-secondary)', fontSize: 15 }}>
-                    Đăng nhập để tiếp tục với NemarChat
+                    Đăng nhập để tiếp tục với NemarkChat
                 </p>
             </div>
 

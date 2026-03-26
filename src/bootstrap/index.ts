@@ -11,6 +11,7 @@ import rootRouter from '../routes';
 import { errorHandler, AppError } from '../middlewares/errorHandler';
 import { requestIdMiddleware } from '../middlewares/requestId';
 import { zaloService } from '../modules/zalo/zalo.service';
+import { facebookService } from '../modules/facebook/facebook.service';
 
 const bootstrap = async () => {
     // 1. Connect to Database
@@ -59,6 +60,13 @@ const bootstrap = async () => {
         zaloService.bootActiveAccounts().catch(err => {
             console.error('[Server] Failed to boot Zalo accounts:', err);
         });
+
+        // Auto-sync Facebook conversations (5s delay to let DB settle)
+        setTimeout(() => {
+            facebookService.syncAllActivePages().catch(err => {
+                console.error('[Server] Failed to auto-sync Facebook pages:', err);
+            });
+        }, 5000);
     });
 
     // Graceful shutdown — close server before exit to release port

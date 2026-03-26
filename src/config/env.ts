@@ -13,4 +13,10 @@ export const env = {
     BROWSER_HEADLESS: process.env.BROWSER_HEADLESS !== 'false',
     SCREENCAST_QUALITY: Number(process.env.SCREENCAST_QUALITY) || 60,
     SCREENCAST_FPS: Number(process.env.SCREENCAST_FPS) || 10,
+
+    // ACB Bank Payment
+    ACB_ACCOUNT_NUMBER: process.env.ACB_ACCOUNT_NUMBER || '24488671',
+    ACB_API_TOKEN: process.env.ACB_API_TOKEN || 'ec4f8aeb9d87bc0ffa48f709365313d1',
+    ACB_API_URL: process.env.ACB_API_URL || 'https://api.sieuthicode.net/historyapiacb',
+    ACB_ACCOUNT_NAME: process.env.ACB_ACCOUNT_NAME || 'NEMARK DIGITAL',
 };

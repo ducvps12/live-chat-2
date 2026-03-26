@@ -74,7 +74,7 @@ export const conversationController = {
     // ── Authenticated: agent dashboard ──
 
     getByWorkspace: asyncHandler(async (req: Request, res: Response) => {
-        const { status, assignee, tags, channel, dateFrom, dateTo, sortBy, page, limit, domain } = req.query as any;
+        const { status, assignee, tags, channel, pageId, dateFrom, dateTo, sortBy, page, limit, domain } = req.query as any;
         const result = await conversationService.getByWorkspace(
             req.params.workspaceId as string,
             { 
@@ -82,6 +82,7 @@ export const conversationController = {
                 assignee,
                 tags,
                 channel,
+                pageId,
                 dateFrom,
                 dateTo,
                 sortBy,
@@ -92,6 +93,23 @@ export const conversationController = {
             { userId: (req as any).user.id, type: 'agent' }
         );
         res.status(200).json({ success: true, data: result });
+    }),
+
+    updateConversationMetadata: asyncHandler(async (req: Request, res: Response) => {
+        const convId = req.params.conversationId as string;
+        const { leadStage, isStarred } = req.body;
+        const { ConversationModel } = require('./repos/conversation.model');
+        const conv = await ConversationModel.findById(convId);
+        if (!conv) {
+            throw new (require('../../middlewares/errorHandler').AppError)('Conversation not found', 404, 'NOT_FOUND');
+        }
+        const metadata = conv.metadata || {};
+        if (leadStage !== undefined) metadata.leadStage = leadStage;
+        if (isStarred !== undefined) metadata.isStarred = isStarred;
+        conv.metadata = metadata;
+        conv.markModified('metadata');
+        await conv.save();
+        res.status(200).json({ success: true, data: conv });
     }),
 
     getDomainsByWorkspace: asyncHandler(async (req: Request, res: Response) => {
@@ -171,6 +189,25 @@ export const conversationController = {
                     );
                 } catch (e) {
                     console.error('[ConversationController] Failed to send Zalo message:', e);
+                }
+            }
+        }
+
+        // ── Facebook Integration: Push message to Facebook if applicable ──
+        if (conv?.channel === 'facebook') {
+            const fbUserId = conv.metadata?.fbUserId;
+            const pageId = conv.metadata?.pageId;
+            if (fbUserId) {
+                try {
+                    const { facebookService } = require('../facebook/facebook.service');
+                    await facebookService.sendMessage(
+                        (conv.workspaceId as any).toString(),
+                        fbUserId,
+                        content || '',
+                        pageId
+                    );
+                } catch (e) {
+                    console.error('[ConversationController] Failed to send Facebook message:', e);
                 }
             }
         }
@@ -422,6 +459,33 @@ export const conversationController = {
         res.status(200).json({ success: true, data: conv });
     }),
 
+    // ── Pin / Unpin conversation ──
+
+    togglePin: asyncHandler(async (req: Request, res: Response) => {
+        const convId = req.params.conversationId as string;
+        const { ConversationModel } = require('./repos/conversation.model');
+        const conv = await ConversationModel.findById(convId);
+        if (!conv) {
+            throw new (require('../../middlewares/errorHandler').AppError)('Conversation not found', 404, 'NOT_FOUND');
+        }
+        conv.isPinned = !conv.isPinned;
+        await conv.save();
+        res.status(200).json({ success: true, data: { isPinned: conv.isPinned } });
+    }),
+
+    // ── Mark as unread ──
+
+    markUnread: asyncHandler(async (req: Request, res: Response) => {
+        const convId = req.params.conversationId as string;
+        const { ConversationModel } = require('./repos/conversation.model');
+        const result = await ConversationModel.findByIdAndUpdate(
+            convId,
+            { $set: { unreadCount: 1 } },
+            { new: true }
+        );
+        res.status(200).json({ success: true, data: result });
+    }),
+
     // ── Internal notes ──
 
     addNote: asyncHandler(async (req: Request, res: Response) => {
@@ -445,5 +509,21 @@ export const conversationController = {
             message: `Đã xóa ${result.deletedMessages} tin nhắn, ${result.deletedZaloMessages} tin Zalo, reset ${result.resetConversations} cuộc hội thoại.`,
             data: result,
         });
+    }),
+
+    // ── Search conversations by message content ──
+
+    searchByMessage: asyncHandler(async (req: Request, res: Response) => {
+        const { q, status, limit } = req.query as any;
+        if (!q || q.trim().length === 0) {
+            res.status(200).json({ success: true, data: { items: [], matchMap: {} } });
+            return;
+        }
+        const result = await conversationService.searchByMessageContent(
+            req.params.workspaceId as string,
+            q,
+            { status, limit: Number(limit) || 50 }
+        );
+        res.status(200).json({ success: true, data: result });
     }),
 };

@@ -21,6 +21,7 @@ export interface IWorkspace extends Document {
         joinedAt: Date;
     }>;
     tags: string[];  // workspace-level tag registry
+    labels: Array<{ name: string; color: string }>;  // colored labels (Zalo-style)
     isActive: boolean;
     createdAt: Date;
     updatedAt: Date;
@@ -64,6 +65,13 @@ const workspaceSchema = new Schema<IWorkspace>(
         },
         members: [memberSchema],
         tags: { type: [String], default: [] },
+        labels: {
+            type: [{
+                name: { type: String, required: true },
+                color: { type: String, required: true },
+            }],
+            default: [],
+        },
         isActive: { type: Boolean, default: true },
     },
     { timestamps: true }

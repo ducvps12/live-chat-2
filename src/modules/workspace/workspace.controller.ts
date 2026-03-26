@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import asyncHandler from 'express-async-handler';
 import { workspaceService, widgetService, offlineMessageService } from './workspace.service';
 import { presenceStore } from '../../infra/presence';
+import { popupRepo } from './repos/popup.repo';
 
 export const workspaceController = {
     create: asyncHandler(async (req: Request, res: Response) => {
@@ -82,6 +83,31 @@ export const workspaceController = {
         const { oldTag, newTag } = req.body;
         const tags = await workspaceService.updateTag(req.params.workspaceId as string, oldTag, newTag);
         res.status(200).json({ success: true, data: tags });
+    }),
+
+    // ── Label registry CRUD (colored tags, Zalo-style) ──
+
+    getLabels: asyncHandler(async (req: Request, res: Response) => {
+        const labels = await workspaceService.getLabels(req.params.workspaceId as string);
+        res.status(200).json({ success: true, data: labels });
+    }),
+
+    addLabel: asyncHandler(async (req: Request, res: Response) => {
+        const { name, color } = req.body;
+        const labels = await workspaceService.addLabel(req.params.workspaceId as string, name, color);
+        res.status(200).json({ success: true, data: labels });
+    }),
+
+    removeLabel: asyncHandler(async (req: Request, res: Response) => {
+        const { name } = req.body;
+        const labels = await workspaceService.removeLabel(req.params.workspaceId as string, name);
+        res.status(200).json({ success: true, data: labels });
+    }),
+
+    updateLabelItem: asyncHandler(async (req: Request, res: Response) => {
+        const { oldName, name, color } = req.body;
+        const labels = await workspaceService.updateLabel(req.params.workspaceId as string, oldName, name, color);
+        res.status(200).json({ success: true, data: labels });
     }),
 
     // GET /:workspaceId/presence — get online/away agents in workspace
@@ -182,5 +208,44 @@ export const offlineMessageController = {
     countPending: asyncHandler(async (req: Request, res: Response) => {
         const count = await offlineMessageService.countPending(req.params.workspaceId as string);
         res.status(200).json({ success: true, data: { count } });
+    }),
+};
+
+export const popupController = {
+    create: asyncHandler(async (req: Request, res: Response) => {
+        const popup = await popupRepo.create({
+            workspaceId: req.params.workspaceId as any,
+            ...req.body,
+        });
+        res.status(201).json({ success: true, data: popup });
+    }),
+
+    getByWorkspace: asyncHandler(async (req: Request, res: Response) => {
+        const popups = await popupRepo.findByWorkspace(req.params.workspaceId as string);
+        res.status(200).json({ success: true, data: popups });
+    }),
+
+    update: asyncHandler(async (req: Request, res: Response) => {
+        const popup = await popupRepo.update(req.params.popupId as string, req.body);
+        res.status(200).json({ success: true, data: popup });
+    }),
+
+    delete: asyncHandler(async (req: Request, res: Response) => {
+        await popupRepo.delete(req.params.popupId as string);
+        res.status(200).json({ success: true });
+    }),
+
+    // Public: get active popups for a workspace's widget
+    getActive: asyncHandler(async (req: Request, res: Response) => {
+        const popups = await popupRepo.findActive(req.params.workspaceId as string);
+        res.status(200).json({ success: true, data: popups });
+    }),
+
+    incrementStat: asyncHandler(async (req: Request, res: Response) => {
+        const { stat } = req.body;
+        if (['views', 'submissions', 'closes'].includes(stat)) {
+            await popupRepo.incrementStat(req.params.popupId as string, stat);
+        }
+        res.status(200).json({ success: true });
     }),
 };

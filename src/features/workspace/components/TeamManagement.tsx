@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { Button, Modal, Form, Input, Select, Table, Tag, Space, Popconfirm, Avatar, Spin, message, Typography, Badge } from 'antd';
@@ -123,7 +123,7 @@ export function TeamManagement({ workspaceId }: { workspaceId: string }) {
 
     return (
         <AppLayout headerTitle="Đội ngũ hỗ trợ (Teams)">
-            <Head><title>Quản lý thành viên | NemarChat</title></Head>
+            <Head><title>Quản lý thành viên | NemarkChat</title></Head>
 
             {/* Content */}
             <main style={{ maxWidth: 1000, margin: '0 auto', padding: '40px 24px' }}>

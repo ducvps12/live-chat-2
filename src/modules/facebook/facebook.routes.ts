@@ -26,5 +26,6 @@ protectedRouter.get('/pages', facebookController.getPages);
 protectedRouter.post('/pages', facebookController.connectPage);
 protectedRouter.delete('/pages/:pageDbId', facebookController.disconnectPage);
 protectedRouter.post('/send', facebookController.sendMessage);
+protectedRouter.post('/pages/:pageDbId/sync', facebookController.syncPageMessages);
 
 export const facebookRoutes = protectedRouter;

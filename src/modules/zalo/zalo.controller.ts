@@ -58,6 +58,60 @@ export const zaloController = {
         });
     }),
 
+    /**
+     * Broadcast/forward messages to multiple Zalo friends
+     * Body: { messages: string[], recipientIds: string[], delayMs?: number }
+     */
+    broadcast: asyncHandler(async (req: Request, res: Response) => {
+        const workspaceId = req.params.workspaceId as string;
+        const { messages, recipientIds, delayMs } = req.body;
+
+        if (!messages?.length || !recipientIds?.length) {
+            res.status(400).json({ success: false, error: { message: 'Cần chọn ít nhất 1 tin nhắn và 1 người nhận' } });
+            return;
+        }
+        if (messages.length > 10) {
+            res.status(400).json({ success: false, error: { message: 'Tối đa 10 tin nhắn mỗi lần chuyển tiếp' } });
+            return;
+        }
+
+        // Auto-batch: split into chunks of 50, send with delay between batches
+        const BATCH_SIZE = 50;
+        const BATCH_COOLDOWN = 30_000; // 30s between batches
+        const allResults: Array<{ threadId: string; success: boolean; error?: string }> = [];
+        let totalSuccess = 0;
+        let totalFailed = 0;
+
+        for (let batchStart = 0; batchStart < recipientIds.length; batchStart += BATCH_SIZE) {
+            const batch = recipientIds.slice(batchStart, batchStart + BATCH_SIZE);
+
+            // Cooldown between batches (not before first batch)
+            if (batchStart > 0) {
+                console.log(`[Broadcast] Cooling down ${BATCH_COOLDOWN / 1000}s before batch ${Math.floor(batchStart / BATCH_SIZE) + 1}...`);
+                await new Promise(resolve => setTimeout(resolve, BATCH_COOLDOWN));
+            }
+
+            const result = await zaloService.broadcastMessages(workspaceId, messages, batch, {
+                delayMs: Math.max(delayMs || 3000, 2000),
+            });
+
+            allResults.push(...result.results);
+            totalSuccess += result.successCount;
+            totalFailed += result.failedCount;
+        }
+
+        res.status(200).json({
+            success: true,
+            data: {
+                results: allResults,
+                successCount: totalSuccess,
+                failedCount: totalFailed,
+                total: recipientIds.length,
+                batches: Math.ceil(recipientIds.length / BATCH_SIZE),
+            },
+        });
+    }),
+
     // ══════════════════════════════════════
     // HISTORY & CONTACTS
     // ══════════════════════════════════════
@@ -279,4 +333,166 @@ export const zaloController = {
             data: status
         });
     }),
+
+    /**
+     * Get Zalo friends list (live from connected session)
+     */
+    getFriends: asyncHandler(async (req: Request, res: Response) => {
+        const workspaceId = req.params.workspaceId as string;
+        const { search, page, limit } = req.query as any;
+        const result = await zaloService.getFriends(workspaceId, {
+            search,
+            page: Number(page) || 1,
+            limit: Number(limit) || 50,
+        });
+        res.status(200).json({ success: true, data: result });
+    }),
+
+    /**
+     * Manually trigger avatar backfill for all Zalo conversations
+     */
+    backfillAvatars: asyncHandler(async (req: Request, res: Response) => {
+        const workspaceId = req.params.workspaceId as string;
+        const { zaloAccountRepo } = await import('./repos/zalo-account.repo');
+        const accounts = await zaloAccountRepo.findByWorkspaceId(workspaceId);
+        const { isZaloSessionConnected } = await import('../../infra/zaloService');
+        const connected = accounts.find((a: any) => isZaloSessionConnected((a._id as unknown as string).toString()));
+        if (!connected) {
+            res.status(400).json({ success: false, error: { message: 'Không có tài khoản Zalo nào đang kết nối' } });
+            return;
+        }
+        const accountId = (connected._id as unknown as string).toString();
+        await zaloService.backfillAvatars(workspaceId, accountId);
+        res.status(200).json({ success: true, message: 'Đã cập nhật avatar cho các cuộc hội thoại' });
+    }),
+
+    // ══════════════════════════════════════
+    // GROUPS & MEMBERS
+    // ══════════════════════════════════════
+
+    /**
+     * Get all Zalo groups (live from connected session)
+     * GET /zalo/groups
+     */
+    getGroups: asyncHandler(async (req: Request, res: Response) => {
+        const workspaceId = req.params.workspaceId as string;
+        const result = await zaloService.getGroups(workspaceId);
+        res.status(200).json({ success: true, data: result });
+    }),
+
+    /**
+     * Get members of a specific Zalo group
+     * GET /zalo/groups/:groupId/members
+     */
+    getGroupMembers: asyncHandler(async (req: Request, res: Response) => {
+        const workspaceId = req.params.workspaceId as string;
+        const groupId = req.params.groupId as string;
+        const result = await zaloService.getGroupMembers(workspaceId, groupId);
+        res.status(200).json({ success: true, data: result });
+    }),
+
+    /**
+     * Kick a member from a Zalo group
+     * DELETE /zalo/groups/:groupId/members/:userId
+     */
+    kickMember: asyncHandler(async (req: Request, res: Response) => {
+        const workspaceId = req.params.workspaceId as string;
+        const groupId = req.params.groupId as string;
+        const userId = req.params.userId as string;
+        const result = await zaloService.kickGroupMember(workspaceId, groupId, userId);
+        res.status(200).json({ success: true, data: result, message: `Đã xóa thành viên ${userId} khỏi nhóm` });
+    }),
+
+    /**
+     * Bulk sync ALL group members → Leads
+     * POST /zalo/groups/sync-all-to-leads
+     */
+    bulkSyncGroupsToLeads: asyncHandler(async (req: Request, res: Response) => {
+        const workspaceId = req.params.workspaceId as string;
+        const result = await zaloService.bulkSyncAllGroupsToLeads(workspaceId);
+        res.status(200).json({
+            success: true,
+            data: result,
+            message: `Đã đồng bộ ${result.totalCreated} lead mới từ ${result.totalGroups} nhóm (${result.totalMembers} thành viên)`,
+        });
+    }),
+
+    // ══════════════════════════════════════
+    // AUTO FRIEND REQUEST
+    // ══════════════════════════════════════
+
+    /**
+     * Auto-friend all members in a Zalo group
+     * POST /zalo/groups/:groupId/auto-friend
+     * Body: { message?: string, delayMs?: number, selectedUserIds?: string[] }
+     */
+    autoFriendGroup: asyncHandler(async (req: Request, res: Response) => {
+        const workspaceId = req.params.workspaceId as string;
+        const groupId = req.params.groupId as string;
+        const { message, delayMs, selectedUserIds } = req.body;
+
+        const result = await zaloService.autoFriendGroupMembers(
+            workspaceId, groupId, message, { delayMs, selectedUserIds }
+        );
+
+        res.status(200).json({
+            success: true,
+            data: result,
+            message: 'Đã bắt đầu gửi lời mời kết bạn. Dùng GET /auto-friend/status để theo dõi.',
+        });
+    }),
+
+    /**
+     * Get auto-friend job status
+     * GET /zalo/auto-friend/status?groupId=...
+     */
+    getAutoFriendStatus: asyncHandler(async (req: Request, res: Response) => {
+        const workspaceId = req.params.workspaceId as string;
+        const groupId = req.query.groupId as string;
+        const status = zaloService.getAutoFriendStatus(workspaceId, groupId);
+
+        if (!status) {
+            res.status(200).json({
+                success: true,
+                data: { status: 'idle', message: 'Chưa có tiến trình kết bạn nào.' },
+            });
+            return;
+        }
+
+        res.status(200).json({ success: true, data: status });
+    }),
+
+    // ══════════════════════════════════════
+    // BEHAVIOR ANALYSIS
+    // ══════════════════════════════════════
+
+    /**
+     * Analyze behavior of a single member
+     * GET /zalo/analyze/:userId
+     */
+    analyzeMember: asyncHandler(async (req: Request, res: Response) => {
+        const workspaceId = req.params.workspaceId as string;
+        const userId = req.params.userId as string;
+        const analysis = await zaloService.analyzeMemberBehavior(workspaceId, userId);
+        res.status(200).json({ success: true, data: analysis });
+    }),
+
+    /**
+     * Batch analyze behavior of multiple members
+     * POST /zalo/analyze/batch
+     * Body: { userIds: string[] }
+     */
+    batchAnalyzeMembers: asyncHandler(async (req: Request, res: Response) => {
+        const workspaceId = req.params.workspaceId as string;
+        const { userIds } = req.body;
+
+        if (!userIds?.length) {
+            res.status(400).json({ success: false, error: { message: 'Cần danh sách userIds' } });
+            return;
+        }
+
+        const results = await zaloService.batchAnalyzeMembers(workspaceId, userIds);
+        res.status(200).json({ success: true, data: { items: results, total: results.length } });
+    }),
 };
+

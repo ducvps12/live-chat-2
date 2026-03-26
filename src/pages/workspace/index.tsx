@@ -1,4 +1,4 @@
-import Head from 'next/head';
+﻿import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
 import { Modal, Form, Input, message, Spin } from 'antd';
@@ -109,7 +109,7 @@ export default function WorkspacePage() {
 
     return (
         <AppLayout headerTitle="Workspace">
-            <Head><title>Workspace | NemarChat</title></Head>
+            <Head><title>Workspace | NemarkChat</title></Head>
 
             <main style={{ maxWidth: 960, margin: '0 auto', padding: '40px 32px 80px' }}>
                 {/* ─── Page Header ─── */}

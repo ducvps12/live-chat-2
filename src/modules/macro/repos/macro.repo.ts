@@ -60,4 +60,8 @@ export const macroRepo = {
             ],
         }).exec();
     },
+
+    async incrementUsage(id: string): Promise<void> {
+        await MacroModel.findByIdAndUpdate(id, { $inc: { usageCount: 1 } }).exec();
+    },
 };

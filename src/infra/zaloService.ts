@@ -409,7 +409,7 @@ export async function createZaloSession(
 
         const zalo = new Zalo({
             logging: false,
-            selfListen: false,
+            selfListen: true, // Capture self-sent messages (from Zalo app) — webSentMsgIds dedup handles web-sent
             imageMetadataGetter: async (filePath: string) => {
                 const data = fs.readFileSync(filePath);
                 // Simple PNG/JPEG dimension parser (no sharp dependency)
@@ -568,7 +568,7 @@ export async function restoreZaloSession(
 
         const zalo = new Zalo({
             logging: false,
-            selfListen: false,
+            selfListen: true, // Capture self-sent messages (from Zalo app) — webSentMsgIds dedup handles web-sent
             imageMetadataGetter: async (filePath: string) => {
                 const data = fs.readFileSync(filePath);
                 let width = 0, height = 0;
@@ -1045,9 +1045,59 @@ export async function getZaloConversations(sessionId: string): Promise<ZaloConve
         // Store in cache
         convCache.set(sessionId, { conversations, fetchedAt: Date.now() });
 
+        // Merge aliases (Zalo nicknames / biệt danh) into display names
+        try {
+            const aliases = await getZaloAliasList(sessionId);
+            if (aliases.length > 0) {
+                const aliasMap = new Map(aliases.map(a => [a.userId, a.alias]));
+                for (const conv of conversations) {
+                    const alias = aliasMap.get(conv.threadId);
+                    if (alias) conv.displayName = alias;
+                }
+                console.log(`[ZaloService] Merged ${aliases.length} aliases into conversation list`);
+            }
+        } catch (err: any) {
+            console.warn(`[ZaloService] Failed to merge aliases:`, err.message);
+        }
+
         return conversations;
     } catch (err) {
         console.error(`[ZaloService] getConversations error:`, err);
+        return [];
+    }
+}
+
+// ========================
+// ALIAS / NICKNAME (Biệt danh)
+// ========================
+
+/**
+ * Fetch all aliases (biệt danh / tên gọi nhớ) set by the user in Zalo.
+ * Returns array of { userId, alias } pairs.
+ */
+export async function getZaloAliasList(sessionId: string): Promise<{ userId: string; alias: string }[]> {
+    const session = sessions.get(sessionId);
+    if (!session || session.status !== 'connected') return [];
+    if (!session.api?.getAliasList) {
+        console.warn(`[ZaloService] getAliasList API not available`);
+        return [];
+    }
+    try {
+        // Fetch all aliases (max 500 per page)
+        const allAliases: { userId: string; alias: string }[] = [];
+        let page = 1;
+        while (true) {
+            const result = await session.api.getAliasList(500, page);
+            const items = result?.items || [];
+            if (items.length === 0) break;
+            allAliases.push(...items);
+            if (items.length < 500) break; // last page
+            page++;
+        }
+        console.log(`[ZaloService] Fetched ${allAliases.length} aliases`);
+        return allAliases;
+    } catch (err: any) {
+        console.error(`[ZaloService] getAliasList error:`, err.message);
         return [];
     }
 }
@@ -1431,6 +1481,85 @@ export async function sendZaloImage(
 // SESSION MANAGEMENT
 // ========================
 
+/**
+ * Migrate an in-memory session from one ID to another.
+ * Used after QR login to move the session from tempSessionId to accountId.
+ */
+export function migrateZaloSession(oldSessionId: string, newSessionId: string): boolean {
+    const session = sessions.get(oldSessionId);
+    if (!session) {
+        console.warn(`[ZaloService] migrateZaloSession: no session found for ${oldSessionId}`);
+        return false;
+    }
+    // Move session entry
+    session.sessionId = newSessionId;
+    sessions.set(newSessionId, session);
+    sessions.delete(oldSessionId);
+
+    // Move message cache entries
+    for (const key of [...messageCache.keys()]) {
+        if (key.startsWith(`${oldSessionId}:`)) {
+            const suffix = key.substring(oldSessionId.length);
+            const data = messageCache.get(key);
+            if (data) {
+                messageCache.set(`${newSessionId}${suffix}`, data);
+            }
+            messageCache.delete(key);
+        }
+    }
+
+    // Move activity entries
+    for (const key of [...recentConvActivity.keys()]) {
+        if (key.startsWith(`${oldSessionId}:`)) {
+            const suffix = key.substring(oldSessionId.length);
+            const data = recentConvActivity.get(key);
+            if (data) {
+                recentConvActivity.set(`${newSessionId}${suffix}`, data);
+            }
+            recentConvActivity.delete(key);
+        }
+    }
+
+    // Move reconnect tracking
+    const attempts = reconnectAttempts.get(oldSessionId);
+    if (attempts !== undefined) {
+        reconnectAttempts.set(newSessionId, attempts);
+        reconnectAttempts.delete(oldSessionId);
+    }
+
+    console.log(`[ZaloService] ✅ Migrated session ${oldSessionId} → ${newSessionId}`);
+    return true;
+}
+
+/**
+ * Copy credential files from one session ID to another.
+ * Copies main credentials, activity, and contacts JSON files.
+ */
+export function copyZaloCredentials(fromSessionId: string, toSessionId: string): boolean {
+    try {
+        ensureCredentialsDir();
+        const filesToCopy = [
+            { from: credentialsPath(fromSessionId), to: credentialsPath(toSessionId) },
+            { from: activityPath(fromSessionId), to: activityPath(toSessionId) },
+            { from: contactDataPath(fromSessionId), to: contactDataPath(toSessionId) },
+        ];
+        let copiedAny = false;
+        for (const { from, to } of filesToCopy) {
+            if (fs.existsSync(from)) {
+                fs.copyFileSync(from, to);
+                copiedAny = true;
+            }
+        }
+        if (copiedAny) {
+            console.log(`[ZaloService] ✅ Credentials copied ${fromSessionId} → ${toSessionId}`);
+        }
+        return copiedAny;
+    } catch (err: any) {
+        console.error(`[ZaloService] Failed to copy credentials:`, err.message);
+        return false;
+    }
+}
+
 export async function destroyZaloSession(sessionId: string): Promise<void> {
     const session = sessions.get(sessionId);
     if (!session) return;
@@ -1686,4 +1815,243 @@ export async function sendZaloVoice(
     }
     const type = threadType === 'group' ? ThreadType.Group : ThreadType.User;
     return session.api.sendVoice({ voiceUrl, ttl }, threadId, type);
+}
+
+// ========================
+// GROUP MEMBERS
+// ========================
+
+export interface ZaloGroupItem {
+    groupId: string;
+    name: string;
+    avatar: string;
+    memberCount: number;
+    creatorId: string;
+    description: string;
+}
+
+export interface ZaloGroupMember {
+    userId: string;
+    displayName: string;
+    avatar: string;
+    role: 'admin' | 'moderator' | 'member';
+    isAdmin?: boolean;
+    joinedAt?: number;
+}
+
+/**
+ * Get all Zalo groups for a session with name, avatar, member count
+ */
+export async function getZaloGroups(sessionId: string): Promise<ZaloGroupItem[]> {
+    const session = sessions.get(sessionId);
+    if (!session?.api || session.status !== 'connected') {
+        throw new Error('Zalo session not connected');
+    }
+
+    const allGroups = await session.api.getAllGroups();
+    const gridVerMap = allGroups?.gridVerMap || {};
+    const groupIds = Object.keys(gridVerMap);
+
+    if (groupIds.length === 0) return [];
+
+    const result: ZaloGroupItem[] = [];
+
+    for (let i = 0; i < groupIds.length; i += GROUP_INFO_CHUNK_SIZE) {
+        const chunk = groupIds.slice(i, i + GROUP_INFO_CHUNK_SIZE);
+        try {
+            const infoResponse = await session.api.getGroupInfo(chunk);
+            const gridInfoMap = infoResponse?.gridInfoMap || {};
+            for (const [groupId, info] of Object.entries(gridInfoMap) as [string, any][]) {
+                const members = info?.memVerList || info?.members || [];
+                result.push({
+                    groupId,
+                    name: info?.name?.trim() || `Nhóm ${groupId}`,
+                    avatar: info?.avt || info?.fullAvt || '',
+                    memberCount: Array.isArray(members) ? members.length : (info?.totalMember || info?.memberCount || 0),
+                    creatorId: info?.creatorId || info?.creator || '',
+                    description: info?.desc || info?.description || '',
+                });
+            }
+        } catch (err: any) {
+            console.error(`[ZaloService] getGroups chunk error:`, err.message);
+            for (const gid of chunk) {
+                result.push({ groupId: gid, name: `Nhóm ${gid}`, avatar: '', memberCount: 0, creatorId: '', description: '' });
+            }
+        }
+    }
+
+    return result;
+}
+
+/**
+ * Get members of a specific Zalo group
+ */
+export async function getZaloGroupMembers(sessionId: string, groupId: string): Promise<ZaloGroupMember[]> {
+    const session = sessions.get(sessionId);
+    if (!session?.api || session.status !== 'connected') {
+        throw new Error('Zalo session not connected');
+    }
+
+    const infoResponse = await session.api.getGroupInfo([groupId]);
+    const gridInfoMap = infoResponse?.gridInfoMap || {};
+    const groupInfo = gridInfoMap[groupId];
+
+    if (!groupInfo) {
+        throw new Error(`Group ${groupId} not found`);
+    }
+
+    const memVerList = groupInfo.memVerList || groupInfo.members || [];
+    const adminIds = new Set<string>();
+    const modIds = new Set<string>();
+
+    // Collect admin IDs
+    if (groupInfo.creatorId) adminIds.add(String(groupInfo.creatorId));
+    if (groupInfo.creator) adminIds.add(String(groupInfo.creator));
+    if (Array.isArray(groupInfo.adminIds)) {
+        for (const id of groupInfo.adminIds) adminIds.add(String(id));
+    }
+    if (Array.isArray(groupInfo.admins)) {
+        for (const id of groupInfo.admins) adminIds.add(String(id));
+    }
+    // Collect moderator/sub-admin IDs (phó nhóm)
+    if (Array.isArray(groupInfo.subAdminIds)) {
+        for (const id of groupInfo.subAdminIds) modIds.add(String(id));
+    }
+    if (Array.isArray(groupInfo.moderatorIds)) {
+        for (const id of groupInfo.moderatorIds) modIds.add(String(id));
+    }
+
+    // Extract member data — memVerList items are usually { id, ..., ts? } or just userId strings
+    const members: ZaloGroupMember[] = [];
+
+    for (const mem of memVerList) {
+        const userId = String(mem.id || mem.uid || mem.userId || mem);
+        if (!userId || userId === 'undefined') continue;
+
+        const isAdmin = adminIds.has(userId);
+        const isMod = modIds.has(userId);
+
+        members.push({
+            userId,
+            displayName: mem.dName || mem.displayName || mem.zaloName || mem.name || '',
+            avatar: mem.avatar || mem.thumbAvatar || '',
+            role: isAdmin ? 'admin' : isMod ? 'moderator' : 'member',
+            isAdmin,
+            joinedAt: mem.ts || mem.joinedAt || undefined,
+        });
+    }
+
+    // If members don't have display names, try fetching from friends list
+    const needNames = members.filter(m => !m.displayName);
+    if (needNames.length > 0 && session.api.getAllFriends) {
+        try {
+            const friends = await session.api.getAllFriends();
+            const friendMap = new Map<string, any>();
+            if (Array.isArray(friends)) {
+                for (const f of friends) {
+                    const fid = String(f.userId || f.uid || f.id || '');
+                    if (fid) friendMap.set(fid, f);
+                }
+            }
+            for (const m of members) {
+                if (!m.displayName) {
+                    const friend = friendMap.get(m.userId);
+                    if (friend) {
+                        m.displayName = friend.displayName || friend.zaloName || friend.name || '';
+                        if (!m.avatar) m.avatar = friend.avatar || friend.thumbAvatar || '';
+                    }
+                }
+                // Fallback name
+                if (!m.displayName) m.displayName = `Thành viên ${m.userId.slice(-6)}`;
+            }
+        } catch { /* silent — friends API may fail */ }
+    }
+
+    console.log(`[ZaloService] Got ${members.length} members for group ${groupId}`);
+    return members;
+}
+
+/**
+ * Remove a member from a Zalo group (kick)
+ */
+export async function removeZaloGroupMember(
+    sessionId: string,
+    groupId: string,
+    userId: string,
+): Promise<{ success: boolean; error?: string }> {
+    const session = sessions.get(sessionId);
+    if (!session?.api || session.status !== 'connected') {
+        return { success: false, error: 'Zalo session not connected' };
+    }
+
+    try {
+        // zca-js API: removeGroupMember or removeMember
+        if (typeof session.api.removeGroupMember === 'function') {
+            await session.api.removeGroupMember(groupId, [userId]);
+        } else if (typeof (session.api as any).removeMemberFromGroup === 'function') {
+            await (session.api as any).removeMemberFromGroup(groupId, userId);
+        } else {
+            return { success: false, error: 'API xóa thành viên chưa được hỗ trợ trong phiên bản này' };
+        }
+        console.log(`[ZaloService] Removed user ${userId} from group ${groupId}`);
+        return { success: true };
+    } catch (err: any) {
+        console.error(`[ZaloService] removeGroupMember error:`, err.message);
+        return { success: false, error: err.message || 'Không thể xóa thành viên' };
+    }
+}
+
+// ========================
+// FRIEND REQUESTS
+// ========================
+
+export interface FriendRequestResult {
+    userId: string;
+    success: boolean;
+    error?: string;
+}
+
+/**
+ * Send a friend request to a Zalo user
+ */
+export async function sendZaloFriendRequest(
+    sessionId: string,
+    userId: string,
+    message: string = 'Xin chào, mình muốn kết bạn!'
+): Promise<FriendRequestResult> {
+    const session = sessions.get(sessionId);
+    if (!session?.api || session.status !== 'connected') {
+        return { userId, success: false, error: 'Zalo session not connected' };
+    }
+
+    try {
+        await session.api.sendFriendRequest(message, userId);
+        console.log(`[ZaloService] Friend request sent to ${userId}`);
+        return { userId, success: true };
+    } catch (err: any) {
+        console.error(`[ZaloService] Friend request failed for ${userId}:`, err.message);
+        return { userId, success: false, error: err.message };
+    }
+}
+
+/**
+ * Get IDs of all current friends (for dedup before sending friend requests)
+ */
+export async function getZaloFriendIds(sessionId: string): Promise<Set<string>> {
+    const session = sessions.get(sessionId);
+    if (!session?.api || session.status !== 'connected') return new Set();
+
+    try {
+        const friends = await session.api.getAllFriends();
+        const ids = new Set<string>();
+        if (Array.isArray(friends)) {
+            for (const f of friends) {
+                const fid = String(f.userId || f.uid || f.id || '');
+                if (fid) ids.add(fid);
+            }
+        }
+        return ids;
+    } catch {
+        return new Set();
+    }
 }

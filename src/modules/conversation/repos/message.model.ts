@@ -13,6 +13,7 @@ export interface IMessage extends Document {
     status: 'sent' | 'delivered' | 'read';  // ack lifecycle
     attachments?: Array<{
         data: string;       // base64 data URI (e.g. data:image/png;base64,...)
+        url?: string;       // external URL (e.g. Zalo CDN image link)
         filename: string;
         mimeType: string;
         size: number;
@@ -54,6 +55,7 @@ const messageSchema = new Schema<IMessage>(
         attachments: [
             {
                 data: String,         // base64 data URI
+                url: String,          // external URL (e.g. Zalo CDN)
                 filename: String,
                 mimeType: String,
                 size: Number,
@@ -69,10 +71,20 @@ const messageSchema = new Schema<IMessage>(
 messageSchema.index({ conversationId: 1, createdAt: 1 });   // load history (asc)
 messageSchema.index({ conversationId: 1, createdAt: -1 });  // latest messages
 messageSchema.index({ createdAt: -1 });
-// Idempotency: unique clientMessageId per conversation (sparse — only indexed when present)
+messageSchema.index({ content: 'text' });                    // full-text search
+// Idempotency: unique clientMessageId per conversation
+// NOTE: partialFilterExpression is required (not sparse) because sparse on compound indexes
+// only skips documents where ALL fields are null — conversationId is never null, so
+// sparse would still index null-clientMessageId docs and cause duplicate key errors.
 messageSchema.index(
     { conversationId: 1, clientMessageId: 1 },
-    { unique: true, sparse: true }
+    { unique: true, partialFilterExpression: { clientMessageId: { $type: 'string' } } }
 );
 
 export const MessageModel = mongoose.model<IMessage>('Message', messageSchema);
+
+// Auto-drop the old broken sparse index if it exists (one-time migration)
+// The old index used { sparse: true } which doesn't work on compound indexes
+MessageModel.collection.dropIndex('conversationId_1_clientMessageId_1').catch(() => {
+    // Index doesn't exist or already dropped — ignore
+});

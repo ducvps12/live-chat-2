@@ -26,7 +26,7 @@ export default function WorkspaceDashboardPage() {
 
     return (
         <AppLayout headerTitle="Tổng quan Workspace">
-            <Head><title>Tổng quan Workspace | NemarChat</title></Head>
+            <Head><title>Tổng quan Workspace | NemarkChat</title></Head>
             <main className="w-full h-full p-6">
                 <WorkspaceDashboard workspaceId={workspaceId as string} />
             </main>

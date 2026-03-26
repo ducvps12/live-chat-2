@@ -22,6 +22,7 @@ import { useTotalUnreadCount } from '../../../domains/conversation/conversation.
 import { useQueryClient } from '@tanstack/react-query';
 import { playNotificationSound } from '../../../utils/audio';
 import { uploadService } from '../../../services/upload.service';
+import { zaloService } from '../../../services/zalo.service';
 import io, { Socket } from 'socket.io-client';
 import { useRef } from 'react';
 
@@ -304,9 +305,17 @@ export default function ZaloPersonalPage() {
 
     // ── Sidebar section states ──
     const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
-        reminders: false, commonGroups: false, media: true, files: true, links: true, security: false, contactData: true,
+        reminders: false, commonGroups: false, members: true, media: true, files: true, links: true, security: false, contactData: true,
     });
-    const [sidebarViewAll, setSidebarViewAll] = useState<string | null>(null); // 'media' | 'links' | 'files' | null
+    const [sidebarViewAll, setSidebarViewAll] = useState<string | null>(null); // 'media' | 'links' | 'files' | 'members' | null
+
+    // ── Group Members state ──
+    const [groupMembers, setGroupMembers] = useState<Array<{
+        userId: string; displayName: string; avatar?: string;
+        role?: 'admin' | 'moderator' | 'member'; isAdmin?: boolean;
+    }>>([]);
+    const [loadingMembers, setLoadingMembers] = useState(false);
+    const [memberSearch, setMemberSearch] = useState('');
 
     const toggleSection = (key: string) => {
         setExpandedSections(prev => ({ ...prev, [key]: !prev[key] }));
@@ -1139,7 +1148,7 @@ export default function ZaloPersonalPage() {
     return (
         <>
             <Head>
-                <title>Zalo Cá nhân | NemarChat</title>
+                <title>Zalo Cá nhân | NemarkChat</title>
             </Head>
             <style>{`
                 @keyframes highlightPulse {
@@ -1956,9 +1965,15 @@ export default function ZaloPersonalPage() {
                                             }
 
                                             const isSticker = msg.type === 'sticker' || !!msg.stickerUrl;
+                                            const isGroupChat = selectedConv?.threadType === 'group';
                                             // Show avatar only for last consecutive message from same sender
                                             const nextMsg = messages[idx + 1];
-                                            const showAvatar = !isAgent && (!nextMsg || nextMsg.sender.type === 'agent' || nextMsg.sender.type === 'system');
+                                            const showAvatar = !isAgent && (!nextMsg || nextMsg.sender.type === 'agent' || nextMsg.sender.type === 'system' || (isGroupChat && nextMsg.sender.name !== msg.sender.name));
+                                            // Group chat: show sender name when sender changes
+                                            const prevVisitorMsg = messages.slice(0, idx).reverse().find(m => m.sender.type === 'customer');
+                                            const showSenderName = isGroupChat && !isAgent && msg.sender.name && (!prevVisitorMsg || prevVisitorMsg.sender.name !== msg.sender.name);
+                                            const senderNameHash = (msg.sender.name || '').split('').reduce((a: number, c: string) => a + c.charCodeAt(0), 0);
+                                            const senderHue = senderNameHash % 360;
 
                                             return (
                                                 <div key={msg._id}>
@@ -2043,12 +2058,14 @@ export default function ZaloPersonalPage() {
                                                     {!isAgent && showAvatar && (
                                                         <div style={{
                                                             width: 32, height: 32, borderRadius: '50%',
-                                                            background: 'linear-gradient(135deg, #0068ff 0%, #4e8cff 100%)',
+                                                            background: isGroupChat
+                                                                ? `linear-gradient(135deg, hsl(${senderHue}, 55%, 50%) 0%, hsl(${senderHue}, 65%, 65%) 100%)`
+                                                                : 'linear-gradient(135deg, #0068ff 0%, #4e8cff 100%)',
                                                             display: 'flex', alignItems: 'center', justifyContent: 'center',
                                                             color: '#fff', fontSize: 13, fontWeight: 700,
                                                             flexShrink: 0, overflow: 'hidden',
                                                         }}>
-                                                            {selectedConv?.contactAvatar ? (
+                                                            {!isGroupChat && selectedConv?.contactAvatar ? (
                                                                 <img src={selectedConv.contactAvatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                                                             ) : (
                                                                 (msg.sender.name || '?')[0].toUpperCase()
@@ -2057,6 +2074,19 @@ export default function ZaloPersonalPage() {
                                                     )}
                                                     {!isAgent && !showAvatar && <div style={{ width: 32, flexShrink: 0 }} />}
 
+                                                    <div style={{ display: 'flex', flexDirection: 'column', maxWidth: '70%', alignItems: isAgent ? 'flex-end' : 'flex-start' }}>
+                                                    {/* Group chat: sender name above bubble */}
+                                                    {showSenderName && (
+                                                        <div style={{
+                                                            fontSize: 12, fontWeight: 600,
+                                                            color: `hsl(${senderHue}, 65%, 45%)`,
+                                                            marginBottom: 2, marginLeft: 4,
+                                                            maxWidth: 200, overflow: 'hidden',
+                                                            textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                                        }}>
+                                                            {msg.sender.name}
+                                                        </div>
+                                                    )}
                                                     <div
                                                         style={{
                                                             ...styles.msgBubble,
@@ -2079,22 +2109,43 @@ export default function ZaloPersonalPage() {
                                                         }}
                                                     >
                                                         {/* Quote/Reply preview */}
-                                                        {msg.quote && (
+                                                        {msg.quote && (() => {
+                                                            // Find sender name from message history using quote.ownerId
+                                                            const quotedMsg = msg.quote.ownerId
+                                                                ? messages.find(m => m.senderId === msg.quote!.ownerId || m._id === msg.quote!.msgId)
+                                                                : null;
+                                                            const quotedSenderName = quotedMsg?.sender?.name || (msg.quote.ownerId ? `Thành viên` : 'Người gửi');
+                                                            return (
                                                             <div style={{
                                                                 background: isAgent ? '#c5d8f8' : '#f0f0f0',
                                                                 borderLeft: '3px solid #0068ff',
                                                                 borderRadius: 4,
-                                                                padding: '4px 8px',
+                                                                padding: '5px 10px',
                                                                 marginBottom: 6,
-                                                                fontSize: 11,
+                                                                fontSize: 12,
                                                                 color: isAgent ? '#1a3a5c' : '#666',
-                                                                maxHeight: 40,
+                                                                maxHeight: 50,
                                                                 overflow: 'hidden',
+                                                                cursor: 'pointer',
+                                                            }} onClick={() => {
+                                                                const el = document.getElementById(`msg-${msg.quote!.msgId}`);
+                                                                if (el) {
+                                                                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                                                    el.style.transition = 'background-color 1s ease';
+                                                                    el.style.backgroundColor = 'rgba(0,104,255,0.12)';
+                                                                    setTimeout(() => { el.style.backgroundColor = 'transparent'; }, 2000);
+                                                                }
                                                             }}>
-                                                                <Reply size={10} style={{ marginRight: 4, verticalAlign: 'middle' }} />
-                                                                {msg.quote.msg.substring(0, 60)}{msg.quote.msg.length > 60 ? '...' : ''}
+                                                                <div style={{ fontWeight: 600, color: '#0068ff', marginBottom: 2, fontSize: 11 }}>
+                                                                    <Reply size={10} style={{ marginRight: 3, verticalAlign: 'middle' }} />
+                                                                    {quotedSenderName}
+                                                                </div>
+                                                                <div style={{ opacity: 0.85, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                                    {msg.quote.msg.substring(0, 60)}{msg.quote.msg.length > 60 ? '...' : ''}
+                                                                </div>
                                                             </div>
-                                                        )}
+                                                            );
+                                                        })()}
                                                         {/* Attachments */}
                                                         {msg.attachments?.map((att, i) => {
                                                             const src = att.url || att.data;
@@ -2135,6 +2186,7 @@ export default function ZaloPersonalPage() {
                                                         </div>
                                                     </div>
                                                 </div>
+                                                </div>{/* END sender name wrapper */}
                                                 </div>
                                             );
                                         })}
@@ -2284,7 +2336,7 @@ export default function ZaloPersonalPage() {
                                             </div>
                                             <div style={{ fontWeight: 600, fontSize: 15, color: '#1a1a2e' }}>{selectedConv.contactName}</div>
                                             {selectedConv.threadType === 'group' && (
-                                                <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>Nhóm · {selectedConv.threadType}</div>
+                                                <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>Nhóm · {groupMembers.length > 0 ? `${groupMembers.length} thành viên` : selectedConv.threadType}</div>
                                             )}
                                             <div style={{ display: 'flex', justifyContent: 'center', gap: 20, marginTop: 16 }}>
                                                 {[
@@ -2449,6 +2501,224 @@ export default function ZaloPersonalPage() {
                                             </div>
                                         )}
                                     </div>
+
+                                    {/* Thành viên nhóm — chỉ show cho group chat */}
+                                    {selectedConv?.threadType === 'group' && (
+                                    <div style={{ borderBottom: '6px solid #f0f0f0' }}>
+                                        <div onClick={() => {
+                                            toggleSection('members');
+                                            // Auto-fetch members when expanding for the first time
+                                            if (!expandedSections.members && groupMembers.length === 0 && !loadingMembers) {
+                                                setLoadingMembers(true);
+                                                const conv = conversations.find(c => c._id === selectedConvId);
+                                                const groupId = conv?.threadId || selectedConvId?.replace('zca_', '') || '';
+                                                zaloService.getGroupMembers(workspaceId as string, groupId)
+                                                    .then(res => {
+                                                        setGroupMembers(res.data?.items || []);
+                                                    })
+                                                    .catch(() => {
+                                                        message.error('Không thể tải danh sách thành viên');
+                                                    })
+                                                    .finally(() => setLoadingMembers(false));
+                                            }
+                                        }} style={{ padding: '12px 16px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', transition: 'background 0.15s' }}
+                                            onMouseEnter={e => (e.currentTarget.style.background = '#f8f9fa')} onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                <Users size={16} color="#555" />
+                                                <span style={{ fontSize: 13, fontWeight: 600, color: '#333' }}>Thành viên</span>
+                                                {groupMembers.length > 0 && (
+                                                    <span style={{ fontSize: 11, color: '#999', background: '#f0f0f0', padding: '1px 8px', borderRadius: 10, fontWeight: 500 }}>
+                                                        {groupMembers.length}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            {expandedSections.members ? <ChevronDown size={16} color="#999" /> : <ChevronRight size={16} color="#999" />}
+                                        </div>
+                                        {expandedSections.members && (
+                                            <div style={{ borderTop: '1px solid #f0f0f0' }}>
+                                                {loadingMembers ? (
+                                                    <div style={{ padding: 20, textAlign: 'center' }}>
+                                                        <Spin size="small" />
+                                                        <div style={{ fontSize: 12, color: '#999', marginTop: 6 }}>Đang tải thành viên...</div>
+                                                    </div>
+                                                ) : groupMembers.length === 0 ? (
+                                                    <div style={{ padding: '16px', textAlign: 'center' }}>
+                                                        <div style={{ color: '#999', fontSize: 12, marginBottom: 8 }}>Chưa tải danh sách thành viên</div>
+                                                        <Button size="small" type="primary" onClick={() => {
+                                                            setLoadingMembers(true);
+                                                            const conv = conversations.find(c => c._id === selectedConvId);
+                                                            const groupId = conv?.threadId || selectedConvId?.replace('zca_', '') || '';
+                                                            zaloService.getGroupMembers(workspaceId as string, groupId)
+                                                                .then(res => setGroupMembers(res.data?.items || []))
+                                                                .catch(() => message.error('Không thể tải danh sách thành viên'))
+                                                                .finally(() => setLoadingMembers(false));
+                                                        }} style={{ borderRadius: 6 }}>
+                                                            Tải danh sách
+                                                        </Button>
+                                                    </div>
+                                                ) : (
+                                                    <>
+                                                        {/* Search bar */}
+                                                        {groupMembers.length > 10 && (
+                                                            <div style={{ padding: '8px 12px' }}>
+                                                                <input
+                                                                    type="text"
+                                                                    value={memberSearch}
+                                                                    onChange={e => setMemberSearch(e.target.value)}
+                                                                    placeholder="Tìm thành viên..."
+                                                                    style={{
+                                                                        width: '100%', padding: '6px 10px', fontSize: 12,
+                                                                        border: '1px solid #e5e7eb', borderRadius: 6, outline: 'none',
+                                                                        background: '#f9fafb',
+                                                                    }}
+                                                                />
+                                                            </div>
+                                                        )}
+                                                        {/* Role legend */}
+                                                        <div style={{ padding: '4px 16px 8px', display: 'flex', gap: 12, fontSize: 11, color: '#888' }}>
+                                                            <span>🔑 <span style={{ color: '#d4a017' }}>Trưởng nhóm</span></span>
+                                                            <span>🛡️ <span style={{ color: '#6b7280' }}>Phó nhóm</span></span>
+                                                        </div>
+                                                        {/* Member list */}
+                                                        <div style={{ maxHeight: sidebarViewAll === 'members' ? 'none' : 320, overflowY: 'auto', padding: '0 8px 8px' }}>
+                                                            {(() => {
+                                                                const filtered = memberSearch
+                                                                    ? groupMembers.filter(m => m.displayName?.toLowerCase().includes(memberSearch.toLowerCase()))
+                                                                    : groupMembers;
+                                                                // Sort: admins first, then moderators, then members
+                                                                const sorted = [...filtered].sort((a, b) => {
+                                                                    const order = { admin: 0, moderator: 1, member: 2 };
+                                                                    return (order[a.role || 'member'] ?? 2) - (order[b.role || 'member'] ?? 2);
+                                                                });
+                                                                return sorted.map(member => {
+                                                                    const nameHash = (member.displayName || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+                                                                    const hue = nameHash % 360;
+                                                                    const isAdminRole = member.role === 'admin' || member.isAdmin;
+                                                                    const isModRole = member.role === 'moderator';
+                                                                    return (
+                                                                        <div
+                                                                            key={member.userId}
+                                                                            style={{
+                                                                                display: 'flex', alignItems: 'center', gap: 10,
+                                                                                padding: '6px 8px', borderRadius: 8,
+                                                                                cursor: 'pointer', transition: 'background 0.15s',
+                                                                            }}
+                                                                            onMouseEnter={e => { e.currentTarget.style.background = '#f5f5f5'; }}
+                                                                            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                                                                        >
+                                                                            {/* Avatar */}
+                                                                            <div style={{
+                                                                                width: 36, height: 36, borderRadius: '50%',
+                                                                                background: member.avatar
+                                                                                    ? 'transparent'
+                                                                                    : `linear-gradient(135deg, hsl(${hue}, 55%, 50%) 0%, hsl(${hue}, 65%, 65%) 100%)`,
+                                                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                                                color: '#fff', fontSize: 14, fontWeight: 700,
+                                                                                flexShrink: 0, overflow: 'hidden',
+                                                                                border: isAdminRole ? '2px solid #d4a017' : isModRole ? '2px solid #94a3b8' : '2px solid transparent',
+                                                                            }}>
+                                                                                {member.avatar ? (
+                                                                                    <img src={member.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                                                                                ) : (
+                                                                                    (member.displayName || '?')[0].toUpperCase()
+                                                                                )}
+                                                                            </div>
+                                                                            {/* Info */}
+                                                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                                                <div style={{
+                                                                                    fontSize: 13, fontWeight: 500, color: '#1a1a2e',
+                                                                                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                                                                    display: 'flex', alignItems: 'center', gap: 4,
+                                                                                }}>
+                                                                                    {member.displayName || `User ${member.userId.slice(-6)}`}
+                                                                                    {isAdminRole && <span title="Trưởng nhóm" style={{ fontSize: 14 }}>🔑</span>}
+                                                                                    {isModRole && <span title="Phó nhóm" style={{ fontSize: 13 }}>🛡️</span>}
+                                                                                </div>
+                                                                                <div style={{ fontSize: 11, color: '#94a3b8' }}>
+                                                                                    {isAdminRole ? 'Trưởng nhóm' : isModRole ? 'Phó nhóm' : 'Thành viên'}
+                                                                                </div>
+                                                                            </div>
+                                                                            {/* Kick button for non-admin members */}
+                                                                            {!isAdminRole && !isModRole && (
+                                                                                <Tooltip title="Xóa khỏi nhóm">
+                                                                                    <button
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation();
+                                                                                            Modal.confirm({
+                                                                                                title: 'Xóa thành viên',
+                                                                                                content: `Bạn có chắc muốn xóa ${member.displayName} khỏi nhóm?`,
+                                                                                                okText: 'Xóa',
+                                                                                                cancelText: 'Hủy',
+                                                                                                okButtonProps: { danger: true },
+                                                                                                onOk: async () => {
+                                                                                                    try {
+                                                                                                        const conv = conversations.find(c => c._id === selectedConvId);
+                                                                                                        const groupId = conv?.threadId || selectedConvId?.replace('zca_', '') || '';
+                                                                                                        await zaloService.kickMember(workspaceId as string, groupId, member.userId);
+                                                                                                        message.success(`Đã xóa ${member.displayName} khỏi nhóm`);
+                                                                                                        setGroupMembers(prev => prev.filter(m => m.userId !== member.userId));
+                                                                                                    } catch (err: any) {
+                                                                                                        message.error('Xóa thất bại: ' + (err.response?.data?.message || err.message));
+                                                                                                    }
+                                                                                                },
+                                                                                            });
+                                                                                        }}
+                                                                                        style={{
+                                                                                            background: 'none', border: 'none', cursor: 'pointer',
+                                                                                            padding: 4, borderRadius: 6, display: 'flex',
+                                                                                            opacity: 0.4, transition: 'opacity 0.15s',
+                                                                                        }}
+                                                                                        onMouseEnter={e => { e.currentTarget.style.opacity = '1'; }}
+                                                                                        onMouseLeave={e => { e.currentTarget.style.opacity = '0.4'; }}
+                                                                                    >
+                                                                                        <Trash2 size={14} color="#ef4444" />
+                                                                                    </button>
+                                                                                </Tooltip>
+                                                                            )}
+                                                                        </div>
+                                                                    );
+                                                                });
+                                                            })()}
+                                                        </div>
+                                                        {/* View all / Collapse */}
+                                                        {groupMembers.length > 10 && sidebarViewAll !== 'members' && (
+                                                            <div
+                                                                onClick={() => setSidebarViewAll('members')}
+                                                                style={{
+                                                                    textAlign: 'center', padding: '8px 0', cursor: 'pointer',
+                                                                    color: '#0068ff', fontSize: 12, fontWeight: 500,
+                                                                    borderTop: '1px solid #f0f0f0',
+                                                                }}
+                                                            >
+                                                                Xem tất cả {groupMembers.length} thành viên
+                                                            </div>
+                                                        )}
+                                                        {/* Refresh button */}
+                                                        <div style={{ padding: '4px 16px 12px', display: 'flex', justifyContent: 'center' }}>
+                                                            <Button type="text" size="small" icon={<RotateCw size={12} />}
+                                                                onClick={() => {
+                                                                    setLoadingMembers(true);
+                                                                    const conv = conversations.find(c => c._id === selectedConvId);
+                                                                    const groupId = conv?.threadId || selectedConvId?.replace('zca_', '') || '';
+                                                                    zaloService.getGroupMembers(workspaceId as string, groupId)
+                                                                        .then(res => {
+                                                                            setGroupMembers(res.data?.items || []);
+                                                                            message.success('Đã cập nhật danh sách thành viên');
+                                                                        })
+                                                                        .catch(() => message.error('Tải thất bại'))
+                                                                        .finally(() => setLoadingMembers(false));
+                                                                }}
+                                                                style={{ fontSize: 11, color: '#888' }}
+                                                            >
+                                                                Làm mới
+                                                            </Button>
+                                                        </div>
+                                                    </>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                    )}
 
                                     {/* Ảnh/Video Section */}
                                     <div style={{ borderBottom: '6px solid #f0f0f0' }}>
@@ -3373,12 +3643,37 @@ const MessageComposer = ({ sending, onSend, onImageSend, onStickerSend, socketRe
                     onClick={() => setShowStickerPicker(!showStickerPicker)}
                     style={{ padding: '4px 8px' }}
                 />
-                <input
-                    style={styles.textInput}
+                <textarea
+                    style={{ ...styles.textInput, resize: 'none', overflow: 'hidden', minHeight: 40, maxHeight: 120, lineHeight: '20px' }}
                     placeholder="Nhập tin nhắn..."
+                    rows={1}
                     value={inputText}
-                    onChange={e => setInputText(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendClick(); } }}
+                    onChange={e => {
+                        setInputText(e.target.value);
+                        // Auto-resize
+                        e.target.style.height = 'auto';
+                        e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+                    }}
+                    onKeyDown={e => {
+                        if (e.key === 'Enter' && e.altKey) {
+                            // Alt+Enter: insert newline
+                            e.preventDefault();
+                            const target = e.target as HTMLTextAreaElement;
+                            const start = target.selectionStart;
+                            const end = target.selectionEnd;
+                            const newValue = inputText.substring(0, start) + '\n' + inputText.substring(end);
+                            setInputText(newValue);
+                            setTimeout(() => {
+                                target.selectionStart = target.selectionEnd = start + 1;
+                                target.style.height = 'auto';
+                                target.style.height = Math.min(target.scrollHeight, 120) + 'px';
+                            }, 0);
+                        } else if (e.key === 'Enter' && !e.shiftKey) {
+                            // Enter: send message
+                            e.preventDefault();
+                            handleSendClick();
+                        }
+                    }}
                     onPaste={(e) => {
                         const items = e.clipboardData?.items;
                         if (!items) return;

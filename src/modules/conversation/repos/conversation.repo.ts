@@ -47,6 +47,7 @@ export const conversationRepo = {
             assignee?: string;
             tags?: string | string[];
             channel?: string;
+            pageId?: string;
             dateFrom?: string;
             dateTo?: string;
             sortBy?: string;
@@ -65,6 +66,8 @@ export const conversationRepo = {
         }
         
         if (options?.channel && options.channel !== 'all') filter.channel = options.channel;
+        
+        if (options?.pageId && options.pageId !== 'all') filter['metadata.pageId'] = options.pageId;
         
         if (options?.tags) {
             const tagsArray = Array.isArray(options.tags) ? options.tags : [options.tags];
@@ -174,6 +177,13 @@ export const conversationRepo = {
 
     async updateMetadata(id: string, metadata: Record<string, any>): Promise<IConversation | null> {
         return ConversationModel.findByIdAndUpdate(id, { metadata }, { new: true }).exec();
+    },
+
+    async updateVisitorInfo(id: string, visitorInfo: { name?: string; avatar?: string }): Promise<IConversation | null> {
+        const update: any = {};
+        if (visitorInfo.name) update['visitorInfo.name'] = visitorInfo.name;
+        if (visitorInfo.avatar) update['visitorInfo.avatar'] = visitorInfo.avatar;
+        return ConversationModel.findByIdAndUpdate(id, { $set: update }, { new: true }).exec();
     },
 
     async countByWorkspace(workspaceId: string, status?: string): Promise<number> {
@@ -330,5 +340,45 @@ export const conversationRepo = {
                 },
             },
         ]).exec();
+    },
+    /**
+     * Search conversations by message content.
+     * Returns conversations that have messages matching the query, with matched snippets.
+     */
+    async searchByMessageContent(
+        workspaceId: string,
+        query: string,
+        options?: { status?: string; limit?: number }
+    ): Promise<{ items: IConversation[]; matchMap: Record<string, { snippet: string; messageId: string }> }> {
+        const mongoose = await import('mongoose');
+        const { messageRepo } = await import('./message.repo');
+
+        // 1. Get all conversation IDs for this workspace (filtered by status if needed)
+        const filter: any = { workspaceId: new mongoose.Types.ObjectId(workspaceId) };
+        if (options?.status && options.status !== 'all') filter.status = options.status;
+
+        const convIds = await ConversationModel.find(filter, { _id: 1 }).lean().exec();
+        const idStrings = convIds.map((c: any) => c._id.toString());
+
+        if (idStrings.length === 0) return { items: [], matchMap: {} };
+
+        // 2. Search messages by content
+        const matches = await messageRepo.searchByContent(idStrings, query, options?.limit || 50);
+        if (matches.length === 0) return { items: [], matchMap: {} };
+
+        // 3. Fetch full conversation docs for matched IDs
+        const matchedConvIds = matches.map(m => m.conversationId);
+        const items = await ConversationModel.find({ _id: { $in: matchedConvIds } })
+            .populate('assignedTo', 'name email')
+            .sort({ lastMessageAt: -1 })
+            .exec();
+
+        // 4. Build match map
+        const matchMap: Record<string, { snippet: string; messageId: string }> = {};
+        for (const m of matches) {
+            matchMap[m.conversationId] = { snippet: m.matchedSnippet, messageId: m.messageId };
+        }
+
+        return { items, matchMap };
     },
 };

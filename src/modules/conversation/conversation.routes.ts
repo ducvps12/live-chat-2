@@ -103,6 +103,14 @@ router.patch(
     conversationController.updateVisitor
 );
 
+// ────────── Search conversations by message content ──────────
+router.get(
+    '/workspace/:workspaceId/search',
+    requireAuth,
+    scopeCheck,
+    conversationController.searchByMessage
+);
+
 // ────────── SLA (must be before generic /:conversationId) ──────────
 router.get(
     '/workspace/:workspaceId/sla/check',
@@ -240,6 +248,22 @@ router.delete(
     conversationController.removeConvTag
 );
 
+// ────────── Pin / Unpin ──────────
+router.patch(
+    '/workspace/:workspaceId/:conversationId/pin',
+    requireAuth,
+    scopeCheck,
+    conversationController.togglePin
+);
+
+// ────────── Mark as unread ──────────
+router.patch(
+    '/workspace/:workspaceId/:conversationId/mark-unread',
+    requireAuth,
+    scopeCheck,
+    conversationController.markUnread
+);
+
 // ────────── Internal notes ──────────
 router.post(
     '/workspace/:workspaceId/:conversationId/notes',
@@ -247,6 +271,14 @@ router.post(
     scopeCheck,
     validateRequest(conversationValidate.addNote),
     conversationController.addNote
+);
+
+// ────────── Conversation metadata (lead stage, star) ──────────
+router.patch(
+    '/workspace/:workspaceId/:conversationId/metadata',
+    requireAuth,
+    scopeCheck,
+    conversationController.updateConversationMetadata
 );
 
 export default router;

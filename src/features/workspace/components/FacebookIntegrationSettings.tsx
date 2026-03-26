@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { Spin, Modal, message } from 'antd';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { httpClient } from '../../../lib/http/client';
@@ -53,6 +53,7 @@ function useDisconnectFBPage() {
 export default function FacebookIntegrationSettings({ workspaceId }: { workspaceId: string }) {
     const [hoverBtn, setHoverBtn] = useState<string | null>(null);
     const [confirmDisconnect, setConfirmDisconnect] = useState<string | null>(null);
+    const [syncingPageId, setSyncingPageId] = useState<string | null>(null);
 
     const { data, isLoading } = useFBPages(workspaceId);
     const { mutate: connectFB, isPending: isConnecting } = useConnectFB();
@@ -101,7 +102,7 @@ export default function FacebookIntegrationSettings({ workspaceId }: { workspace
                         Tích hợp Facebook Fanpage
                     </h3>
                     <p className="m-0 text-[13px] text-slate-500 leading-6">
-                        Kết nối Fanpage để nhận tin nhắn Messenger trong NemarChat
+                        Kết nối Fanpage để nhận tin nhắn Messenger trong NemarkChat
                     </p>
                 </div>
 
@@ -161,6 +162,35 @@ export default function FacebookIntegrationSettings({ workspaceId }: { workspace
                                                     </span>
                                                 </div>
                                             </div>
+
+                                            {/* Sync */}
+                                            <button
+                                                onClick={async () => {
+                                                    setSyncingPageId(page.id);
+                                                    try {
+                                                        const res = await httpClient.post(`/workspaces/${workspaceId}/facebook/pages/${page.id}/sync`);
+                                                        message.success(res.data?.message || `Đồng bộ hoàn tất: ${res.data?.data?.synced || 0} tin nhắn`);
+                                                    } catch (err: any) {
+                                                        message.error(err.response?.data?.error || 'Lỗi đồng bộ tin nhắn');
+                                                    } finally {
+                                                        setSyncingPageId(null);
+                                                    }
+                                                }}
+                                                disabled={syncingPageId === page.id}
+                                                onMouseEnter={() => setHoverBtn(`sync-${page.id}`)}
+                                                onMouseLeave={() => setHoverBtn(null)}
+                                                className="inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 transition-all duration-200 shrink-0 text-[12px] font-semibold"
+                                                style={{
+                                                    cursor: syncingPageId === page.id ? 'not-allowed' : 'pointer',
+                                                    opacity: syncingPageId === page.id ? 0.6 : 1,
+                                                    background: hoverBtn === `sync-${page.id}` ? '#eff6ff' : 'white',
+                                                    borderColor: hoverBtn === `sync-${page.id}` ? '#93c5fd' : '#e2e8f0',
+                                                    color: '#1877F2',
+                                                }}
+                                                title="Đồng bộ tin nhắn từ Fanpage"
+                                            >
+                                                {syncingPageId === page.id ? <Spin size="small" /> : <><ExternalLink size={13} /> Đồng bộ</>}
+                                            </button>
 
                                             {/* Disconnect */}
                                             <button
@@ -230,7 +260,7 @@ export default function FacebookIntegrationSettings({ workspaceId }: { workspace
                                     <ul className="m-0 pl-4 text-[12px] text-amber-700 space-y-1">
                                         <li>Tạo Facebook App tại <a href="https://developers.facebook.com" target="_blank" rel="noreferrer" className="underline">developers.facebook.com</a></li>
                                         <li>Thêm <code>FB_APP_ID</code> và <code>FB_APP_SECRET</code> vào file <code>.env</code></li>
-                                        <li>Cấu hình Webhook URL: <code>{`{domain}/api/v1/facebook/webhook`}</code></li>
+                                        <li>Cấu hình Webhook URL: <code>{`{domain}/api/facebook/webhook`}</code></li>
                                     </ul>
                                 </div>
                             </div>

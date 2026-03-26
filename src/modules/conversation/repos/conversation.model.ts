@@ -8,6 +8,7 @@ export interface IConversation extends Document {
         name?: string;
         email?: string;
         phone?: string;
+        avatar?: string;
         [key: string]: any;
     };
     status: 'open' | 'pending' | 'closed' | 'resolved';
@@ -24,6 +25,7 @@ export interface IConversation extends Document {
         name?: string;
     };
     unreadCount: number;  // unread messages for agent side
+    isPinned?: boolean;    // pinned conversation stays at top of inbox
     readContext?: Array<{
         participantId: string;
         participantType: 'visitor' | 'agent';
@@ -43,6 +45,7 @@ const conversationSchema = new Schema<IConversation>(
             name: String,
             email: String,
             phone: String,
+            avatar: String,
         },
         status: { type: String, enum: ['open', 'pending', 'closed', 'resolved'], default: 'open' },
         priority: { type: String, enum: ['urgent', 'high', 'normal', 'low'], default: 'normal' },
@@ -57,6 +60,7 @@ const conversationSchema = new Schema<IConversation>(
             name: String,
         },
         unreadCount: { type: Number, default: 0 },
+        isPinned: { type: Boolean, default: false },
         readContext: [
             {
                 participantId: String,

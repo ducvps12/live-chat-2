@@ -141,6 +141,27 @@ export const workspaceService = {
         return workspaceRepo.updateTag(workspaceId, oldTag, newTag.trim().toLowerCase());
     },
 
+    // ── Label registry CRUD (colored tags, Zalo-style) ──
+
+    async getLabels(workspaceId: string) {
+        return workspaceRepo.getLabels(workspaceId);
+    },
+
+    async addLabel(workspaceId: string, name: string, color: string) {
+        if (!name || name.trim().length === 0) throw new AppError('Tên nhãn không được rỗng', 400, 'VALIDATION_ERROR');
+        if (!color || color.trim().length === 0) throw new AppError('Màu nhãn không được rỗng', 400, 'VALIDATION_ERROR');
+        return workspaceRepo.addLabel(workspaceId, { name: name.trim(), color: color.trim() });
+    },
+
+    async removeLabel(workspaceId: string, name: string) {
+        return workspaceRepo.removeLabel(workspaceId, name);
+    },
+
+    async updateLabel(workspaceId: string, oldName: string, newName: string, color: string) {
+        if (!newName || newName.trim().length === 0) throw new AppError('Tên nhãn mới không được rỗng', 400, 'VALIDATION_ERROR');
+        return workspaceRepo.updateLabel(workspaceId, oldName, { name: newName.trim(), color: color.trim() });
+    },
+
     async getAgentPerformance(workspaceId: string) {
         const workspace = await workspaceRepo.findById(workspaceId);
         if (!workspace || !workspace.isActive) throw new AppError('Workspace không tồn tại', 404, 'NOT_FOUND');

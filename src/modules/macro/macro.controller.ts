@@ -72,4 +72,12 @@ export const macroController = {
         await macroService.remove(req.params.macroId as string, user.id, isManagerOrAdmin);
         res.status(200).json({ success: true, message: 'Đã xóa macro' });
     }),
+
+    /**
+     * POST /macros/workspace/:workspaceId/:macroId/use - track macro usage
+     */
+    trackUsage: asyncHandler(async (req: Request, res: Response) => {
+        await macroService.incrementUsage(req.params.macroId as string);
+        res.status(200).json({ success: true });
+    }),
 };

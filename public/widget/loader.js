@@ -1,11 +1,11 @@
 /**
- * NemarChat Widget Loader v1.0
+ * NemarkChat Widget Loader v1.0
  * ─────────────────────────────
  * Nhúng lên website tenant bằng snippet:
  *
  *   <script>
  *     (function(w,d,s,o){
- *       w.NemarChat=o;w[o]=w[o]||function(){(w[o].q=w[o].q||[]).push(arguments)};
+ *       w.NemarkChat=o;w[o]=w[o]||function(){(w[o].q=w[o].q||[]).push(arguments)};
  *       var js=d.createElement(s);js.async=1;
  *       js.src='https://YOUR_DOMAIN/widget/loader.js';
  *       js.setAttribute('data-widget-id','WIDGET_ID');
@@ -108,22 +108,26 @@
     // ── 1. Tìm script tag để lấy widget ID ──
     var scripts = document.querySelectorAll('script[data-widget-id]');
     var currentScript = scripts[scripts.length - 1];
-    if (!currentScript) { console.warn('[NemarChat] Missing data-widget-id'); return; }
+    if (!currentScript) { console.warn('[NemarkChat] Missing data-widget-id'); return; }
 
     var widgetId = currentScript.getAttribute('data-widget-id');
-    if (!widgetId) { console.warn('[NemarChat] Empty widget-id'); return; }
+    if (!widgetId) { console.warn('[NemarkChat] Empty widget-id'); return; }
 
-    // ── 2. Xác định API base URL (origin nơi script được load) ──
+    // ── 2. Xác định API base URL ──
+    // Priority: data-api-base attribute > script src origin > window.location.origin
     var scriptSrc = currentScript.getAttribute('src') || '';
+    var explicitBase = currentScript.getAttribute('data-api-base') || '';
     var apiBase = '';
-    try {
-        apiBase = new URL(scriptSrc).origin;
-        // Next.js dev server (3010) doesn't proxy WebSockets reliably. Point directly to backend (4010) in dev.
-        if (apiBase.indexOf('localhost:3010') !== -1 || apiBase.indexOf('127.0.0.1:3010') !== -1) {
-            apiBase = apiBase.replace('3010', '4010');
+
+    if (explicitBase) {
+        // Explicit override (e.g., from test modal or custom deployments)
+        apiBase = explicitBase.replace(/\/+$/, ''); // trim trailing slashes
+    } else {
+        try {
+            apiBase = new URL(scriptSrc).origin;
+        } catch (e) {
+            apiBase = window.location.origin;
         }
-    } catch (e) {
-        apiBase = window.location.origin;
     }
 
     var CONFIG_URL = apiBase + '/api/workspaces/public/widgets/' + widgetId + '/config';
@@ -144,7 +148,7 @@
             })
             .then(function (res) {
                 if (!res.success || !res.data) {
-                    console.warn('[NemarChat] Widget not found or inactive');
+                    console.warn('[NemarkChat] Widget not found or inactive');
                     renderFallback('inactive');
                     return;
                 }
@@ -164,11 +168,11 @@
                     });
 
                     if (rules.mode === 'allowlist' && !matched) {
-                        console.warn('[NemarChat] Domain not in allowlist:', hostname);
+                        console.warn('[NemarkChat] Domain not in allowlist:', hostname);
                         return;
                     }
                     if (rules.mode === 'blocklist' && matched) {
-                        console.warn('[NemarChat] Domain blocklisted:', hostname);
+                        console.warn('[NemarkChat] Domain blocklisted:', hostname);
                         return;
                     }
                 }
@@ -181,7 +185,7 @@
             })
             .catch(function (err) {
                 _configFetching = false;
-                console.error('[NemarChat] Load failed (attempt ' + (attempt + 1) + '):', err.message);
+                console.error('[NemarkChat] Load failed (attempt ' + (attempt + 1) + '):', err.message);
                 if (attempt < MAX_RETRIES) {
                     setTimeout(function () { fetchConfig(attempt + 1); }, RETRY_DELAY);
                 } else {
@@ -228,7 +232,7 @@
         document.body.appendChild(tip);
 
         // Expose minimal API so tenant code doesn't crash
-        var globalObjName = typeof window.NemarChat === 'string' ? window.NemarChat : 'NemarChat';
+        var globalObjName = typeof window.NemarkChat === 'string' ? window.NemarkChat : 'NemarkChat';
         var apiObj = window[globalObjName] || {};
         apiObj.open = function () { };
         apiObj.close = function () { };
@@ -245,6 +249,61 @@
     // ────────────────────────────────────────
     function renderWidget(cfg, id, base, vid, bh, widgetName) {
         if (_rendered) return;
+
+        // ── URL Targeting: check domain + path rules before rendering ──
+        var urlRules = cfg.urlRules || {};
+        var domainRules = urlRules.domains || [];
+        var pathRules = urlRules.paths || [];
+
+        function matchesUrlRules() {
+            var currentHost = window.location.hostname;
+            var currentPath = window.location.pathname;
+
+            // Domain rules
+            if (domainRules.length > 0) {
+                var domainInclude = domainRules.filter(function(r) { return r.type === 'include'; });
+                var domainExclude = domainRules.filter(function(r) { return r.type === 'exclude'; });
+
+                // If there are include rules, current host must match at least one
+                if (domainInclude.length > 0) {
+                    var matched = false;
+                    for (var i = 0; i < domainInclude.length; i++) {
+                        if (currentHost.indexOf(domainInclude[i].value) !== -1) { matched = true; break; }
+                    }
+                    if (!matched) return false;
+                }
+                // Exclude rules: if current host matches any, block
+                for (var j = 0; j < domainExclude.length; j++) {
+                    if (currentHost.indexOf(domainExclude[j].value) !== -1) return false;
+                }
+            }
+
+            // Path rules
+            if (pathRules.length > 0) {
+                var pathInclude = pathRules.filter(function(r) { return r.type === 'include'; });
+                var pathExclude = pathRules.filter(function(r) { return r.type === 'exclude'; });
+
+                if (pathInclude.length > 0) {
+                    var pathMatched = false;
+                    for (var k = 0; k < pathInclude.length; k++) {
+                        if (currentPath.indexOf(pathInclude[k].value) !== -1 || pathInclude[k].value === '*') { pathMatched = true; break; }
+                    }
+                    if (!pathMatched) return false;
+                }
+                for (var l = 0; l < pathExclude.length; l++) {
+                    if (currentPath.indexOf(pathExclude[l].value) !== -1) return false;
+                }
+            }
+
+            return true;
+        }
+
+        // If URL rules exist and page doesn't match, don't render
+        if ((domainRules.length > 0 || pathRules.length > 0) && !matchesUrlRules()) {
+            console.log('[NemarkChat] URL rules: page does not match, widget hidden.');
+            return;
+        }
+
         _rendered = true;
 
         // Cleanup fallback if it was shown during retries
@@ -363,133 +422,198 @@
         }
 
         css.textContent = [
-            // Bubble Launcher
-            '#nchat-bubble{position:fixed;' + bubblePos + bubbleCss + 'background:' + bgVal + ';color:#fff;cursor:pointer;z-index:2147483647;box-shadow:' + (launcherStyle === 'image' ? 'none' : '0 4px 24px rgba(0,0,0,0.18)') + ';transition:all .3s cubic-bezier(.4,0,.2,1);border:none;outline:none}',
-            '#nchat-bubble:hover{transform:' + (isSide ? 'translateY(-50%)' : 'translateY(0)') + ' scale(1.05);box-shadow:' + (launcherStyle === 'image' ? 'none' : '0 6px 32px rgba(0,0,0,0.22)') + ';}',
-            '#nchat-bubble svg{width:28px;height:28px;fill:currentColor}',
+            // ── Reset for widget namespace ──
+            '#nchat-bubble,#nchat-bubble *,#nchat-window,#nchat-window *,#nchat-tooltip,#nchat-tooltip *{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}',
+
+            // ── Bubble Launcher ──
+            '#nchat-bubble{position:fixed;' + bubblePos + bubbleCss + 'background:' + bgVal + ';color:#fff;cursor:pointer;z-index:2147483647;box-shadow:' + (launcherStyle === 'image' ? 'none' : '0 4px 20px rgba(0,0,0,0.2)') + ';transition:all .35s cubic-bezier(.4,0,.2,1);border:none;outline:none}',
+            '#nchat-bubble:hover{transform:' + (isSide ? 'translateY(-50%)' : 'translateY(0)') + ' scale(1.08);box-shadow:' + (launcherStyle === 'image' ? 'none' : '0 6px 28px rgba(0,0,0,0.25)') + '}',
+            '#nchat-bubble svg{width:26px;height:26px;fill:currentColor;transition:transform .3s ease}',
             '#nchat-bubble img.nchat-custom-img{width:100%;height:100%;object-fit:cover;border-radius:50%;box-shadow:0 4px 16px rgba(0,0,0,0.15)}',
-            '#nchat-bubble.nchat-opened-bubble{width:60px !important;height:60px !important;padding:0 !important;border-radius:' + (isSide ? (pos === 'side-right' ? '30px 0 0 30px' : '0 30px 30px 0') : '50%') + ' !important}',
+            '#nchat-bubble.nchat-opened-bubble{width:56px !important;height:56px !important;padding:0 !important;border-radius:' + (isSide ? (pos === 'side-right' ? '28px 0 0 28px' : '0 28px 28px 0') : '50%') + ' !important;background:' + color + ' !important}',
+            '#nchat-bubble .nchat-badge{position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;font-size:10px;font-weight:700;min-width:20px;height:20px;border-radius:10px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(239,68,68,.4);border:2px solid #fff;padding:0 4px}',
 
-            // Tooltip
-            '#nchat-tooltip{position:fixed;z-index:2147483647;background:#333;color:#fff;padding:8px 14px;border-radius:10px;font-size:12px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,0.2);opacity:0;pointer-events:none;transition:opacity .25s ease,transform .25s ease;transform:translateY(6px)}',
+            // ── Tooltip (Subiz card-style) ──
+            '#nchat-tooltip{position:fixed;z-index:2147483647;background:#fff;color:#333;padding:12px 16px;border-radius:12px;font-size:13px;font-weight:500;box-shadow:0 4px 20px rgba(0,0,0,0.12);opacity:0;pointer-events:none;transition:opacity .25s ease,transform .25s ease;transform:translateY(4px);max-width:240px;line-height:1.4}',
             '#nchat-tooltip.nchat-tip-visible{opacity:1;pointer-events:auto;transform:translateY(0)}',
-            '#nchat-tooltip::after{content:"";position:absolute;bottom:-6px;right:24px;border-left:6px solid transparent;border-right:6px solid transparent;border-top:6px solid #333}',
+            '#nchat-tooltip::after{content:"";position:absolute;bottom:-6px;' + (isRight ? 'right:24px;' : 'left:24px;') + 'border-left:6px solid transparent;border-right:6px solid transparent;border-top:6px solid #fff}',
+            '.nchat-tip-hdr{display:flex;align-items:center;gap:8px;margin-bottom:4px}',
+            '.nchat-tip-dot{width:8px;height:8px;border-radius:50%;background:#22c55e;flex-shrink:0}',
+            '.nchat-tip-name{font-weight:600;font-size:13px;color:#1a1a2e}',
+            '.nchat-tip-sub{font-size:12px;color:#64748b;font-weight:400}',
 
-            // Window
-            '#nchat-window{position:fixed;' + winPos + 'width:380px;max-width:calc(100vw - 32px);max-height:min(560px, calc(100vh - 120px));border-radius:16px;overflow:hidden;box-shadow:0 12px 60px rgba(0,0,0,0.16);z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;background:#fff;opacity:0;pointer-events:none;transition:all .25s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column}',
+            // ── Chat Window ──
+            '#nchat-window{position:fixed;' + winPos + 'width:370px;max-width:calc(100vw - 24px);height:520px;max-height:min(520px,calc(100vh - 120px));border-radius:16px;overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,0.15),0 2px 8px rgba(0,0,0,0.06);z-index:2147483647;background:#fff;opacity:0;pointer-events:none;transition:all .3s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column}',
             '#nchat-window.nchat-open{transform:' + (isSide ? 'translateY(-50%)' : 'translateY(0)') + ' scale(1);opacity:1;pointer-events:auto}',
 
-            // Header
-            '#nchat-hdr{background:' + bgVal + ';padding:20px 20px 16px;color:#fff;position:relative}',
-            '#nchat-hdr h4{margin:0;font-size:16px;font-weight:700;line-height:1.3}',
-            '#nchat-hdr p{margin:6px 0 0;font-size:13px;opacity:.85;line-height:1.4}',
-            '#nchat-hdr-close{position:absolute;top:14px;right:14px;background:rgba(255,255,255,.15);border:none;color:#fff;width:28px;height:28px;border-radius:50%;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;transition:background .2s}',
-            '#nchat-hdr-close:hover{background:rgba(255,255,255,.3)}',
+            // ── Header (Subiz-inspired gradient with avatar) ──
+            '#nchat-hdr{background:' + bgVal + ';padding:18px 16px 16px;color:#fff;position:relative;flex-shrink:0}',
+            '#nchat-hdr-inner{display:flex;align-items:center;gap:12px}',
+            '#nchat-hdr-avatar{width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden;border:2px solid rgba(255,255,255,.3)}',
+            '#nchat-hdr-avatar img{width:100%;height:100%;object-fit:cover}',
+            '#nchat-hdr-avatar svg{width:22px;height:22px;fill:rgba(255,255,255,.8)}',
+            '#nchat-hdr-text{flex:1;min-width:0}',
+            '#nchat-hdr h4{margin:0;font-size:15px;font-weight:700;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+            '#nchat-hdr p{margin:2px 0 0;font-size:12px;opacity:.85;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+            '#nchat-hdr-close{position:absolute;top:16px;right:14px;background:rgba(255,255,255,.12);border:none;color:#fff;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;transition:background .2s;line-height:1}',
+            '#nchat-hdr-close:hover{background:rgba(255,255,255,.25)}',
+            '#nchat-hdr-close svg{width:16px;height:16px;fill:currentColor}',
 
-            // Online indicator
-            '.nchat-online{display:inline-flex;align-items:center;gap:6px;font-size:12px;margin-top:8px;opacity:.9}',
-            '.nchat-online-dot{width:8px;height:8px;border-radius:50%;background:#4ade80;display:inline-block;animation:nchat-pulse 2s infinite}',
+            // Online indicator in header
+            '.nchat-online{display:inline-flex;align-items:center;gap:5px;font-size:11px;margin-top:4px;opacity:.9}',
+            '.nchat-online-dot{width:7px;height:7px;border-radius:50%;background:#4ade80;display:inline-block;animation:nchat-pulse 2s infinite}',
             '@keyframes nchat-pulse{0%,100%{opacity:1}50%{opacity:.4}}',
+            '.nchat-offline-dot{width:7px;height:7px;border-radius:50%;background:#ef4444;display:inline-block}',
 
-            // Body
-            '#nchat-list-view{flex:1;overflow-y:auto;background:#f8f9fa;display:none;flex-direction:column;position:relative}',
+            // Back button
+            '#nchat-hdr-left{display:flex;align-items:center;gap:8px}',
+            '#nchat-hdr-back{background:transparent;border:none;color:#fff;width:28px;height:28px;border-radius:50%;cursor:pointer;display:none;align-items:center;justify-content:center;margin-left:-4px;transition:background 0.2s;flex-shrink:0}',
+            '#nchat-hdr-back:hover{background:rgba(255,255,255,.2)}',
+            '#nchat-hdr-back svg{width:20px;height:20px;fill:currentColor}',
+            '#nchat-window.show-chat.has-list #nchat-hdr-back{display:flex}',
+
+            // ── List View ──
+            '#nchat-list-view{flex:1;overflow-y:auto;background:#f8f9fb;display:none;flex-direction:column;position:relative}',
             '.nchat-list-items{flex:1;overflow-y:auto;padding:12px}',
-            '.nchat-list-item{background:#fff;border-radius:12px;padding:12px;margin-bottom:10px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.04);border:1px solid #f0f0f0;transition:all 0.2s;display:flex;align-items:center;gap:12px}',
-            '.nchat-list-item:hover{border-color:' + color + ';box-shadow:0 4px 12px rgba(0,0,0,0.08)}',
-            '.nchat-list-avatar{width:40px;height:40px;border-radius:50%;background:' + bgVal + ';color:#fff;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:16px;flex-shrink:0}',
+            '.nchat-list-item{background:#fff;border-radius:12px;padding:12px;margin-bottom:8px;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.04);border:1px solid #f0f0f0;transition:all 0.2s;display:flex;align-items:center;gap:12px}',
+            '.nchat-list-item:hover{border-color:' + color + ';box-shadow:0 2px 8px rgba(0,0,0,0.08);transform:translateY(-1px)}',
+            '.nchat-list-avatar{width:40px;height:40px;border-radius:50%;background:' + bgVal + ';color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;flex-shrink:0}',
             '.nchat-list-info{flex:1;min-width:0}',
-            '.nchat-list-name{font-size:14px;font-weight:600;color:#333;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-            '.nchat-list-msg{font-size:12px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-            '.nchat-list-time{font-size:11px;color:#999}',
-            '.nchat-list-footer{padding:16px;background:#fff;border-top:1px solid #f0f0f0}',
-            '#nchat-new-conv{width:100%;padding:12px;background:' + bgVal + ';color:#fff;border:none;border-radius:8px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;font-size:14px;transition:opacity 0.2s}',
-            '#nchat-new-conv:hover{opacity:0.9}',
+            '.nchat-list-name{font-size:14px;font-weight:600;color:#1a1a2e;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+            '.nchat-list-msg{font-size:12px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+            '.nchat-list-time{font-size:11px;color:#94a3b8;flex-shrink:0}',
+            '.nchat-list-footer{padding:12px;background:#fff;border-top:1px solid #f0f0f5}',
+            '#nchat-new-conv{width:100%;padding:11px;background:' + bgVal + ';color:#fff;border:none;border-radius:10px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;font-size:13px;transition:all 0.2s}',
+            '#nchat-new-conv:hover{opacity:0.9;transform:translateY(-1px)}',
             '#nchat-new-conv svg{width:16px;height:16px;fill:currentColor}',
+
+            // View switching
             '#nchat-chat-view{flex:1;display:none;flex-direction:column;overflow:hidden}',
             '#nchat-window.show-list #nchat-list-view{display:flex}',
             '#nchat-window.show-chat #nchat-chat-view{display:flex}',
-            '#nchat-hdr-left{display:flex;align-items:center;gap:8px}',
-            '#nchat-hdr-back{background:transparent;border:none;color:#fff;width:28px;height:28px;border-radius:50%;cursor:pointer;display:none;align-items:center;justify-content:center;margin-left:-8px;transition:background 0.2s}',
-            '#nchat-hdr-back:hover{background:rgba(255,255,255,0.2)}',
-            '#nchat-hdr-back svg{width:20px;height:20px;fill:currentColor}',
-            '#nchat-window.show-chat.has-list #nchat-hdr-back{display:flex}',
-            '#nchat-body{flex:1;overflow-y:auto;padding:16px;background:#f8f9fa;min-height:180px}',
 
-            // Pre-chat form
-            '#nchat-pcf{max-width:100%}',
-            '#nchat-pcf .nchat-pcf-title{font-size:14px;font-weight:600;color:#1a1a1a;margin-bottom:14px}',
-            '#nchat-pcf label{display:block;font-size:12px;font-weight:500;color:#555;margin-bottom:3px}',
+            // ── Chat Body ──
+            '#nchat-body{flex:1;overflow-y:auto;padding:16px;background:#f8f9fb;min-height:0}',
+
+            // ── Empty State (Subiz-style SVG illustration) ──
+            '.nchat-empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 24px;text-align:center;min-height:220px}',
+            '.nchat-empty-state svg{width:120px;height:120px;margin-bottom:16px;opacity:.85}',
+            '.nchat-empty-text{font-size:14px;color:#64748b;line-height:1.5;font-weight:500}',
+
+            // ── Pre-chat form (redesigned) ──
+            '#nchat-pcf{max-width:100%;padding:4px 0}',
+            '#nchat-pcf .nchat-pcf-title{font-size:14px;font-weight:600;color:#1a1a2e;margin-bottom:16px}',
+            '#nchat-pcf label{display:block;font-size:12px;font-weight:500;color:#475569;margin-bottom:4px}',
             '#nchat-pcf label .nchat-req{color:#ef4444;margin-left:2px}',
-            '#nchat-pcf input{width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;margin-bottom:12px;box-sizing:border-box;outline:none;transition:border-color .2s}',
-            '#nchat-pcf input:focus{border-color:' + color + '}',
-            '#nchat-pcf button{width:100%;padding:11px;border:none;border-radius:10px;background:' + bgVal + ';color:#fff;font-weight:600;cursor:pointer;font-size:14px;transition:opacity .2s;margin-top:4px}',
-            '#nchat-pcf button:hover{opacity:.9}',
-            '#nchat-pcf textarea{width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;margin-bottom:12px;box-sizing:border-box;outline:none;transition:border-color .2s;font-family:inherit;resize:vertical;min-height:60px;max-height:120px}',
-            '#nchat-pcf textarea:focus{border-color:' + color + '}',
-            '#nchat-pcf select{width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;margin-bottom:12px;box-sizing:border-box;outline:none;transition:border-color .2s;background:#fff;cursor:pointer;appearance:auto}',
+            '#nchat-pcf input{width:100%;padding:10px 14px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:13px;margin-bottom:12px;box-sizing:border-box;outline:none;transition:border-color .2s,box-shadow .2s;background:#fff}',
+            '#nchat-pcf input:focus{border-color:' + color + ';box-shadow:0 0 0 3px ' + color + '20}',
+            '#nchat-pcf button{width:100%;padding:12px;border:none;border-radius:12px;background:' + bgVal + ';color:#fff;font-weight:600;cursor:pointer;font-size:14px;transition:all .2s;margin-top:4px}',
+            '#nchat-pcf button:hover{opacity:.92;transform:translateY(-1px);box-shadow:0 4px 12px ' + color + '30}',
+            '#nchat-pcf textarea{width:100%;padding:10px 14px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:13px;margin-bottom:12px;box-sizing:border-box;outline:none;transition:border-color .2s,box-shadow .2s;font-family:inherit;resize:vertical;min-height:60px;max-height:120px;background:#fff}',
+            '#nchat-pcf textarea:focus{border-color:' + color + ';box-shadow:0 0 0 3px ' + color + '20}',
+            '#nchat-pcf select{width:100%;padding:10px 14px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:13px;margin-bottom:12px;box-sizing:border-box;outline:none;transition:border-color .2s;background:#fff;cursor:pointer;appearance:auto}',
             '#nchat-pcf select:focus{border-color:' + color + '}',
-            // Validation errors
             '.nchat-pcf-err{font-size:11px;color:#ef4444;margin:-8px 0 8px;line-height:1.3}',
             '#nchat-pcf input.nchat-invalid,#nchat-pcf textarea.nchat-invalid,#nchat-pcf select.nchat-invalid{border-color:#ef4444}',
 
-            // Messages area
-            '.nchat-msg{margin-bottom:10px;display:flex}',
+            // ── Message Bubbles (improved) ──
+            '.nchat-msg{margin-bottom:8px;display:flex;animation:nchat-fadeIn .25s ease}',
+            '@keyframes nchat-fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}',
             '.nchat-msg-bot{justify-content:flex-start}',
             '.nchat-msg-user{justify-content:flex-end}',
-            '.nchat-msg-bubble{max-width:80%;padding:10px 14px;border-radius:14px;font-size:13px;line-height:1.5;word-wrap:break-word;overflow-wrap:break-word}',
-            '.nchat-msg-bot .nchat-msg-bubble{background:#fff;border:1px solid #e5e5e5;border-bottom-left-radius:4px;color:#333}',
+            '.nchat-msg-bubble{max-width:78%;padding:10px 14px;border-radius:16px;font-size:13px;line-height:1.55;word-wrap:break-word;overflow-wrap:break-word}',
+            '.nchat-msg-bot .nchat-msg-bubble{background:#fff;border:1px solid #e8ecf0;border-bottom-left-radius:4px;color:#1e293b;box-shadow:0 1px 2px rgba(0,0,0,0.04)}',
             '.nchat-msg-user .nchat-msg-bubble{background:' + bgVal + ';color:#fff;border-bottom-right-radius:4px}',
 
-            // Message states (sending / error / retry)
-            '.nchat-msg-sending{opacity:.6}',
+            // Message states
+            '.nchat-msg-sending{opacity:.55}',
             '.nchat-msg-sending .nchat-msg-bubble{position:relative}',
-            '.nchat-msg-sending .nchat-msg-bubble::after{content:"";position:absolute;bottom:4px;right:8px;width:10px;height:10px;border:2px solid #999;border-top-color:transparent;border-radius:50%;animation:nchat-spin .8s linear infinite}',
+            '.nchat-msg-sending .nchat-msg-bubble::after{content:"";position:absolute;bottom:4px;right:8px;width:10px;height:10px;border:2px solid rgba(255,255,255,.5);border-top-color:transparent;border-radius:50%;animation:nchat-spin .7s linear infinite}',
             '@keyframes nchat-spin{to{transform:rotate(360deg)}}',
             '.nchat-msg-error .nchat-msg-bubble{border:1.5px solid #ef4444 !important}',
-            '.nchat-retry-btn{display:block;margin-top:4px;padding:2px 10px;font-size:11px;color:#ef4444;background:none;border:1px solid #ef4444;border-radius:10px;cursor:pointer;transition:all .2s}',
+            '.nchat-retry-btn{display:inline-block;margin-top:4px;padding:3px 12px;font-size:11px;color:#ef4444;background:none;border:1px solid #ef4444;border-radius:12px;cursor:pointer;transition:all .2s}',
             '.nchat-retry-btn:hover{background:#ef4444;color:#fff}',
-
-            // Message status ticks (only on user messages)
-            '.nchat-msg-status{display:block;font-size:10px;color:#999;margin-top:2px;text-align:right;line-height:1}',
+            '.nchat-msg-status{display:block;font-size:10px;color:#94a3b8;margin-top:2px;text-align:right;line-height:1}',
             '.nchat-msg-status-sent::after{content:"✓"}',
             '.nchat-msg-status-delivered::after{content:"✓✓"}',
             '.nchat-msg-status-read::after{content:"✓✓";color:#34b7f1}',
 
-            // Footer
-            '#nchat-ftr{padding:12px 16px;border-top:1px solid #eee;display:flex;gap:8px;align-items:center;background:#fff}',
-            '#nchat-ftr input{flex:1;padding:10px 16px;border:1.5px solid #e0e0e0;border-radius:22px;font-size:13px;outline:none;transition:border-color .2s}',
-            '#nchat-ftr input:focus{border-color:' + color + '}',
-            '#nchat-ftr button{width:38px;height:38px;border-radius:50%;border:none;background:' + bgVal + ';color:#fff;cursor:pointer;font-size:17px;display:flex;align-items:center;justify-content:center;transition:opacity .2s;flex-shrink:0}',
-            '#nchat-ftr button:hover{opacity:.85}',
-
-            // Branding
-            '.nchat-brand{text-align:center;padding:6px;font-size:10px;color:#aaa;background:#fff}',
-            '.nchat-brand a{color:#888;text-decoration:none}',
-
-            // Offline state
-            '.nchat-offline-dot{width:8px;height:8px;border-radius:50%;background:#ef4444;display:inline-block;margin-right:5px}',
-            '.nchat-offline-msg{padding:16px;text-align:center;color:#666;font-size:13px;line-height:1.6}',
-            '#nchat-offline-form{padding:16px}',
-            '#nchat-offline-form label{display:block;font-size:12px;color:#555;margin-bottom:4px;font-weight:500}',
-            '#nchat-offline-form input,#nchat-offline-form textarea{width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:13px;margin-bottom:12px;box-sizing:border-box;outline:none;transition:border-color .2s;font-family:inherit}',
-            '#nchat-offline-form input:focus,#nchat-offline-form textarea:focus{border-color:' + color + '}',
-            '#nchat-offline-form textarea{resize:vertical;min-height:60px}',
-            '#nchat-offline-form button{width:100%;padding:11px;border:none;border-radius:10px;background:' + bgVal + ';color:#fff;font-weight:600;cursor:pointer;font-size:14px;transition:opacity .2s;margin-top:4px}',
-            '#nchat-offline-form button:hover{opacity:.9}',
-
-            // Upload button
-            '#nchat-upload-btn{width:38px;height:38px;border-radius:50%;border:none;background:transparent;color:#999;cursor:pointer;font-size:20px;display:flex;align-items:center;justify-content:center;transition:color .2s;flex-shrink:0}',
+            // ── Footer Input (Subiz-style clean bar) ──
+            '#nchat-ftr{padding:10px 12px;border-top:1px solid #f0f0f5;display:flex;gap:6px;align-items:center;background:#fff;flex-shrink:0}',
+            '#nchat-ftr input{flex:1;padding:10px 14px;border:1.5px solid #e2e8f0;border-radius:24px;font-size:13px;outline:none;transition:border-color .2s,box-shadow .2s;background:#f8f9fb;min-width:0}',
+            '#nchat-ftr input:focus{border-color:' + color + ';background:#fff;box-shadow:0 0 0 3px ' + color + '15}',
+            '#nchat-ftr input::placeholder{color:#94a3b8}',
+            // Emoji button (decorative)
+            '#nchat-emoji-btn{width:32px;height:32px;border-radius:50%;border:none;background:transparent;color:#94a3b8;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:color .2s;flex-shrink:0;padding:0}',
+            '#nchat-emoji-btn:hover{color:' + color + '}',
+            '#nchat-emoji-btn svg{width:20px;height:20px;fill:currentColor}',
+            // Attachment / upload
+            '#nchat-upload-btn{width:32px;height:32px;border-radius:50%;border:none;background:transparent;color:#94a3b8;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:color .2s;flex-shrink:0;padding:0}',
             '#nchat-upload-btn:hover{color:' + color + '}',
             '#nchat-upload-btn svg{width:20px;height:20px;fill:currentColor}',
+            // Send button
+            '#nchat-send{width:36px;height:36px;border-radius:50%;border:none;background:' + bgVal + ';color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0;padding:0}',
+            '#nchat-send:hover{opacity:.85;transform:scale(1.05)}',
+            '#nchat-send svg{width:18px;height:18px;fill:currentColor}',
 
-            // Image messages
-            '.nchat-msg-img{max-width:100%;border-radius:8px;cursor:pointer;margin-top:4px}',
-            '.nchat-msg-img:hover{opacity:.9}',
-            '.nchat-img-preview{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.85);z-index:2147483647;display:flex;align-items:center;justify-content:center;cursor:zoom-out}',
+            // ── Branding (Subiz-style centered) ──
+            '.nchat-brand{text-align:center;padding:8px;font-size:11px;color:#94a3b8;background:#fff;border-top:1px solid #f0f0f5;flex-shrink:0}',
+            '.nchat-brand a{color:#64748b;text-decoration:none;font-weight:500;transition:color .2s}',
+            '.nchat-brand a:hover{color:' + color + '}',
+            '.nchat-brand svg{width:14px;height:14px;vertical-align:middle;margin-right:3px;fill:#94a3b8}',
+
+            // ── Offline state ──
+            '.nchat-offline-msg{padding:24px 16px;text-align:center;color:#64748b;font-size:13px;line-height:1.6}',
+            '#nchat-offline-form{padding:16px}',
+            '#nchat-offline-form label{display:block;font-size:12px;color:#475569;margin-bottom:4px;font-weight:500}',
+            '#nchat-offline-form input,#nchat-offline-form textarea{width:100%;padding:10px 14px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:13px;margin-bottom:12px;box-sizing:border-box;outline:none;transition:border-color .2s;font-family:inherit;background:#fff}',
+            '#nchat-offline-form input:focus,#nchat-offline-form textarea:focus{border-color:' + color + '}',
+            '#nchat-offline-form textarea{resize:vertical;min-height:60px}',
+            '#nchat-offline-form button{width:100%;padding:12px;border:none;border-radius:12px;background:' + bgVal + ';color:#fff;font-weight:600;cursor:pointer;font-size:14px;transition:all .2s;margin-top:4px}',
+            '#nchat-offline-form button:hover{opacity:.92;transform:translateY(-1px)}',
+
+            // ── Image messages ──
+            '.nchat-msg-img{max-width:100%;border-radius:10px;cursor:pointer;margin-top:4px;transition:opacity .2s}',
+            '.nchat-msg-img:hover{opacity:.88}',
+            '.nchat-img-preview{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.88);z-index:2147483647;display:flex;align-items:center;justify-content:center;cursor:zoom-out;animation:nchat-fadeIn .2s ease}',
             '.nchat-img-preview img{max-width:90%;max-height:90%;border-radius:8px}',
 
-            // Mobile
-            '@media(max-width:440px){#nchat-window{width:calc(100vw - 16px);' + (isRight ? 'right:8px' : 'left:8px') + ';' + (isSide ? 'top:50%;transform:translateY(-50%) scale(0.95);' : 'bottom:80px;') + 'max-height:calc(100vh - 100px)}#nchat-bubble{' + (isSide ? '' : (isRight ? 'right:16px;' : 'left:16px;') + 'bottom:16px;width:54px;height:54px;') + '}}'
+            // ── Typing indicator ──
+            '.nchat-typing .nchat-msg-bubble{font-style:normal !important;opacity:1 !important;display:flex;align-items:center;gap:8px;padding:10px 16px}',
+            '.nchat-dots{display:flex;gap:3px;align-items:center}',
+            '.nchat-dots span{width:6px;height:6px;border-radius:50%;background:#94a3b8;animation:nchat-bounce 1.4s infinite ease-in-out both}',
+            '.nchat-dots span:nth-child(1){animation-delay:0s}',
+            '.nchat-dots span:nth-child(2){animation-delay:.16s}',
+            '.nchat-dots span:nth-child(3){animation-delay:.32s}',
+            '@keyframes nchat-bounce{0%,80%,100%{transform:scale(0.6);opacity:.4}40%{transform:scale(1);opacity:1}}',
+
+            // ── Greeting Popup Card (Subiz-style floating notification) ──
+            '#nchat-greeting{position:fixed;z-index:2147483646;' + (isRight ? 'right:24px;' : 'left:24px;') + 'bottom:96px;background:#fff;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,0.12);max-width:300px;opacity:0;transform:translateY(12px) scale(0.95);transition:all .35s cubic-bezier(.4,0,.2,1);pointer-events:none;overflow:hidden}',
+            '#nchat-greeting.nchat-greeting-show{opacity:1;transform:translateY(0) scale(1);pointer-events:auto}',
+            '#nchat-greeting-inner{padding:14px 16px;display:flex;align-items:flex-start;gap:10px}',
+            '#nchat-greeting-avatar{width:36px;height:36px;border-radius:50%;background:' + bgVal + ';display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden}',
+            '#nchat-greeting-avatar img{width:100%;height:100%;object-fit:cover}',
+            '#nchat-greeting-avatar svg{width:18px;height:18px;fill:#fff}',
+            '#nchat-greeting-text{flex:1;min-width:0}',
+            '.nchat-greeting-name{font-size:13px;font-weight:600;color:#1a1a2e;margin-bottom:2px}',
+            '.nchat-greeting-msg{font-size:12px;color:#475569;line-height:1.4}',
+            '#nchat-greeting-cta{display:block;padding:8px 16px;color:' + color + ';font-weight:600;font-size:13px;text-decoration:none;border-top:1px solid #f0f0f5;cursor:pointer;transition:background .2s;text-align:center}',
+            '#nchat-greeting-cta:hover{background:#f8f9fb}',
+            '#nchat-greeting-close{position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:50%;background:transparent;border:none;color:#94a3b8;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .2s;padding:0;font-size:14px}',
+            '#nchat-greeting-close:hover{background:#f1f5f9;color:#64748b}',
+            '#nchat-greeting-close svg{width:14px;height:14px;fill:currentColor}',
+
+            // ── CSAT Rating (stars after conversation close) ──
+            '.nchat-csat{text-align:center;padding:16px}',
+            '.nchat-csat-title{font-size:13px;color:#475569;margin-bottom:10px;font-weight:500}',
+            '.nchat-csat-stars{display:flex;justify-content:center;gap:6px}',
+            '.nchat-csat-star{width:32px;height:32px;cursor:pointer;fill:#d1d5db;transition:all .2s;border:none;background:none;padding:0}',
+            '.nchat-csat-star:hover,.nchat-csat-star.nchat-star-active{fill:#f59e0b;transform:scale(1.15)}',
+            '.nchat-csat-thanks{font-size:12px;color:#22c55e;margin-top:8px;font-weight:500;display:none}',
+
+            // ── Mobile ──
+            '@media(max-width:440px){#nchat-window{width:100vw;max-width:100vw;height:100vh;max-height:100vh;border-radius:0;' + (isRight ? 'right:0' : 'left:0') + ';bottom:0;top:0}#nchat-window.nchat-open{transform:none}#nchat-bubble{' + (isSide ? '' : (isRight ? 'right:16px;' : 'left:16px;') + 'bottom:16px;width:52px;height:52px;') + '}}',
+            '@media(min-width:441px) and (max-width:600px){#nchat-window{width:calc(100vw - 16px);' + (isRight ? 'right:8px' : 'left:8px') + ';bottom:80px;max-height:calc(100vh - 100px)}}'
         ].join('\n');
         document.head.appendChild(css);
 
@@ -518,12 +642,22 @@
         bubble.setAttribute('aria-label', 'Open chat');
         document.body.appendChild(bubble);
 
-        // ── Tooltip (floating popup on hover) ──
+        // ── Tooltip (Subiz-style card popup on hover) ──
         var tipEl = null;
-        if (tooltipText) {
+        var tipTextRaw = tooltipText || (widgetName || '');
+        if (tipTextRaw) {
             tipEl = document.createElement('div');
             tipEl.id = 'nchat-tooltip';
-            tipEl.textContent = tooltipText;
+            var tipContent = '<div class="nchat-tip-hdr">'
+                + '<span class="nchat-tip-dot' + (online ? '' : ' nchat-offline-dot') + '"></span>'
+                + '<span class="nchat-tip-name">' + (widgetName || (lang === 'vi' ? 'Hỗ trợ' : 'Support')) + '</span>'
+                + '</div>';
+            if (tooltipText) {
+                tipContent += '<div class="nchat-tip-sub">' + tooltipText + '</div>';
+            } else {
+                tipContent += '<div class="nchat-tip-sub">' + (online ? (lang === 'vi' ? 'Hỗ trợ 24/7' : 'Support 24/7') : (lang === 'vi' ? 'Để lại lời nhắn' : 'Leave a message')) + '</div>';
+            }
+            tipEl.innerHTML = tipContent;
             document.body.appendChild(tipEl);
 
             function positionTooltip() {
@@ -553,24 +687,30 @@
         var win = document.createElement('div');
         win.id = 'nchat-window';
 
-        // Header
+        // Header (Subiz-inspired with avatar)
         var statusDot = online
             ? '<div class="nchat-online"><span class="nchat-online-dot"></span>' + (lang === 'vi' ? 'Trực tuyến' : 'Online') + '</div>'
             : '<div class="nchat-online"><span class="nchat-offline-dot"></span>' + (lang === 'vi' ? 'Ngoại tuyến' : 'Offline') + '</div>';
         
         var backIcon = '<svg viewBox="0 0 24 24"><path d="M15.41 16.59L10.83 12l4.58-4.59L14 6l-6 6 6 6 1.41-1.41z"/></svg>';
+        var avatarHtml = cfg.headerAvatar
+            ? '<img src="' + cfg.headerAvatar + '" alt="" />'
+            : '<svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.2L4 17.2V4h16v12z"/></svg>';
+        var closeIcon = '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"/></svg>';
+        var headerSubtext = greeting || (online
+            ? (lang === 'vi' ? 'Chúng tôi sẵn sàng hỗ trợ bạn' : 'We\'re here to help you')
+            : (lang === 'vi' ? 'Để lại lời nhắn, chúng tôi sẽ phản hồi sớm' : 'Leave a message, we\'ll get back to you'));
         var hdr = '<div id="nchat-hdr">'
-            + '<div style="display:flex;align-items:flex-start;justify-content:space-between">'
-            + '<div id="nchat-hdr-left">'
+            + '<div id="nchat-hdr-inner">'
             + '<button id="nchat-hdr-back" aria-label="Back">' + backIcon + '</button>'
-            + '<div>'
-            + '<h4>' + (widgetName || (lang === 'vi' ? 'Chat hỗ trợ' : 'Support Chat')) + '</h4>'
-            + '<p>' + greeting + '</p>'
+            + '<div id="nchat-hdr-avatar">' + avatarHtml + '</div>'
+            + '<div id="nchat-hdr-text">'
+            + '<h4>' + (widgetName || (lang === 'vi' ? 'Hỗ trợ trực tuyến' : 'Live Support')) + '</h4>'
+            + '<p>' + headerSubtext + '</p>'
             + statusDot
             + '</div>'
             + '</div>'
-            + '<button id="nchat-hdr-close" aria-label="Close">&times;</button>'
-            + '</div>'
+            + '<button id="nchat-hdr-close" aria-label="Close">' + closeIcon + '</button>'
             + '</div>';
 
         // ── LIST VIEW ──
@@ -637,21 +777,39 @@
                     : 'Welcome back <strong>' + vName + '</strong>! How can we help?')
                 + '</div></div>';
         } else {
-            // No pre-chat form: auto greeting
-            body += '<div class="nchat-msg nchat-msg-bot"><div class="nchat-msg-bubble">' + greeting + '</div></div>';
+            // No pre-chat form: show Subiz-style empty state illustration
+            var emptyStateText = lang === 'vi' ? 'Gửi một tin nhắn để bắt đầu hội thoại!' : 'Send a message to start conversation!';
+            body += '<div class="nchat-empty-state">'
+                + '<svg viewBox="0 0 200 180" xmlns="http://www.w3.org/2000/svg">'
+                + '<circle cx="115" cy="65" r="50" fill="none" stroke="' + color + '" stroke-width="3"/>'
+                + '<circle cx="130" cy="55" r="5" fill="' + color + '"/>'
+                + '<circle cx="115" cy="55" r="5" fill="' + color + '"/>'
+                + '<path d="M105 72 Q115 82 125 72" fill="none" stroke="' + color + '" stroke-width="3" stroke-linecap="round"/>'
+                + '<circle cx="75" cy="110" r="35" fill="none" stroke="' + color + '" stroke-width="3"/>'
+                + '<circle cx="65" cy="110" r="3.5" fill="' + color + '"/>'
+                + '<circle cx="75" cy="110" r="3.5" fill="' + color + '"/>'
+                + '<circle cx="85" cy="110" r="3.5" fill="' + color + '"/>'
+                + '</svg>'
+                + '<div class="nchat-empty-text">' + emptyStateText + '</div>'
+                + '</div>';
         }
         body += '</div>';
 
-        // Footer with upload button
+        // Footer with emoji, upload, input, send (Subiz-style)
+        var emojiIcon = '<svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z"/></svg>';
+        var attachIcon = '<svg viewBox="0 0 24 24"><path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5s2.5 1.12 2.5 2.5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/></svg>';
+        var sendIcon = '<svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>';
         var ftr = '<div id="nchat-ftr">'
-            + '<label id="nchat-upload-btn" aria-label="Upload"><svg viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg><input type="file" id="nchat-file-input" accept="image/*,.pdf,.doc,.docx" style="display:none" /></label>'
+            + '<button id="nchat-emoji-btn" aria-label="Emoji">' + emojiIcon + '</button>'
+            + '<label id="nchat-upload-btn" aria-label="Upload">' + attachIcon + '<input type="file" id="nchat-file-input" accept="image/*,.pdf,.doc,.docx" style="display:none" /></label>'
             + '<input type="text" id="nchat-input" placeholder="' + placeholder + '" />'
-            + '<button id="nchat-send" aria-label="Send">&#10148;</button>'
+            + '<button id="nchat-send" aria-label="Send">' + sendIcon + '</button>'
             + '</div></div>'; // end nchat-chat-view
 
-        // Branding
+        // Branding (Subiz-style with icon)
+        var brandIcon = '<svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>';
         var brand = cfg.showBranding !== false
-            ? '<div class="nchat-brand">Powered by <a href="https://nemarchat.com" target="_blank" rel="noopener">NemarChat</a></div>'
+            ? '<div class="nchat-brand">' + brandIcon + ' <a href="https://nemarkdigital.com" target="_blank" rel="noopener">NemarkChat</a></div>'
             : '';
 
         win.innerHTML = hdr + listViewHtml + body + ftr + brand;
@@ -930,6 +1088,93 @@
         document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape' && isOpen) toggleChat(false);
         });
+
+        // ── Greeting Popup Card (Subiz-style floating notification) ──
+        var greetingCfg = cfg.greetingPopup || {};
+        var greetingDismissed = false;
+        var greetingEl = null;
+        var GREETING_DISMISS_KEY = 'nchat_greeting_dismissed_' + id;
+
+        try { greetingDismissed = sessionStorage.getItem(GREETING_DISMISS_KEY) === '1'; } catch (e) { }
+
+        if (greetingCfg.enabled !== false && !greetingDismissed && !isOpen) {
+            greetingEl = document.createElement('div');
+            greetingEl.id = 'nchat-greeting';
+            var greetAvatar = cfg.headerAvatar
+                ? '<img src="' + cfg.headerAvatar + '" alt="" />'
+                : '<svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>';
+            var closeIcon = '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>';
+            var greetMsg = greetingCfg.message || greeting;
+            var greetCta = greetingCfg.ctaText || (lang === 'vi' ? 'Gửi tin nhắn' : 'Send a message');
+            greetingEl.innerHTML = '<button id="nchat-greeting-close" aria-label="Close">' + closeIcon + '</button>'
+                + '<div id="nchat-greeting-inner">'
+                + '<div id="nchat-greeting-avatar">' + greetAvatar + '</div>'
+                + '<div id="nchat-greeting-text">'
+                + '<div class="nchat-greeting-name">' + (widgetName || (lang === 'vi' ? 'Hỗ trợ' : 'Support')) + '</div>'
+                + '<div class="nchat-greeting-msg">' + greetMsg + '</div>'
+                + '</div>'
+                + '</div>'
+                + '<a id="nchat-greeting-cta">' + greetCta + '</a>';
+            document.body.appendChild(greetingEl);
+
+            // Show after delay
+            var greetDelay = (greetingCfg.delay || 3) * 1000;
+            setTimeout(function () {
+                if (!isOpen && greetingEl && !greetingDismissed) {
+                    greetingEl.classList.add('nchat-greeting-show');
+                }
+            }, greetDelay);
+
+            // Click CTA → open widget
+            greetingEl.querySelector('#nchat-greeting-cta').addEventListener('click', function () {
+                greetingEl.classList.remove('nchat-greeting-show');
+                toggleChat(true);
+            });
+
+            // Close button
+            greetingEl.querySelector('#nchat-greeting-close').addEventListener('click', function (e) {
+                e.stopPropagation();
+                greetingEl.classList.remove('nchat-greeting-show');
+                greetingDismissed = true;
+                try { sessionStorage.setItem(GREETING_DISMISS_KEY, '1'); } catch (e2) { }
+            });
+        }
+
+        // Hide greeting when widget opens
+        var _origToggle = toggleChat;
+        toggleChat = function (open) {
+            _origToggle(open);
+            if (greetingEl && isOpen) {
+                greetingEl.classList.remove('nchat-greeting-show');
+            }
+        };
+        // Re-bind bubble click with wrapped toggle
+        bubble.removeEventListener('click', bubble.__nchatClick);
+        bubble.__nchatClick = function () { toggleChat(); };
+        bubble.addEventListener('click', bubble.__nchatClick);
+
+        // ── Auto-open Timer ──
+        var autoOpenCfg = cfg.autoOpen || {};
+        var AUTO_OPEN_KEY = 'nchat_auto_opened_' + id;
+        var alreadyAutoOpened = false;
+        try { alreadyAutoOpened = sessionStorage.getItem(AUTO_OPEN_KEY) === '1'; } catch (e) { }
+
+        if (autoOpenCfg.mode && autoOpenCfg.mode !== 'none' && !alreadyAutoOpened && !isOpen) {
+            var autoDelay = 0;
+            if (autoOpenCfg.mode === 'immediate') autoDelay = 500;
+            else if (autoOpenCfg.mode === '20s') autoDelay = 20000;
+            else if (autoOpenCfg.mode === '5min') autoDelay = 300000;
+            else if (autoOpenCfg.mode === 'custom') autoDelay = (autoOpenCfg.customSeconds || 0) * 1000;
+
+            if (autoDelay >= 0) {
+                setTimeout(function () {
+                    if (!isOpen) {
+                        toggleChat(true);
+                        try { sessionStorage.setItem(AUTO_OPEN_KEY, '1'); } catch (e) { }
+                    }
+                }, autoDelay);
+            }
+        }
 
         // ── Pre-chat form validation + submit ──
         var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -1317,7 +1562,7 @@
 
         function sendTextMessage(text) {
             if (!text || !_conversationId) {
-                console.warn('[NemarChat] sendTextMessage blocked — text:', !!text, 'convId:', _conversationId);
+                console.warn('[NemarkChat] sendTextMessage blocked — text:', !!text, 'convId:', _conversationId);
                 return;
             }
 
@@ -1344,12 +1589,12 @@
                         if (res.success && res.data) {
                             markMessageAck(tid, res.data);
                         } else {
-                            console.error('[NemarChat] Send failed:', res);
+                            console.error('[NemarkChat] Send failed:', res);
                             markMessageError(tid, doSend);
                         }
                     })
                     .catch(function (err) {
-                        console.error('[NemarChat] Send error:', err);
+                        console.error('[NemarkChat] Send error:', err);
                         markMessageError(tid, doSend);
                     });
             }
@@ -1485,7 +1730,7 @@
                         if (callback) callback(res.data);
                     }
                 })
-                .catch(function (err) { console.error('[NemarChat] Conversation init failed:', err); });
+                .catch(function (err) { console.error('[NemarkChat] Conversation init failed:', err); });
         }
 
         // ── Resume existing conversation on load ──
@@ -1533,7 +1778,7 @@
         // ── Auto-retry offline messages ──
         window.addEventListener('online', function () {
             if (_pendingMessages.length > 0) {
-                console.log('[NemarChat] Network restored. Retrying', _pendingMessages.length, 'messages...');
+                console.log('[NemarkChat] Network restored. Retrying', _pendingMessages.length, 'messages...');
                 // Copy array because retry function will remove elements
                 var queue = _pendingMessages.slice();
                 _pendingMessages = [];
@@ -1712,7 +1957,7 @@
             var s = document.createElement('script');
             s.src = base + '/socket.io/socket.io.js'; // served by socket.io server
             s.onload = cb;
-            s.onerror = function () { console.warn('[NemarChat] Socket.IO client load failed — realtime disabled'); };
+            s.onerror = function () { console.warn('[NemarkChat] Socket.IO client load failed — realtime disabled'); };
             document.head.appendChild(s);
         }
 
@@ -1731,7 +1976,7 @@
                 });
 
                 _socket.on('connect', function () {
-                    console.log('[NemarChat] Socket connected:', _socket.id);
+                    console.log('[NemarkChat] Socket connected:', _socket.id);
                     if (_conversationId) {
                         _socket.emit('join:conversation', { conversationId: _conversationId });
 
@@ -1753,7 +1998,7 @@
 
                 // Incoming message from agent
                 _socket.on('message:new', function (msg) {
-                    console.log('[NemarChat] Received message:new payload:', msg);
+                    console.log('[NemarkChat] Received message:new payload:', msg);
                     if (msg.sender && msg.sender.type !== 'visitor') {
                         appendMessage(msg); // dedup + ordering + timestamp tracking handled inside
                         notifyNewMessage();
@@ -1761,14 +2006,14 @@
                 });
 
                 _socket.on('message:edited', function (msg) {
-                    console.log('[NemarChat] Received message:edited:', msg);
+                    console.log('[NemarkChat] Received message:edited:', msg);
                     if (!msg || !msg._id) return;
                     var el = win.querySelector('[data-msg-id="' + msg._id + '"]');
                     if (el) updateMessageElement(el, msg);
                 });
 
                 _socket.on('message:recalled', function (data) {
-                    console.log('[NemarChat] Received message:recalled:', data);
+                    console.log('[NemarkChat] Received message:recalled:', data);
                     if (!data || !data.messageId) return;
                     var el = win.querySelector('[data-msg-id="' + data.messageId + '"]');
                     if (el) {
@@ -1792,7 +2037,50 @@
                     var ftrEl = win.querySelector('#nchat-ftr');
                     if (ftrEl) {
                         ftrEl.innerHTML = '<div style="padding:12px 16px;text-align:center;color:#888;font-size:13px;background:#f3f4f6;border-top:1px solid #eee">'
-                            + '🔒 Cuộc hội thoại đã đóng</div>';
+                            + '🔒 ' + (lang === 'vi' ? 'Cuộc hội thoại đã đóng' : 'Conversation closed') + '</div>';
+                    }
+
+                    // ── CSAT Rating ──
+                    if (cfg.requestRating) {
+                        var bodyEl = win.querySelector('#nchat-body');
+                        if (bodyEl) {
+                            var csatDiv = document.createElement('div');
+                            csatDiv.className = 'nchat-csat';
+                            var csatTitle = lang === 'vi' ? 'Bạn đánh giá cuộc hội thoại này thế nào?' : 'How would you rate this conversation?';
+                            var starSvg = '<svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>';
+                            csatDiv.innerHTML = '<div class="nchat-csat-title">' + csatTitle + '</div>'
+                                + '<div class="nchat-csat-stars">'
+                                + '<button class="nchat-csat-star" data-rating="1">' + starSvg + '</button>'
+                                + '<button class="nchat-csat-star" data-rating="2">' + starSvg + '</button>'
+                                + '<button class="nchat-csat-star" data-rating="3">' + starSvg + '</button>'
+                                + '<button class="nchat-csat-star" data-rating="4">' + starSvg + '</button>'
+                                + '<button class="nchat-csat-star" data-rating="5">' + starSvg + '</button>'
+                                + '</div>'
+                                + '<div class="nchat-csat-thanks">' + (lang === 'vi' ? 'Cảm ơn bạn đã đánh giá! ⭐' : 'Thank you for your feedback! ⭐') + '</div>';
+                            bodyEl.appendChild(csatDiv);
+                            bodyEl.scrollTop = bodyEl.scrollHeight;
+
+                            // Star click handlers
+                            var stars = csatDiv.querySelectorAll('.nchat-csat-star');
+                            for (var si = 0; si < stars.length; si++) {
+                                stars[si].addEventListener('click', function () {
+                                    var rating = parseInt(this.getAttribute('data-rating'));
+                                    // Highlight stars up to selected
+                                    for (var sj = 0; sj < stars.length; sj++) {
+                                        if (sj < rating) stars[sj].classList.add('nchat-star-active');
+                                        else stars[sj].classList.remove('nchat-star-active');
+                                        stars[sj].style.pointerEvents = 'none'; // disable re-click
+                                    }
+                                    // Show thanks
+                                    var thanks = csatDiv.querySelector('.nchat-csat-thanks');
+                                    if (thanks) thanks.style.display = 'block';
+                                    // Emit rating
+                                    if (_socket && _socket.connected && _conversationId) {
+                                        _socket.emit('conversation:rate', { conversationId: _conversationId, rating: rating });
+                                    }
+                                });
+                            }
+                        }
                     }
                 });
 
@@ -1800,9 +2088,10 @@
                 _socket.on('conversation:reopened', function () {
                     var ftrEl = win.querySelector('#nchat-ftr');
                     if (ftrEl) {
-                        ftrEl.innerHTML = '<label id="nchat-upload-btn" aria-label="Upload"><svg viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg><input type="file" id="nchat-file-input" accept="image/*,.pdf,.doc,.docx" style="display:none" /></label>'
+                        ftrEl.innerHTML = '<button id="nchat-emoji-btn" aria-label="Emoji">' + emojiIcon + '</button>'
+                            + '<label id="nchat-upload-btn" aria-label="Upload">' + attachIcon + '<input type="file" id="nchat-file-input" accept="image/*,.pdf,.doc,.docx" style="display:none" /></label>'
                             + '<input type="text" id="nchat-input" placeholder="' + placeholder + '" />'
-                            + '<button id="nchat-send" aria-label="Send">&#10148;</button>';
+                            + '<button id="nchat-send" aria-label="Send">' + sendIcon + '</button>';
                         // Re-attach send handlers
                         var inp2 = ftrEl.querySelector('#nchat-input');
                         var btn2 = ftrEl.querySelector('#nchat-send');
@@ -1818,7 +2107,7 @@
                 });
 
                 _socket.on('disconnect', function (reason) {
-                    console.log('[NemarChat] Socket disconnected:', reason);
+                    console.log('[NemarkChat] Socket disconnected:', reason);
                 });
             });
         }
@@ -1831,8 +2120,9 @@
             if (existing) existing.remove();
             var div = document.createElement('div');
             div.className = 'nchat-msg nchat-msg-bot nchat-typing';
-            div.innerHTML = '<div class="nchat-msg-bubble" style="font-style:italic;color:#888">'
-                + (name || 'Agent') + ' đang nhập...</div>';
+            div.innerHTML = '<div class="nchat-msg-bubble">'
+                + '<div class="nchat-dots"><span></span><span></span><span></span></div>'
+                + '</div>';
             bodyEl.appendChild(div);
             bodyEl.scrollTop = bodyEl.scrollHeight;
         }
@@ -1848,7 +2138,7 @@
         if (_visitorToken) connectSocket();
 
         // ── Expose API ──
-        var globalObjName = typeof window.NemarChat === 'string' ? window.NemarChat : 'NemarChat';
+        var globalObjName = typeof window.NemarkChat === 'string' ? window.NemarkChat : 'NemarkChat';
         var apiObj = window[globalObjName] || {};
         apiObj.open = function () { toggleChat(true); };
         apiObj.close = function () { toggleChat(false); };

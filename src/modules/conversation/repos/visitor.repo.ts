@@ -15,8 +15,14 @@ export const visitorRepo = {
             if (info.name) updates.name = info.name;
             if (info.email) updates.email = info.email;
             if (info.phone) updates.phone = info.phone;
+            if (info.avatar) updates['attributes.avatar'] = info.avatar;
+            if (info.attributes) {
+                for (const [key, val] of Object.entries(info.attributes)) {
+                    updates[`attributes.${key}`] = val;
+                }
+            }
 
-            visitor = await VisitorModel.findByIdAndUpdate(visitor._id, updates, { new: true }).exec();
+            visitor = await VisitorModel.findByIdAndUpdate(visitor._id, { $set: updates }, { new: true }).exec();
             return { visitor: visitor!, isNew: false };
         }
 

@@ -6,7 +6,7 @@ import {
     Empty, Spin, Tag, Drawer, Divider, Typography, Card, Space, Badge, Upload
 } from 'antd';
 import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
-import { Plus, Copy, Code, Settings, Trash2, ArrowLeft, Eye, Globe, MessageSquare, Upload as UploadIcon } from 'lucide-react';
+import { Plus, Copy, Code, Settings, Trash2, ArrowLeft, Eye, Globe, MessageSquare, Upload as UploadIcon, FlaskConical } from 'lucide-react';
 import { useGetMe } from '../../../domains/auth/auth.hooks';
 import { useWorkspace } from '../../../domains/workspace/workspace.hooks';
 import { useTotalUnreadCount } from '../../../domains/conversation';
@@ -250,10 +250,10 @@ function WidgetPreview({ config }: { config: any }) {
 }
 
 function EmbedSnippet({ widgetId }: { widgetId: string }) {
-    const snippet = `<!-- NemarChat Widget -->
+    const snippet = `<!-- NemarkChat Widget -->
 <script>
   (function(w,d,s,o){
-    w.NemarChat=o;w[o]=w[o]||function(){(w[o].q=w[o].q||[]).push(arguments)};
+    w.NemarkChat=o;w[o]=w[o]||function(){(w[o].q=w[o].q||[]).push(arguments)};
     var js=d.createElement(s);js.async=1;
     js.src='${typeof window !== 'undefined' ? window.location.origin : 'https://your-domain.com'}/widget/loader.js';
     js.setAttribute('data-widget-id','${widgetId}');
@@ -303,6 +303,7 @@ export default function WorkspaceDetailPage() {
     const [editingWidget, setEditingWidget] = useState<any>(null);
     const [configDrawer, setConfigDrawer] = useState(false);
     const [snippetModal, setSnippetModal] = useState<string | null>(null);
+    const [testModal, setTestModal] = useState<string | null>(null);
     const [createForm] = Form.useForm();
     const [configForm] = Form.useForm();
 
@@ -374,6 +375,19 @@ export default function WorkspaceDetailPage() {
                 })),
             domainMode: widget.domainRules?.mode || 'allowlist',
             domains: widget.domainRules?.domains?.length ? widget.domainRules.domains.map((d: string) => ({ value: d })) : [],
+            // Subiz-inspired fields
+            headerAvatar: widget.config?.headerAvatar || '',
+            profileDisplay: widget.config?.profileDisplay || 'company',
+            showTypingIndicator: widget.config?.showTypingIndicator ?? true,
+            requestRating: widget.config?.requestRating ?? false,
+            autoOpenMode: widget.config?.autoOpen?.mode || 'none',
+            autoOpenCustom: widget.config?.autoOpen?.customSeconds || 0,
+            greetingPopupEnabled: widget.config?.greetingPopup?.enabled ?? true,
+            greetingPopupMessage: widget.config?.greetingPopup?.message || '',
+            greetingPopupCta: widget.config?.greetingPopup?.ctaText || 'Gửi tin nhắn',
+            greetingPopupDelay: widget.config?.greetingPopup?.delay || 3,
+            urlDomainRules: widget.config?.urlRules?.domains || [],
+            urlPathRules: widget.config?.urlRules?.paths || [],
         });
         setConfigDrawer(true);
     };
@@ -426,6 +440,25 @@ export default function WorkspaceDetailPage() {
                             }))),
                         ],
                     },
+                    // Subiz-inspired features
+                    headerAvatar: values.headerAvatar || '',
+                    profileDisplay: values.profileDisplay || 'company',
+                    showTypingIndicator: values.showTypingIndicator ?? true,
+                    requestRating: values.requestRating ?? false,
+                    autoOpen: {
+                        mode: values.autoOpenMode || 'none',
+                        customSeconds: values.autoOpenCustom || 0,
+                    },
+                    greetingPopup: {
+                        enabled: values.greetingPopupEnabled ?? true,
+                        message: values.greetingPopupMessage || '',
+                        ctaText: values.greetingPopupCta || 'Gửi tin nhắn',
+                        delay: values.greetingPopupDelay || 3,
+                    },
+                    urlRules: {
+                        domains: (values.urlDomainRules || []).filter((r: any) => r?.value),
+                        paths: (values.urlPathRules || []).filter((r: any) => r?.value),
+                    },
                 },
                 domainRules: {
                     mode: values.domainMode || 'allowlist',
@@ -467,7 +500,7 @@ export default function WorkspaceDetailPage() {
 
     return (
         <AppLayout headerTitle="Chat Widgets">
-            <Head><title>{workspace?.name || 'Workspace'} | NemarChat</title></Head>
+            <Head><title>{workspace?.name || 'Workspace'} | NemarkChat</title></Head>
 
             {/* Content */}
             <main style={{ maxWidth: 1000, margin: '0px auto', padding: '40px 24px' }}>
@@ -506,6 +539,7 @@ export default function WorkspaceDetailPage() {
                             <Card key={w._id} hoverable style={{ borderRadius: 12 }}
                                 actions={[
                                     <Button key="cfg" type="text" icon={<Settings size={14} />} onClick={() => openConfig(w)}>Cấu hình</Button>,
+                                    <Button key="test" type="text" icon={<FlaskConical size={14} />} onClick={() => setTestModal(w._id)} style={{ color: '#10b981' }}>Test</Button>,
                                     <Button key="code" type="text" icon={<Code size={14} />} onClick={() => setSnippetModal(w._id)}>Mã nhúng</Button>,
                                     <Button key="del" type="text" danger icon={<Trash2 size={14} />} onClick={() => handleDelete(w._id)} />,
                                 ]}
@@ -564,6 +598,190 @@ export default function WorkspaceDetailPage() {
                 {snippetModal && <EmbedSnippet widgetId={snippetModal} />}
             </Modal>
 
+            {/* ─── Local Test Modal ─── */}
+            <Modal
+                title={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><FlaskConical size={18} style={{ color: '#10b981' }} /> Test Widget tại Local</div>}
+                open={!!testModal}
+                onCancel={() => setTestModal(null)}
+                footer={
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
+                            💡 Widget đang chạy trên môi trường local — test trước khi xuất bản.
+                        </span>
+                        <Button onClick={() => setTestModal(null)}>Đóng</Button>
+                    </div>
+                }
+                width={900}
+                styles={{ body: { padding: 0, height: '70vh', overflow: 'hidden' } }}
+                destroyOnClose
+            >
+                {testModal && (() => {
+                    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3010';
+                    // Derive backend base URL from NEXT_PUBLIC_API_URL or fall back to SERVER_PORT
+                    const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
+                    const backendBase = apiUrl ? apiUrl.replace(/\/api\/?$/, '') : origin;
+                    const testHtml = `<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Widget Test - NemarkChat</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #f0f4ff 0%, #faf5ff 50%, #fff1f2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        .test-page {
+            max-width: 680px;
+            margin: 40px auto;
+            padding: 48px 40px;
+            text-align: center;
+        }
+        .test-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #ecfdf5;
+            color: #059669;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            border: 1px solid #a7f3d0;
+        }
+        .test-badge::before {
+            content: '🧪';
+        }
+        h1 {
+            font-size: 28px;
+            font-weight: 700;
+            color: #1a1a2e;
+            margin-bottom: 12px;
+        }
+        p {
+            color: #64748b;
+            font-size: 15px;
+            line-height: 1.6;
+            margin-bottom: 32px;
+        }
+        .test-card {
+            background: white;
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+            border: 1px solid #e2e8f0;
+            text-align: left;
+            margin-bottom: 24px;
+        }
+        .test-card h3 {
+            font-size: 14px;
+            font-weight: 600;
+            color: #334155;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .checklist {
+            list-style: none;
+            padding: 0;
+        }
+        .checklist li {
+            padding: 8px 0;
+            font-size: 13px;
+            color: #475569;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border-bottom: 1px solid #f1f5f9;
+        }
+        .checklist li:last-child { border-bottom: none; }
+        .checklist li::before {
+            content: '☐';
+            font-size: 16px;
+            color: #94a3b8;
+        }
+        .note {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            background: #fffbeb;
+            border: 1px solid #fde68a;
+            border-radius: 10px;
+            padding: 12px 16px;
+            font-size: 12px;
+            color: #92400e;
+            text-align: left;
+        }
+        .note::before {
+            content: '⚡';
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-page">
+        <div class="test-badge">Môi trường Test Local</div>
+        <h1>🛠️ Trang Test Widget</h1>
+        <p>
+            Đây là trang giả lập để test widget chat trước khi nhúng vào website thật.
+            Widget sẽ xuất hiện ở góc phải bên dưới — hãy click để mở và thử các tính năng.
+        </p>
+
+        <div class="test-card">
+            <h3>📋 Checklist kiểm tra</h3>
+            <ul class="checklist">
+                <li>Widget bubble hiển thị đúng vị trí và màu sắc</li>
+                <li>Click mở widget → hiện cửa sổ chat</li>
+                <li>Form pre-chat hiển thị (nếu đã bật)</li>
+                <li>Gửi tin nhắn test → nhận được trong Inbox</li>
+                <li>Lời chào và placeholder đúng</li>
+                <li>Branding NemarkChat hiển thị (nếu bật)</li>
+            </ul>
+        </div>
+
+        <div class="note">
+            Widget đang kết nối tới server: ${backendBase}
+        </div>
+    </div>
+
+    <!-- NemarkChat Widget -->
+    <script>
+        (function(w,d,s,o){
+            w.NemarkChat=o;w[o]=w[o]||function(){(w[o].q=w[o].q||[]).push(arguments)};
+            var js=d.createElement(s);js.async=1;
+            js.src='${origin}/widget/loader.js';
+            js.setAttribute('data-widget-id','${testModal}');
+            js.setAttribute('data-api-base','${backendBase}');
+            d.head.appendChild(js);
+        })(window,document,'script','nchat');
+    </script>
+</body>
+</html>`;
+                    const blob = new Blob([testHtml], { type: 'text/html' });
+                    const blobUrl = URL.createObjectURL(blob);
+                    return (
+                        <iframe
+                            src={blobUrl}
+                            style={{ width: '100%', height: '100%', border: 'none' }}
+                            title="Widget Local Test"
+                            onLoad={() => {
+                                // Revoke blob URL after iframe loads to free memory
+                                setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+                            }}
+                        />
+                    );
+                })()}
+            </Modal>
+
             {/* ─── Config Drawer ─── */}
             <Drawer
                 title="Cấu hình Widget"
@@ -620,7 +838,7 @@ export default function WorkspaceDetailPage() {
                                                 <Form.Item label="Tự động trả lời" name="autoReply">
                                                     <Input placeholder="Để trống nếu không cần" />
                                                 </Form.Item>
-                                                <Form.Item label="Hiện thương hiệu NemarChat" name="showBranding" valuePropName="checked">
+                                                <Form.Item label="Hiện thương hiệu NemarkChat" name="showBranding" valuePropName="checked">
                                                     <Switch />
                                                 </Form.Item>
                                             </>
@@ -914,6 +1132,132 @@ export default function WorkspaceDetailPage() {
                                                     • <code>*.example.com</code> — tất cả subdomain<br />
                                                     • Nếu allowlist trống → widget hiển thị mọi nơi
                                                 </div>
+                                            </>
+                                        ),
+                                    },
+                                    {
+                                        key: 'timing', label: '⏱ Thời gian & Mục tiêu',
+                                        children: (
+                                            <>
+                                                <Divider style={{ fontSize: 14, fontWeight: 600 }}>Tự mở widget</Divider>
+                                                <Form.Item label="Sau khi khách vào website" name="autoOpenMode">
+                                                    <Select options={[
+                                                        { value: 'none', label: 'Không tự mở' },
+                                                        { value: 'immediate', label: 'Ngay lập tức' },
+                                                        { value: '20s', label: 'Sau 20 giây' },
+                                                        { value: '5min', label: 'Sau 5 phút' },
+                                                        { value: 'custom', label: 'Tùy chỉnh (giây)' },
+                                                    ]} />
+                                                </Form.Item>
+                                                <Form.Item noStyle shouldUpdate={(prev, cur) => prev.autoOpenMode !== cur.autoOpenMode}>
+                                                    {({ getFieldValue }) => (
+                                                        getFieldValue('autoOpenMode') === 'custom' && (
+                                                            <Form.Item label="Số giây" name="autoOpenCustom">
+                                                                <Input type="number" min={0} placeholder="VD: 30" suffix="giây" />
+                                                            </Form.Item>
+                                                        )
+                                                    )}
+                                                </Form.Item>
+
+                                                <Divider style={{ fontSize: 14, fontWeight: 600 }}>Đối tượng mục tiêu — URL</Divider>
+                                                <div style={{ marginBottom: 8, fontSize: 12, color: '#666' }}>Cài đặt widget chỉ hiển thị khi gặp điều kiện URL</div>
+                                                <Form.List name="urlDomainRules">
+                                                    {(fields, { add, remove }) => (
+                                                        <>
+                                                            <Text strong style={{ fontSize: 12 }}>URL Website (domain)</Text>
+                                                            {fields.map(({ key, name, ...rest }) => (
+                                                                <Space key={key} style={{ display: 'flex', marginBottom: 6, width: '100%' }} align="baseline">
+                                                                    <Form.Item {...rest} name={[name, 'type']} noStyle initialValue="include">
+                                                                        <Select style={{ width: 100 }} options={[
+                                                                            { value: 'include', label: 'Bao gồm' },
+                                                                            { value: 'exclude', label: 'Ngoại trừ' },
+                                                                        ]} />
+                                                                    </Form.Item>
+                                                                    <Form.Item {...rest} name={[name, 'value']} style={{ flex: 1, marginBottom: 0, width: 200 }}>
+                                                                        <Input placeholder="example.com" />
+                                                                    </Form.Item>
+                                                                    <MinusCircleOutlined onClick={() => remove(name)} style={{ color: '#ff4d4f' }} />
+                                                                </Space>
+                                                            ))}
+                                                            <Button type="dashed" onClick={() => add({ type: 'include', value: '' })} block icon={<PlusOutlined />} size="small" style={{ marginBottom: 16 }}>
+                                                                + Thêm điều kiện domain
+                                                            </Button>
+                                                        </>
+                                                    )}
+                                                </Form.List>
+                                                <Form.List name="urlPathRules">
+                                                    {(fields, { add, remove }) => (
+                                                        <>
+                                                            <Text strong style={{ fontSize: 12 }}>Website URL path</Text>
+                                                            {fields.map(({ key, name, ...rest }) => (
+                                                                <Space key={key} style={{ display: 'flex', marginBottom: 6, width: '100%' }} align="baseline">
+                                                                    <Form.Item {...rest} name={[name, 'type']} noStyle initialValue="include">
+                                                                        <Select style={{ width: 100 }} options={[
+                                                                            { value: 'include', label: 'Bao gồm' },
+                                                                            { value: 'exclude', label: 'Ngoại trừ' },
+                                                                        ]} />
+                                                                    </Form.Item>
+                                                                    <Form.Item {...rest} name={[name, 'value']} style={{ flex: 1, marginBottom: 0, width: 200 }}>
+                                                                        <Input placeholder="/products/*" />
+                                                                    </Form.Item>
+                                                                    <MinusCircleOutlined onClick={() => remove(name)} style={{ color: '#ff4d4f' }} />
+                                                                </Space>
+                                                            ))}
+                                                            <Button type="dashed" onClick={() => add({ type: 'include', value: '' })} block icon={<PlusOutlined />} size="small">
+                                                                + Thêm điều kiện path
+                                                            </Button>
+                                                        </>
+                                                    )}
+                                                </Form.List>
+                                            </>
+                                        ),
+                                    },
+                                    {
+                                        key: 'greeting', label: '💬 Lời mời chat',
+                                        children: (
+                                            <>
+                                                <div style={{ marginBottom: 16, padding: 12, background: '#f0f7ff', borderRadius: 8, fontSize: 12, color: '#1e40af' }}>
+                                                    💡 Popup thông báo nổi xuất hiện bên cạnh nút chat, giúp mời gọi khách hàng nhắn tin.
+                                                </div>
+                                                <Form.Item label="Bật lời mời chat" name="greetingPopupEnabled" valuePropName="checked">
+                                                    <Switch />
+                                                </Form.Item>
+                                                <Form.Item label="Nội dung lời mời" name="greetingPopupMessage">
+                                                    <Input.TextArea rows={2} placeholder="Chào mừng bạn đến với website của chúng tôi!" />
+                                                </Form.Item>
+                                                <Form.Item label="Văn bản nút CTA" name="greetingPopupCta">
+                                                    <Input placeholder="Gửi tin nhắn" />
+                                                </Form.Item>
+                                                <Form.Item label="Hiển thị sau (giây)" name="greetingPopupDelay">
+                                                    <Input type="number" min={0} placeholder="3" suffix="giây" />
+                                                </Form.Item>
+                                            </>
+                                        ),
+                                    },
+                                    {
+                                        key: 'profile', label: '👤 Hồ sơ & Đánh giá',
+                                        children: (
+                                            <>
+                                                <Divider style={{ fontSize: 14, fontWeight: 600 }}>Hiển thị hồ sơ người chat</Divider>
+                                                <Form.Item label="Kiểu hiển thị" name="profileDisplay">
+                                                    <Select options={[
+                                                        { value: 'company', label: '🏢 Doanh nghiệp — Hiện tên workspace' },
+                                                        { value: 'agent', label: '👤 Agent — Hiện tên nhân viên đang trả lời' },
+                                                    ]} />
+                                                </Form.Item>
+                                                <Form.Item label="Avatar header (URL ảnh)" name="headerAvatar" extra="Ảnh đại diện hiển thị trên đầu widget">
+                                                    <Input placeholder="https://example.com/avatar.jpg" />
+                                                </Form.Item>
+
+                                                <Divider style={{ fontSize: 14, fontWeight: 600 }}>Tính năng nâng cao</Divider>
+                                                <Form.Item label="Hiện đang gõ" name="showTypingIndicator" valuePropName="checked"
+                                                    extra="Hiển thị thông báo đang gõ phím trên cửa sổ chat khi agent soạn tin nhắn">
+                                                    <Switch />
+                                                </Form.Item>
+                                                <Form.Item label="Gửi yêu cầu đánh giá" name="requestRating" valuePropName="checked"
+                                                    extra="Tự động xin đánh giá (⭐ 1-5 sao) khi hoàn thành hội thoại">
+                                                    <Switch />
+                                                </Form.Item>
                                             </>
                                         ),
                                     },

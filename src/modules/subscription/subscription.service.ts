@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { SubscriptionModel, InvoiceModel, ISubscription, IInvoice, PLAN_TIERS, PlanTier } from './subscription.model';
+import { paymentService } from './payment.service';
 
 export class SubscriptionService {
 
@@ -47,40 +48,41 @@ export class SubscriptionService {
     }
 
     /**
-     * Nâng cấp/thay đổi plan
+     * Nâng cấp/thay đổi plan — tạo invoice pending, chờ thanh toán
      */
-    async changePlan(workspaceId: string, planId: string, billingCycle: 'monthly' | 'yearly' = 'monthly'): Promise<ISubscription> {
+    async changePlan(workspaceId: string, planId: string, billingCycle: 'monthly' | 'yearly' = 'monthly'): Promise<{ subscription: ISubscription; invoice?: IInvoice }> {
         const plan = PLAN_TIERS.find(p => p.id === planId);
         if (!plan) throw new Error('Plan không tồn tại');
         if (plan.price < 0) throw new Error('Vui lòng liên hệ sales cho gói Enterprise');
 
-        const now = new Date();
-        const periodEnd = billingCycle === 'yearly'
-            ? new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000)
-            : new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-
-        const sub = await SubscriptionModel.findOneAndUpdate(
-            { workspaceId: new mongoose.Types.ObjectId(workspaceId) },
-            {
-                $set: {
-                    planId,
-                    status: 'active',
-                    currentPeriodStart: now,
-                    currentPeriodEnd: periodEnd,
-                    billingCycle,
-                    cancelledAt: null,
+        // For free plan, activate immediately
+        if (plan.price === 0) {
+            const now = new Date();
+            const periodEnd = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+            const sub = await SubscriptionModel.findOneAndUpdate(
+                { workspaceId: new mongoose.Types.ObjectId(workspaceId) },
+                {
+                    $set: {
+                        planId,
+                        status: 'active',
+                        currentPeriodStart: now,
+                        currentPeriodEnd: periodEnd,
+                        billingCycle,
+                        cancelledAt: null,
+                    },
                 },
-            },
-            { upsert: true, new: true, lean: true }
-        ).exec();
-
-        // Create invoice
-        const amount = billingCycle === 'yearly' ? plan.priceYearly : plan.price;
-        if (amount > 0) {
-            await this.createInvoice(workspaceId, planId, amount, billingCycle);
+                { upsert: true, new: true, lean: true }
+            ).exec();
+            return { subscription: sub as ISubscription };
         }
 
-        return sub as ISubscription;
+        // For paid plans: create invoice but DON'T activate yet — wait for payment
+        const amount = billingCycle === 'yearly' ? plan.priceYearly : plan.price;
+        const invoice = await this.createInvoice(workspaceId, planId, amount, billingCycle);
+
+        // Return current subscription (not yet upgraded)
+        const currentSub = await this.getSubscription(workspaceId);
+        return { subscription: currentSub, invoice: invoice };
     }
 
     /**
@@ -100,14 +102,14 @@ export class SubscriptionService {
     /**
      * Tạo hoá đơn
      */
-    private async createInvoice(
+    async createInvoice(
         workspaceId: string,
         planId: string,
         amount: number,
         billingCycle: 'monthly' | 'yearly'
     ): Promise<IInvoice> {
         const plan = PLAN_TIERS.find(p => p.id === planId);
-        const invoiceNumber = `INV-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+        const invoiceNumber = `INV-${Date.now()}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
         return InvoiceModel.create({
             workspaceId: new mongoose.Types.ObjectId(workspaceId),
@@ -140,24 +142,26 @@ export class SubscriptionService {
     }
 
     /**
-     * Simulate payment (for demo — replace with real gateway later)
+     * Verify bank transfer payment for an invoice via ACB API
      */
-    async simulatePayment(invoiceId: string): Promise<IInvoice> {
-        const invoice = await InvoiceModel.findByIdAndUpdate(
-            invoiceId,
-            {
-                $set: {
-                    status: 'paid',
-                    paidAt: new Date(),
-                    paymentMethod: 'demo',
-                    paymentReference: `PAY-${Date.now()}`,
-                },
-            },
-            { new: true, lean: true }
-        ).exec();
+    async verifyPayment(invoiceId: string): Promise<IInvoice> {
+        const result = await paymentService.checkPayment(invoiceId);
+        if (!result.invoice) throw new Error('Invoice không tồn tại');
+        return result.invoice;
+    }
 
-        if (!invoice) throw new Error('Invoice không tồn tại');
-        return invoice as IInvoice;
+    /**
+     * Get bank transfer payment info for an invoice
+     */
+    async getPaymentInfo(invoiceId: string) {
+        return paymentService.getPaymentInfo(invoiceId);
+    }
+
+    /**
+     * Check payment status (called by frontend polling)
+     */
+    async checkPaymentStatus(invoiceId: string) {
+        return paymentService.checkPayment(invoiceId);
     }
 }
 

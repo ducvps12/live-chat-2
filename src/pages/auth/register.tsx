@@ -1,4 +1,4 @@
-import Head from 'next/head';
+﻿import Head from 'next/head';
 import AuthLayout from '../../components/layout/AuthLayout';
 import { Form, Input, Button, Alert, message } from 'antd';
 import { Mail, Lock, User } from 'lucide-react';
@@ -37,7 +37,7 @@ export default function RegisterPage() {
     return (
         <AuthLayout>
             <Head>
-                <title>Đăng ký | NemarChat</title>
+                <title>Đăng ký | NemarkChat</title>
             </Head>
 
             <div
@@ -53,7 +53,7 @@ export default function RegisterPage() {
                         Tạo tài khoản mới
                     </h1>
                     <p style={{ color: 'var(--color-text-secondary)', fontSize: 15 }}>
-                        Bắt đầu sử dụng NemarChat miễn phí
+                        Bắt đầu sử dụng NemarkChat miễn phí
                     </p>
                 </div>
 

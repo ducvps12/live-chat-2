@@ -1,4 +1,4 @@
-import Head from 'next/head';
+﻿import Head from 'next/head';
 import AuthLayout from '../../components/layout/AuthLayout';
 import { Form, Input, Button, Alert, message } from 'antd';
 import { Lock } from 'lucide-react';
@@ -35,7 +35,7 @@ export default function ResetPasswordPage() {
     return (
         <AuthLayout>
             <Head>
-                <title>Khôi phục mật khẩu | NemarChat</title>
+                <title>Khôi phục mật khẩu | NemarkChat</title>
             </Head>
 
             <div

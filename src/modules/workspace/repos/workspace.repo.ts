@@ -84,4 +84,39 @@ export const workspaceRepo = {
         ).exec();
         return ws?.tags || [];
     },
+
+    // ── Label registry CRUD (colored tags, Zalo-style) ──
+
+    async getLabels(workspaceId: string): Promise<Array<{ name: string; color: string }>> {
+        const ws = await WorkspaceModel.findById(workspaceId, 'labels').exec();
+        return ws?.labels || [];
+    },
+
+    async addLabel(workspaceId: string, label: { name: string; color: string }): Promise<Array<{ name: string; color: string }>> {
+        const ws = await WorkspaceModel.findByIdAndUpdate(
+            workspaceId,
+            { $push: { labels: label } },
+            { new: true }
+        ).exec();
+        return ws?.labels || [];
+    },
+
+    async removeLabel(workspaceId: string, labelName: string): Promise<Array<{ name: string; color: string }>> {
+        const ws = await WorkspaceModel.findByIdAndUpdate(
+            workspaceId,
+            { $pull: { labels: { name: labelName } } },
+            { new: true }
+        ).exec();
+        return ws?.labels || [];
+    },
+
+    async updateLabel(workspaceId: string, oldName: string, newLabel: { name: string; color: string }): Promise<Array<{ name: string; color: string }>> {
+        // Use array filter positional update
+        const ws = await WorkspaceModel.findOneAndUpdate(
+            { _id: workspaceId, 'labels.name': oldName },
+            { $set: { 'labels.$.name': newLabel.name, 'labels.$.color': newLabel.color } },
+            { new: true }
+        ).exec();
+        return ws?.labels || [];
+    },
 };

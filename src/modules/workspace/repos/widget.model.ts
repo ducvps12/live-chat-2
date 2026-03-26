@@ -10,9 +10,27 @@ export interface IPreChatField {
     options?: string[];    // for select type
 }
 
+export interface IAutoOpen {
+    mode: 'none' | 'immediate' | '20s' | '5min' | 'custom';
+    customSeconds?: number;
+}
+
+export interface IGreetingPopup {
+    enabled: boolean;
+    message: string;
+    ctaText: string;
+    delay: number;           // seconds before showing
+}
+
+export interface IUrlRule {
+    type: 'include' | 'exclude';
+    value: string;
+}
+
 export interface IWidgetConfig {
     primaryColor: string;
     gradient?: string;
+    fontColor?: 'dark' | 'light';
     launcherStyle?: 'bubble' | 'tab' | 'pill' | 'image';
     launcherText?: string;
     launcherIcon?: string;
@@ -22,9 +40,19 @@ export interface IWidgetConfig {
     position: 'bottom-right' | 'bottom-left' | 'side-right' | 'side-left';
     language: string;
     avatarUrl?: string;
+    headerAvatar?: string;
     showBranding: boolean;
     offlineMessage: string;
     autoReply?: string;
+    profileDisplay?: 'agent' | 'company';
+    showTypingIndicator?: boolean;
+    requestRating?: boolean;
+    autoOpen?: IAutoOpen;
+    greetingPopup?: IGreetingPopup;
+    urlRules?: {
+        domains: IUrlRule[];
+        paths: IUrlRule[];
+    };
     preChatForm: {
         enabled: boolean;
         title: string;
@@ -65,6 +93,7 @@ const widgetSchema = new Schema<IWidget>(
         config: {
             primaryColor: { type: String, default: '#6366f1' },
             gradient: { type: String },
+            fontColor: { type: String, enum: ['dark', 'light'], default: 'light' },
             launcherStyle: { type: String, enum: ['bubble', 'tab', 'pill', 'image'], default: 'bubble' },
             launcherText: { type: String },
             launcherIcon: { type: String },
@@ -74,9 +103,33 @@ const widgetSchema = new Schema<IWidget>(
             position: { type: String, enum: ['bottom-right', 'bottom-left', 'side-right', 'side-left'], default: 'bottom-right' },
             language: { type: String, default: 'vi' },
             avatarUrl: { type: String },
+            headerAvatar: { type: String },
             showBranding: { type: Boolean, default: true },
             offlineMessage: { type: String, default: 'Hiện tại không có agent trực tuyến. Vui lòng để lại lời nhắn.' },
             autoReply: { type: String },
+            profileDisplay: { type: String, enum: ['agent', 'company'], default: 'company' },
+            showTypingIndicator: { type: Boolean, default: true },
+            requestRating: { type: Boolean, default: false },
+            autoOpen: {
+                mode: { type: String, enum: ['none', 'immediate', '20s', '5min', 'custom'], default: 'none' },
+                customSeconds: { type: Number, default: 0 },
+            },
+            greetingPopup: {
+                enabled: { type: Boolean, default: true },
+                message: { type: String, default: 'Chào mừng bạn đến với website của chúng tôi!' },
+                ctaText: { type: String, default: 'Gửi tin nhắn' },
+                delay: { type: Number, default: 3 },
+            },
+            urlRules: {
+                domains: [{
+                    type: { type: String, enum: ['include', 'exclude'], default: 'include' },
+                    value: { type: String },
+                }],
+                paths: [{
+                    type: { type: String, enum: ['include', 'exclude'], default: 'include' },
+                    value: { type: String },
+                }],
+            },
             preChatForm: {
                 enabled: { type: Boolean, default: true },
                 title: { type: String, default: 'Vui lòng nhập thông tin để bắt đầu' },

@@ -28,7 +28,9 @@ export interface Conversation {
         name?: string;
     };
     unreadCount?: number;
+    isPinned?: boolean;
     metadata?: Record<string, any>;
+    channel?: 'widget' | 'zalo';
     createdAt: string;
     updatedAt?: string;
 }

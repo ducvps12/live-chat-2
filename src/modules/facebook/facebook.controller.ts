@@ -33,8 +33,9 @@ export const facebookController = {
             const pages = await facebookService.getUserPages(longToken);
 
             // Auto-connect all pages
+            const connectedPages: any[] = [];
             for (const page of pages) {
-                await facebookService.connectPage(
+                const saved = await facebookService.connectPage(
                     workspaceId,
                     page.id,
                     page.name,
@@ -42,6 +43,15 @@ export const facebookController = {
                     page.access_token,
                     longToken,
                 );
+                connectedPages.push(saved);
+            }
+
+            // Auto-sync conversations in background (fire-and-forget)
+            for (const saved of connectedPages) {
+                const pageDbId = (saved._id as any).toString();
+                facebookService.syncPageConversations(workspaceId, pageDbId).catch(err => {
+                    console.warn(`[FacebookController] Background sync error for page ${pageDbId}:`, err);
+                });
             }
 
             // Redirect back to settings page
@@ -140,6 +150,21 @@ export const facebookController = {
         res.status(200).json({
             success: true,
             data: result,
+        });
+    }),
+
+    /**
+     * Sync historical messages from a connected Facebook Page
+     */
+    syncPageMessages: asyncHandler(async (req: Request, res: Response) => {
+        const workspaceId = req.params.workspaceId as string;
+        const pageDbId = req.params.pageDbId as string;
+
+        const result = await facebookService.syncPageConversations(workspaceId, pageDbId);
+        res.status(200).json({
+            success: true,
+            data: result,
+            message: `Đồng bộ hoàn tất: ${result.synced} tin nhắn, ${result.skipped} bỏ qua`,
         });
     }),
 };

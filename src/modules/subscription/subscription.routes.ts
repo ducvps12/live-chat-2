@@ -23,7 +23,14 @@ router.post('/cancel', subscriptionController.cancelSubscription);
 // Invoices
 router.get('/invoices', subscriptionController.getInvoices);
 
-// Pay invoice (demo)
+// ── Payment endpoints ──
+// Get bank transfer info for an invoice
+router.get('/invoices/:invoiceId/payment-info', subscriptionController.getPaymentInfo);
+
+// Check if payment has arrived (polling endpoint)
+router.get('/invoices/:invoiceId/check-payment', subscriptionController.checkPaymentStatus);
+
+// Pay invoice (legacy — triggers real verification now)
 router.post('/invoices/:invoiceId/pay', subscriptionController.payInvoice);
 
 export const subscriptionRoutes = router;

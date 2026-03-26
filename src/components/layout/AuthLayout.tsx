@@ -32,18 +32,20 @@ export default function AuthLayout({ children }: AuthLayoutProps) {
                 {/* Content */}
                 <div style={{ position: 'relative', zIndex: 1, maxWidth: 420, textAlign: 'center' }}>
                     {/* Logo */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 40 }}>
-                        <div style={{
-                            width: 48, height: 48, borderRadius: 14,
-                            background: 'rgba(255,255,255,0.2)',
-                            backdropFilter: 'blur(10px)',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            boxShadow: '0 8px 32px rgba(0,0,0,0.15)',
-                        }}>
-                            <MessageCircle size={26} color="white" />
-                        </div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, marginBottom: 40 }}>
+                        <img
+                            src="/images/nemarkchat-logo.png"
+                            alt="NemarkChat"
+                            style={{
+                                width: 48, height: 48, borderRadius: 14,
+                                objectFit: 'contain',
+                                boxShadow: '0 8px 32px rgba(0,0,0,0.15)',
+                                background: 'rgba(255,255,255,0.15)',
+                                padding: 4,
+                            }}
+                        />
                         <span style={{ fontWeight: 800, fontSize: 28, color: 'white', letterSpacing: '-0.02em' }}>
-                            NemarChat
+                            Nemark<span style={{ opacity: 0.9 }}>Chat</span>
                         </span>
                     </div>
 

@@ -1,10 +1,10 @@
 import { useRouter } from 'next/router';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import Head from 'next/head';
-import { Spin, message, Tag, Table } from 'antd';
+import { Spin, message, Tag, Table, Modal } from 'antd';
 import AppLayout from '../../../components/layout/AppLayout';
 import { httpClient } from '../../../lib/http/client';
-import { Check, Crown, Zap, Star, Shield, CreditCard, Clock, FileText, ArrowRight, Sparkles, ChevronRight, Receipt } from 'lucide-react';
+import { Check, Crown, Zap, Star, Shield, CreditCard, Clock, FileText, ArrowRight, Sparkles, ChevronRight, Receipt, Copy, CheckCircle, Loader2, BanknoteIcon, QrCode, X } from 'lucide-react';
 
 interface PlanTier {
     id: string;
@@ -37,6 +37,16 @@ interface Invoice {
     paidAt?: string;
     description: string;
     createdAt: string;
+}
+
+interface PaymentInfo {
+    bankName: string;
+    accountNumber: string;
+    accountName: string;
+    amount: number;
+    transferContent: string;
+    invoiceNumber: string;
+    currency: string;
 }
 
 const planIcons: Record<string, any> = {
@@ -86,6 +96,11 @@ function formatVND(amount: number) {
     return amount.toLocaleString('vi-VN') + 'đ';
 }
 
+// ── VietQR URL generator ──
+function generateVietQRUrl(bankId: string, accountNumber: string, amount: number, content: string, accountName: string): string {
+    return `https://img.vietqr.io/image/${bankId}-${accountNumber}-compact2.png?amount=${amount}&addInfo=${encodeURIComponent(content)}&accountName=${encodeURIComponent(accountName)}`;
+}
+
 export default function BillingPage() {
     const router = useRouter();
     const { workspaceId } = router.query;
@@ -98,6 +113,16 @@ export default function BillingPage() {
     const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
     const [hoveredPlan, setHoveredPlan] = useState<string | null>(null);
 
+    // ── Payment modal state ──
+    const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+    const [paymentInfo, setPaymentInfo] = useState<PaymentInfo | null>(null);
+    const [paymentLoading, setPaymentLoading] = useState(false);
+    const [paymentChecking, setPaymentChecking] = useState(false);
+    const [paymentSuccess, setPaymentSuccess] = useState(false);
+    const [copiedField, setCopiedField] = useState<string | null>(null);
+    const pollingRef = useRef<NodeJS.Timeout | null>(null);
+    const pollingInvoiceIdRef = useRef<string | null>(null);
+
     useEffect(() => {
         const t = localStorage.getItem('nemark_token');
         setReady(true);
@@ -108,6 +133,13 @@ export default function BillingPage() {
         if (!workspaceId) return;
         fetchData();
     }, [workspaceId]);
+
+    // Cleanup polling on unmount
+    useEffect(() => {
+        return () => {
+            if (pollingRef.current) clearInterval(pollingRef.current);
+        };
+    }, []);
 
     const fetchData = async () => {
         setLoading(true);
@@ -134,12 +166,21 @@ export default function BillingPage() {
         if (!workspaceId) return;
         setChangingPlan(planId);
         try {
-            await httpClient.post(`/workspaces/${workspaceId}/subscription/change`, {
+            const res = await httpClient.post(`/workspaces/${workspaceId}/subscription/change`, {
                 planId,
                 billingCycle,
             });
-            message.success('Đã nâng cấp gói thành công!');
-            fetchData();
+
+            // If an invoice was created, open payment modal
+            const invoice = res.data?.data?.invoice;
+            if (invoice && invoice._id) {
+                message.info('Hoá đơn đã được tạo. Vui lòng thanh toán chuyển khoản.');
+                await fetchData();
+                openPaymentModal(invoice._id);
+            } else {
+                message.success('Đã chuyển gói thành công!');
+                fetchData();
+            }
         } catch (err: any) {
             message.error(err.response?.data?.error || 'Lỗi khi đổi gói');
         } finally {
@@ -147,14 +188,91 @@ export default function BillingPage() {
         }
     };
 
-    const handlePayInvoice = async (invoiceId: string) => {
+    // ── Payment Modal Logic ──
+    const openPaymentModal = async (invoiceId: string) => {
+        setPaymentLoading(true);
+        setPaymentSuccess(false);
+        setPaymentModalOpen(true);
+        pollingInvoiceIdRef.current = invoiceId;
+
         try {
-            await httpClient.post(`/workspaces/${workspaceId}/subscription/invoices/${invoiceId}/pay`);
-            message.success('Thanh toán thành công!');
-            fetchData();
-        } catch {
-            message.error('Lỗi khi thanh toán');
+            const res = await httpClient.get(
+                `/workspaces/${workspaceId}/subscription/invoices/${invoiceId}/payment-info`
+            );
+            if (res.data?.data) {
+                setPaymentInfo(res.data.data);
+                // Start polling for payment
+                startPolling(invoiceId);
+            }
+        } catch (err) {
+            message.error('Không thể tải thông tin thanh toán');
+            setPaymentModalOpen(false);
+        } finally {
+            setPaymentLoading(false);
         }
+    };
+
+    const startPolling = useCallback((invoiceId: string) => {
+        // Stop any existing polling
+        if (pollingRef.current) clearInterval(pollingRef.current);
+
+        setPaymentChecking(true);
+        let elapsed = 0;
+        const POLL_INTERVAL = 5000; // 5 seconds
+        const MAX_POLL_TIME = 15 * 60 * 1000; // 15 minutes
+
+        pollingRef.current = setInterval(async () => {
+            elapsed += POLL_INTERVAL;
+
+            // Timeout after 15 minutes
+            if (elapsed >= MAX_POLL_TIME) {
+                if (pollingRef.current) clearInterval(pollingRef.current);
+                setPaymentChecking(false);
+                return;
+            }
+
+            try {
+                const res = await httpClient.get(
+                    `/workspaces/${workspaceId}/subscription/invoices/${invoiceId}/check-payment`
+                );
+                if (res.data?.data?.found) {
+                    // Payment confirmed!
+                    if (pollingRef.current) clearInterval(pollingRef.current);
+                    setPaymentChecking(false);
+                    setPaymentSuccess(true);
+                    message.success('🎉 Thanh toán thành công! Gói đã được kích hoạt.');
+                    // Refresh data after a brief celebration delay
+                    setTimeout(() => {
+                        fetchData();
+                    }, 2000);
+                }
+            } catch (err) {
+                console.error('Payment check error:', err);
+            }
+        }, POLL_INTERVAL);
+    }, [workspaceId]);
+
+    const closePaymentModal = () => {
+        if (pollingRef.current) clearInterval(pollingRef.current);
+        setPaymentModalOpen(false);
+        setPaymentInfo(null);
+        setPaymentChecking(false);
+        setPaymentSuccess(false);
+        pollingInvoiceIdRef.current = null;
+    };
+
+    const handleCopy = async (text: string, field: string) => {
+        try {
+            await navigator.clipboard.writeText(text);
+            setCopiedField(field);
+            setTimeout(() => setCopiedField(null), 2000);
+        } catch {
+            message.error('Không thể copy');
+        }
+    };
+
+    const handlePayInvoice = async (invoiceId: string) => {
+        openPaymentModal(invoiceId);
     };
 
     if (!ready || !workspaceId) {
@@ -233,9 +351,14 @@ export default function BillingPage() {
         },
     ];
 
+    // ── VietQR URL ──
+    const qrUrl = paymentInfo
+        ? generateVietQRUrl('ACB', paymentInfo.accountNumber, paymentInfo.amount, paymentInfo.transferContent, paymentInfo.accountName)
+        : '';
+
     return (
         <AppLayout headerTitle="Thanh toán">
-            <Head><title>Thanh toán | NemarChat</title></Head>
+            <Head><title>Thanh toán | NemarkChat</title></Head>
 
             <style>{`
                 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
@@ -444,10 +567,180 @@ export default function BillingPage() {
                     background: #fafbfc !important;
                 }
 
+                /* ── Payment Modal ── */
+                .payment-modal .ant-modal-content {
+                    border-radius: 24px !important;
+                    overflow: hidden;
+                    padding: 0 !important;
+                }
+                .payment-modal .ant-modal-header {
+                    display: none !important;
+                }
+                .payment-modal .ant-modal-body {
+                    padding: 0 !important;
+                }
+                .payment-modal .ant-modal-close {
+                    top: 16px !important;
+                    right: 16px !important;
+                }
+
+                .payment-content {
+                    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+                }
+
+                .payment-header {
+                    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a78bfa 100%);
+                    padding: 28px 32px;
+                    color: #fff;
+                    position: relative;
+                    overflow: hidden;
+                }
+                .payment-header::after {
+                    content: '';
+                    position: absolute;
+                    right: -40px;
+                    top: -40px;
+                    width: 180px;
+                    height: 180px;
+                    border-radius: 50%;
+                    background: rgba(255, 255, 255, 0.08);
+                }
+
+                .payment-body {
+                    padding: 28px 32px 32px;
+                }
+
+                .payment-info-row {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    padding: 14px 16px;
+                    background: #f8fafc;
+                    border-radius: 14px;
+                    margin-bottom: 10px;
+                    border: 1px solid #e2e8f0;
+                    transition: all 0.2s ease;
+                }
+                .payment-info-row:hover {
+                    border-color: #c7d2fe;
+                    background: #eef2ff;
+                }
+
+                .payment-info-label {
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: #94a3b8;
+                    text-transform: uppercase;
+                    letter-spacing: 0.05em;
+                    margin-bottom: 2px;
+                }
+
+                .payment-info-value {
+                    font-size: 15px;
+                    font-weight: 700;
+                    color: #0f172a;
+                    font-family: 'JetBrains Mono', monospace;
+                }
+
+                .copy-btn {
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                    background: #fff;
+                    border: 1.5px solid #e2e8f0;
+                    color: #64748b;
+                    padding: 6px 14px;
+                    border-radius: 10px;
+                    font-size: 12px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.2s ease;
+                    white-space: nowrap;
+                }
+                .copy-btn:hover {
+                    border-color: #6366f1;
+                    color: #6366f1;
+                    background: #eef2ff;
+                }
+                .copy-btn.copied {
+                    border-color: #22c55e;
+                    color: #22c55e;
+                    background: #f0fdf4;
+                }
+
+                .payment-qr-wrap {
+                    display: flex;
+                    justify-content: center;
+                    margin: 20px 0;
+                }
+
+                .payment-qr-card {
+                    background: #fff;
+                    border-radius: 20px;
+                    padding: 16px;
+                    border: 2px solid #e2e8f0;
+                    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+                    display: inline-flex;
+                    flex-direction: column;
+                    align-items: center;
+                    gap: 10px;
+                }
+
+                .payment-status-bar {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 10px;
+                    padding: 16px;
+                    border-radius: 16px;
+                    margin-top: 16px;
+                    font-size: 14px;
+                    font-weight: 600;
+                }
+
+                .payment-status-checking {
+                    background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+                    color: #92400e;
+                    border: 1px solid #fde68a;
+                }
+
+                .payment-status-success {
+                    background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+                    color: #166534;
+                    border: 1px solid #86efac;
+                }
+
+                @keyframes spin {
+                    to { transform: rotate(360deg); }
+                }
+                .spinning {
+                    animation: spin 1.5s linear infinite;
+                }
+
+                @keyframes pulse-glow {
+                    0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
+                    50% { box-shadow: 0 0 0 12px rgba(34, 197, 94, 0); }
+                }
+
+                .success-pulse {
+                    animation: pulse-glow 1.5s ease-in-out 3;
+                }
+
+                @keyframes checkmark-pop {
+                    0% { transform: scale(0); opacity: 0; }
+                    50% { transform: scale(1.2); }
+                    100% { transform: scale(1); opacity: 1; }
+                }
+                .checkmark-animate {
+                    animation: checkmark-pop 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+                }
+
                 @media (max-width: 768px) {
                     .billing-page { padding: 16px 12px 40px; }
                     .billing-banner { padding: 24px 20px; border-radius: 18px; }
                     .plans-grid { grid-template-columns: 1fr !important; }
+                    .payment-header { padding: 20px 20px; }
+                    .payment-body { padding: 20px 20px 24px; }
                 }
             `}</style>
 
@@ -693,6 +986,199 @@ export default function BillingPage() {
                     </>
                 )}
             </main>
+
+            {/* ══════════════ Payment Modal ══════════════ */}
+            <Modal
+                open={paymentModalOpen}
+                onCancel={closePaymentModal}
+                footer={null}
+                width={520}
+                className="payment-modal"
+                centered
+                destroyOnClose
+                closable={!paymentSuccess}
+            >
+                <div className="payment-content">
+                    {/* ── Header ── */}
+                    <div className="payment-header">
+                        <div style={{ position: 'relative', zIndex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                                <div style={{
+                                    width: 40, height: 40, borderRadius: 12,
+                                    background: 'rgba(255,255,255,0.2)',
+                                    backdropFilter: 'blur(8px)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                }}>
+                                    <BanknoteIcon size={22} />
+                                </div>
+                                <div>
+                                    <div style={{ fontSize: 18, fontWeight: 800 }}>Thanh toán chuyển khoản</div>
+                                    <div style={{ fontSize: 12, opacity: 0.8 }}>Quét QR hoặc chuyển khoản theo thông tin bên dưới</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* ── Body ── */}
+                    <div className="payment-body">
+                        {paymentLoading ? (
+                            <div style={{ textAlign: 'center', padding: 40 }}>
+                                <Spin size="large" />
+                                <div style={{ marginTop: 12, color: '#94a3b8', fontSize: 13 }}>Đang tải thông tin...</div>
+                            </div>
+                        ) : paymentSuccess ? (
+                            /* ── Success State ── */
+                            <div style={{ textAlign: 'center', padding: '20px 0' }}>
+                                <div className="checkmark-animate success-pulse" style={{
+                                    width: 80, height: 80, borderRadius: '50%',
+                                    background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
+                                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                    marginBottom: 20,
+                                }}>
+                                    <CheckCircle size={40} color="#fff" />
+                                </div>
+                                <div style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', marginBottom: 6 }}>
+                                    Thanh toán thành công! 🎉
+                                </div>
+                                <div style={{ fontSize: 14, color: '#64748b', marginBottom: 24 }}>
+                                    Gói dịch vụ đã được kích hoạt. Cảm ơn bạn!
+                                </div>
+                                <button
+                                    onClick={closePaymentModal}
+                                    style={{
+                                        background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
+                                        color: '#fff',
+                                        border: 'none',
+                                        padding: '14px 40px',
+                                        borderRadius: 14,
+                                        fontWeight: 700,
+                                        fontSize: 15,
+                                        cursor: 'pointer',
+                                        boxShadow: '0 4px 16px rgba(34, 197, 94, 0.3)',
+                                    }}
+                                >
+                                    Đóng
+                                </button>
+                            </div>
+                        ) : paymentInfo ? (
+                            <>
+                                {/* ── QR Code ── */}
+                                <div className="payment-qr-wrap">
+                                    <div className="payment-qr-card">
+                                        <img
+                                            src={qrUrl}
+                                            alt="QR Thanh toán"
+                                            style={{ width: 220, height: 220, borderRadius: 12, objectFit: 'contain' }}
+                                            onError={(e) => {
+                                                (e.target as HTMLImageElement).style.display = 'none';
+                                            }}
+                                        />
+                                        <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                            <QrCode size={12} /> Quét mã QR để thanh toán
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* ── Bank Details ── */}
+                                <div style={{ fontSize: 13, fontWeight: 700, color: '#64748b', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                    Thông tin chuyển khoản
+                                </div>
+
+                                <div className="payment-info-row">
+                                    <div>
+                                        <div className="payment-info-label">Ngân hàng</div>
+                                        <div className="payment-info-value" style={{ fontFamily: 'Inter, sans-serif' }}>{paymentInfo.bankName}</div>
+                                    </div>
+                                </div>
+
+                                <div className="payment-info-row">
+                                    <div>
+                                        <div className="payment-info-label">Số tài khoản</div>
+                                        <div className="payment-info-value">{paymentInfo.accountNumber}</div>
+                                    </div>
+                                    <button
+                                        className={`copy-btn ${copiedField === 'account' ? 'copied' : ''}`}
+                                        onClick={() => handleCopy(paymentInfo.accountNumber, 'account')}
+                                    >
+                                        {copiedField === 'account' ? <><CheckCircle size={13} /> Đã copy</> : <><Copy size={13} /> Copy</>}
+                                    </button>
+                                </div>
+
+                                <div className="payment-info-row">
+                                    <div>
+                                        <div className="payment-info-label">Chủ tài khoản</div>
+                                        <div className="payment-info-value" style={{ fontFamily: 'Inter, sans-serif' }}>{paymentInfo.accountName}</div>
+                                    </div>
+                                </div>
+
+                                <div className="payment-info-row">
+                                    <div>
+                                        <div className="payment-info-label">Số tiền</div>
+                                        <div className="payment-info-value" style={{ color: '#dc2626', fontSize: 17 }}>{formatVND(paymentInfo.amount)}</div>
+                                    </div>
+                                    <button
+                                        className={`copy-btn ${copiedField === 'amount' ? 'copied' : ''}`}
+                                        onClick={() => handleCopy(paymentInfo.amount.toString(), 'amount')}
+                                    >
+                                        {copiedField === 'amount' ? <><CheckCircle size={13} /> Đã copy</> : <><Copy size={13} /> Copy</>}
+                                    </button>
+                                </div>
+
+                                <div className="payment-info-row" style={{ background: '#fffbeb', borderColor: '#fde68a' }}>
+                                    <div>
+                                        <div className="payment-info-label" style={{ color: '#92400e' }}>Nội dung chuyển khoản</div>
+                                        <div className="payment-info-value" style={{ color: '#b45309' }}>{paymentInfo.transferContent}</div>
+                                    </div>
+                                    <button
+                                        className={`copy-btn ${copiedField === 'content' ? 'copied' : ''}`}
+                                        onClick={() => handleCopy(paymentInfo.transferContent, 'content')}
+                                    >
+                                        {copiedField === 'content' ? <><CheckCircle size={13} /> Đã copy</> : <><Copy size={13} /> Copy</>}
+                                    </button>
+                                </div>
+
+                                <div style={{
+                                    marginTop: 12, padding: '10px 14px',
+                                    background: '#fef2f2', borderRadius: 10,
+                                    border: '1px solid #fecaca',
+                                    fontSize: 12, color: '#991b1b', fontWeight: 500,
+                                    lineHeight: 1.5,
+                                }}>
+                                    ⚠️ Vui lòng nhập <strong>chính xác</strong> nội dung chuyển khoản để hệ thống tự động xác nhận thanh toán.
+                                </div>
+
+                                {/* ── Polling Status ── */}
+                                {paymentChecking && (
+                                    <div className="payment-status-bar payment-status-checking">
+                                        <div className="spinning" style={{ display: 'flex' }}>
+                                            <Loader2 size={18} />
+                                        </div>
+                                        Đang chờ xác nhận thanh toán...
+                                    </div>
+                                )}
+
+                                {!paymentChecking && (
+                                    <div className="payment-status-bar" style={{ background: '#f1f5f9', color: '#64748b', border: '1px solid #e2e8f0' }}>
+                                        <Clock size={16} />
+                                        Hết thời gian chờ. Bấm "Kiểm tra lại" nếu đã chuyển khoản.
+                                        <button
+                                            onClick={() => pollingInvoiceIdRef.current && startPolling(pollingInvoiceIdRef.current)}
+                                            style={{
+                                                background: '#6366f1', color: '#fff',
+                                                border: 'none', padding: '6px 16px',
+                                                borderRadius: 8, fontWeight: 600, fontSize: 12,
+                                                cursor: 'pointer', marginLeft: 8,
+                                            }}
+                                        >
+                                            Kiểm tra lại
+                                        </button>
+                                    </div>
+                                )}
+                            </>
+                        ) : null}
+                    </div>
+                </div>
+            </Modal>
         </AppLayout>
     );
 }

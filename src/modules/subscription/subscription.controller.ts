@@ -27,7 +27,7 @@ export const subscriptionController = {
     }),
 
     /**
-     * Nâng cấp / thay đổi plan
+     * Nâng cấp / thay đổi plan — tạo invoice pending
      */
     changePlan: asyncHandler(async (req: Request, res: Response) => {
         const workspaceId = req.params.workspaceId as string;
@@ -38,8 +38,14 @@ export const subscriptionController = {
             return;
         }
 
-        const sub = await subscriptionService.changePlan(workspaceId, planId, billingCycle);
-        res.json({ success: true, data: sub, message: `Đã nâng cấp lên gói ${planId}` });
+        const result = await subscriptionService.changePlan(workspaceId, planId, billingCycle);
+        res.json({
+            success: true,
+            data: result,
+            message: result.invoice
+                ? `Đã tạo hoá đơn cho gói ${planId}. Vui lòng thanh toán.`
+                : `Đã chuyển sang gói ${planId}`,
+        });
     }),
 
     /**
@@ -64,11 +70,45 @@ export const subscriptionController = {
     }),
 
     /**
-     * Simulate payment (demo)
+     * Lấy thông tin thanh toán (bank account, nội dung CK) cho 1 invoice
+     */
+    getPaymentInfo: asyncHandler(async (req: Request, res: Response) => {
+        const invoiceId = req.params.invoiceId as string;
+        const info = await subscriptionService.getPaymentInfo(invoiceId);
+
+        if (!info) {
+            res.status(404).json({ success: false, error: 'Invoice không tồn tại' });
+            return;
+        }
+
+        res.json({ success: true, data: info });
+    }),
+
+    /**
+     * Kiểm tra trạng thái thanh toán (polling endpoint)
+     */
+    checkPaymentStatus: asyncHandler(async (req: Request, res: Response) => {
+        const invoiceId = req.params.invoiceId as string;
+        const result = await subscriptionService.checkPaymentStatus(invoiceId);
+
+        res.json({
+            success: true,
+            data: {
+                found: result.found,
+                invoice: result.invoice,
+                message: result.found
+                    ? 'Thanh toán đã được xác nhận!'
+                    : 'Chưa nhận được thanh toán. Vui lòng chờ...',
+            },
+        });
+    }),
+
+    /**
+     * [Legacy] Pay invoice — now delegates to real verification
      */
     payInvoice: asyncHandler(async (req: Request, res: Response) => {
         const invoiceId = req.params.invoiceId as string;
-        const invoice = await subscriptionService.simulatePayment(invoiceId);
+        const invoice = await subscriptionService.verifyPayment(invoiceId);
         res.json({ success: true, data: invoice, message: 'Thanh toán thành công' });
     }),
 };

@@ -56,4 +56,12 @@ router.delete(
     macroController.remove
 );
 
+// ────────── Track macro usage ──────────
+router.post(
+    '/workspace/:workspaceId/:macroId/use',
+    requireAuth,
+    scopeCheck,
+    macroController.trackUsage
+);
+
 export default router;

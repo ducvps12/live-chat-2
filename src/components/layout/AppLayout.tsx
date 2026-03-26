@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import { Layout, Menu, Dropdown, Avatar, Spin, Badge } from 'antd';
 import { 
-    MessageSquare, Settings, Users, Box, User, LogOut, Code, ChevronDown, CheckCircle, ChevronLeft, ChevronRight, LayoutDashboard, Contact2, CreditCard 
+    MessageSquare, Settings, Users, Box, User, LogOut, Code, ChevronDown, CheckCircle, ChevronLeft, ChevronRight, LayoutDashboard, Contact2, CreditCard, Target, BarChart3, Bot, Megaphone, Shield, Palette 
 } from 'lucide-react';
 import Link from 'next/link';
 import { useGetMe, useLogout } from '../../domains/auth/auth.hooks';
@@ -141,9 +141,34 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                 label: <Link href={`/workspace/${workspaceId}/contacts`}>Người dùng</Link>,
             },
             {
+                key: `/workspace/${workspaceId}/leads`,
+                icon: <Target size={20} />,
+                label: <Link href={`/workspace/${workspaceId}/leads`}>Leads</Link>,
+            },
+            {
+                key: `/workspace/${workspaceId}/analytics`,
+                icon: <BarChart3 size={20} />,
+                label: <Link href={`/workspace/${workspaceId}/analytics`}>Thống kê</Link>,
+            },
+            {
                 key: `/workspace/${workspaceId}/widgets`,
                 icon: <Code size={20} />,
                 label: <Link href={`/workspace/${workspaceId}/widgets`}>Widgets</Link>,
+            },
+            {
+                key: `/workspace/${workspaceId}/popups`,
+                icon: <Palette size={20} />,
+                label: <Link href={`/workspace/${workspaceId}/popups`}>Tiện ích Web</Link>,
+            },
+            {
+                key: `/workspace/${workspaceId}/chatbot`,
+                icon: <Bot size={20} />,
+                label: <Link href={`/workspace/${workspaceId}/chatbot`}>Nhân viên AI</Link>,
+            },
+            {
+                key: `/workspace/${workspaceId}/campaigns`,
+                icon: <Megaphone size={20} />,
+                label: <Link href={`/workspace/${workspaceId}/campaigns`}>Campaigns</Link>,
             },
             {
                 key: `/workspace/${workspaceId}/teams`,
@@ -176,10 +201,15 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
     if (workspaceId) {
         if (router.pathname.includes('/inbox')) selectedKey = `/workspace/${workspaceId}/inbox`;
         else if (router.pathname.includes('/contacts')) selectedKey = `/workspace/${workspaceId}/contacts`;
+        else if (router.pathname.includes('/leads')) selectedKey = `/workspace/${workspaceId}/leads`;
+        else if (router.pathname.includes('/analytics')) selectedKey = `/workspace/${workspaceId}/analytics`;
+        else if (router.pathname.includes('/chatbot')) selectedKey = `/workspace/${workspaceId}/chatbot`;
+        else if (router.pathname.includes('/campaigns')) selectedKey = `/workspace/${workspaceId}/campaigns`;
         else if (router.pathname.includes('/teams')) selectedKey = `/workspace/${workspaceId}/teams`;
         else if (router.pathname.includes('/billing')) selectedKey = `/workspace/${workspaceId}/billing`;
         else if (router.pathname.includes('/settings')) selectedKey = `/workspace/${workspaceId}/settings`;
         else if (router.pathname.includes('/widgets')) selectedKey = `/workspace/${workspaceId}/widgets`;
+        else if (router.pathname.includes('/popups')) selectedKey = `/workspace/${workspaceId}/popups`;
         else selectedKey = `/workspace/${workspaceId}`;
     }
 
@@ -215,10 +245,47 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                     }
                     .app-main-content {
                         margin-left: 0 !important;
+                        padding-bottom: 64px !important;
                     }
                     .app-main-header {
                         display: none !important;
                     }
+                    .mobile-bottom-nav {
+                        display: flex !important;
+                    }
+                }
+                .mobile-bottom-nav {
+                    display: none !important;
+                    position: fixed;
+                    bottom: 0;
+                    left: 0;
+                    right: 0;
+                    height: 60px;
+                    background: rgba(255,255,255,0.95);
+                    backdrop-filter: blur(16px);
+                    -webkit-backdrop-filter: blur(16px);
+                    border-top: 1px solid var(--color-border, #e8e8e8);
+                    z-index: 200;
+                    align-items: center;
+                    justify-content: space-around;
+                    padding: 0 4px;
+                    padding-bottom: env(safe-area-inset-bottom, 0px);
+                }
+                .mobile-nav-item {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    gap: 2px;
+                    padding: 6px 0;
+                    cursor: pointer;
+                    border: none;
+                    background: none;
+                    min-width: 56px;
+                    transition: color 0.15s;
+                }
+                .mobile-nav-item span {
+                    font-size: 10px;
+                    font-weight: 500;
                 }
             `}</style>
             {/* ─── LEFT SIDEBAR ─── */}
@@ -248,22 +315,18 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                     display: 'flex', 
                     alignItems: 'center', 
                     justifyContent: collapsed ? 'center' : 'flex-start',
-                    padding: collapsed ? '0' : '0 24px',
+                    padding: collapsed ? '0' : '0 20px',
                     borderBottom: '1px solid var(--color-border)',
-                    gap: 12,
+                    gap: 10,
                     background: 'linear-gradient(180deg, var(--color-primary-50) 0%, var(--color-bg) 100%)',
                 }}>
-                    <div style={{
+                    <img src="/images/logo.png" alt="NemarkChat" style={{
                         width: collapsed ? 38 : 32, 
                         height: collapsed ? 38 : 32, 
                         borderRadius: collapsed ? 10 : 8,
-                        background: 'var(--gradient-primary)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        color: 'white', fontWeight: 'bold', fontSize: collapsed ? 18 : 16,
-                        flexShrink: 0,
-                        boxShadow: '0 4px 12px rgba(99, 102, 241, 0.25)',
-                    }}>N</div>
-                    {!collapsed && <span style={{ fontWeight: 700, fontSize: 18, color: 'var(--color-text)', whiteSpace: 'nowrap' }}>NemarChat</span>}
+                        flexShrink: 0
+                    }} />
+                    {!collapsed && <span style={{ fontWeight: 700, fontSize: 18, color: 'var(--color-text)', whiteSpace: 'nowrap' }}>NemarkChat</span>}
                 </div>
 
                 {/* Workspace Switcher */}
@@ -315,6 +378,42 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                     />
                 </div>
 
+                {/* ── Admin Panel Button (admin only) ── */}
+                {user.role === 'admin' && (
+                    <div style={{ padding: collapsed ? '8px 0' : '8px 12px' }}>
+                        <div
+                            onClick={() => router.push('/admin')}
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: collapsed ? 'center' : 'flex-start',
+                                gap: 10,
+                                padding: collapsed ? '12px' : '12px 16px',
+                                borderRadius: collapsed ? 14 : 16,
+                                background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s',
+                                boxShadow: '0 4px 14px rgba(79, 70, 229, 0.25)',
+                                width: collapsed ? 48 : '100%',
+                                margin: collapsed ? '0 auto' : undefined,
+                            }}
+                            className="admin-panel-btn"
+                        >
+                            <Shield size={collapsed ? 20 : 18} color="#fff" />
+                            {!collapsed && (
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: '#fff', lineHeight: 1.2 }}>
+                                        Quản trị hệ thống
+                                    </div>
+                                    <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.7)', marginTop: 1 }}>
+                                        Super Admin
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
                 {/* Bottom User Area */}
                 <div style={{ 
                     padding: collapsed ? '16px 0' : '16px', 
@@ -360,7 +459,13 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                                     label: 'Hồ sơ cá nhân',
                                     onClick: () => router.push('/profile')
                                 },
-                                { type: 'divider' },
+                                ...(user.role === 'admin' ? [{
+                                    key: 'admin',
+                                    icon: <Shield size={16} />,
+                                    label: 'Super Admin',
+                                    onClick: () => router.push('/admin')
+                                }] : []),
+                                { type: 'divider' as const },
                                 {
                                     key: 'logout',
                                     icon: <LogOut size={16} />,
@@ -432,6 +537,32 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                     {children}
                 </Content>
             </Layout>
+
+            {/* ─── MOBILE BOTTOM NAV ─── */}
+            {workspaceId && (
+                <nav className="mobile-bottom-nav">
+                    {[
+                        { key: 'dashboard', icon: <LayoutDashboard size={20} />, label: 'Tổng quan', path: `/workspace/${workspaceId}` },
+                        { key: 'inbox', icon: <Badge count={unreadCount} size="small" offset={[6, -2]}><MessageSquare size={20} /></Badge>, label: 'Hộp thư', path: `/workspace/${workspaceId}/inbox` },
+                        { key: 'contacts', icon: <Contact2 size={20} />, label: 'Liên hệ', path: `/workspace/${workspaceId}/contacts` },
+                        { key: 'leads', icon: <Target size={20} />, label: 'Leads', path: `/workspace/${workspaceId}/leads` },
+                        { key: 'settings', icon: <Settings size={20} />, label: 'Cài đặt', path: `/workspace/${workspaceId}/settings` },
+                    ].map(item => {
+                        const isActive = selectedKey === item.path || (item.key === 'dashboard' && selectedKey === `/workspace/${workspaceId}`);
+                        return (
+                            <button
+                                key={item.key}
+                                className="mobile-nav-item"
+                                onClick={() => router.push(item.path)}
+                                style={{ color: isActive ? 'var(--color-primary, #4f46e5)' : 'var(--color-text-secondary, #94a3b8)' }}
+                            >
+                                {item.icon}
+                                <span style={{ fontWeight: isActive ? 600 : 500 }}>{item.label}</span>
+                            </button>
+                        );
+                    })}
+                </nav>
+            )}
         </Layout>
     );
 }

@@ -1,4 +1,4 @@
-import Head from 'next/head';
+﻿import Head from 'next/head';
 import {
     MessageCircle,
     Zap,
@@ -109,19 +109,16 @@ function Header() {
             <div className="container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 72 }}>
                 {/* Logo */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div
+                    <img
+                        src="/images/nemarkchat-logo.png"
+                        alt="NemarkChat"
                         style={{
                             width: 36,
                             height: 36,
                             borderRadius: 10,
-                            background: 'var(--gradient-hero)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
+                            objectFit: 'contain',
                         }}
-                    >
-                        <MessageCircle size={20} color="white" />
-                    </div>
+                    />
                     <span style={{ fontWeight: 800, fontSize: 20, color: 'var(--color-text)' }}>
                         Nemark<span style={{ color: 'var(--color-primary)' }}>Chat</span>
                     </span>
@@ -191,7 +188,7 @@ function HeroDashboardMockup() {
         { from: 'visitor', text: 'Xin chào, tôi muốn hỏi về gói Professional', time: '14:02', delay: 0 },
         { from: 'agent', text: 'Chào bạn! Mình sẵn sàng hỗ trợ. Gói Pro bao gồm 20 agents, widget tuỳ chỉnh đầy đủ 🎉', time: '14:02', delay: 0.3 },
         { from: 'visitor', text: 'Có hỗ trợ tích hợp Zalo OA không?', time: '14:03', delay: 0.6 },
-        { from: 'agent', text: 'Có ạ! NemarChat hỗ trợ tích hợp Zalo OA, Facebook Messenger và nhiều kênh khác 💬', time: '14:03', delay: 0.9 },
+        { from: 'agent', text: 'Có ạ! NemarkChat hỗ trợ tích hợp Zalo OA, Facebook Messenger và nhiều kênh khác 💬', time: '14:03', delay: 0.9 },
     ];
 
     const mockupBase: React.CSSProperties = {
@@ -508,7 +505,7 @@ function Hero() {
                         lineHeight: 1.7,
                     }}
                 >
-                    NemarChat giúp doanh nghiệp quản lý hội thoại đa kênh, phân quyền team linh hoạt,
+                    NemarkChat giúp doanh nghiệp quản lý hội thoại đa kênh, phân quyền team linh hoạt,
                     và tự động hoá hỗ trợ khách hàng — tất cả trong một nền tảng duy nhất.
                 </p>
 
@@ -677,7 +674,7 @@ function Features() {
                         <span className="text-gradient">hỗ trợ khách hàng</span>
                     </h2>
                     <p style={{ color: 'var(--color-text-secondary)', fontSize: 17, maxWidth: 560, margin: '0 auto' }}>
-                        Từ chat realtime đến AI tự động — NemarChat cung cấp giải pháp toàn diện cho doanh nghiệp mọi quy mô.
+                        Từ chat realtime đến AI tự động — NemarkChat cung cấp giải pháp toàn diện cho doanh nghiệp mọi quy mô.
                     </p>
                 </div>
 
@@ -1297,7 +1294,7 @@ function CtaSection() {
                                 lineHeight: 1.7,
                             }}
                         >
-                            Bắt đầu dùng NemarChat miễn phí ngay hôm nay. Không cần thẻ tín dụng, không ràng buộc.
+                            Bắt đầu dùng NemarkChat miễn phí ngay hôm nay. Không cần thẻ tín dụng, không ràng buộc.
                         </p>
                         <div style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap' }}>
                             <a href="#" className="btn btn-lg btn-primary">
@@ -1346,19 +1343,7 @@ function Footer() {
                     {/* Brand */}
                     <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-                            <div
-                                style={{
-                                    width: 32,
-                                    height: 32,
-                                    borderRadius: 8,
-                                    background: 'var(--gradient-hero)',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                }}
-                            >
-                                <MessageCircle size={16} color="white" />
-                            </div>
+                            <img src="/images/logo.png" alt="NemarkChat" style={{ width: 36, height: 36, borderRadius: 10 }} />
                             <span style={{ fontWeight: 800, fontSize: 18 }}>
                                 Nemark<span style={{ color: 'var(--color-primary)' }}>Chat</span>
                             </span>
@@ -1372,15 +1357,31 @@ function Footer() {
                     {[
                         {
                             title: 'Sản phẩm',
-                            links: ['Tính năng', 'Báo giá', 'Lộ trình', 'API Docs', 'Changelog'],
+                            links: [
+                                { label: 'Tính năng', href: '/#features' },
+                                { label: 'Báo giá', href: '/#pricing' },
+                                { label: 'Lộ trình', href: '/#phases' },
+                                { label: 'API Docs', href: '/help' },
+                                { label: 'Changelog', href: '/changelog' },
+                            ],
                         },
                         {
                             title: 'Công ty',
-                            links: ['Giới thiệu', 'Blog', 'Tuyển dụng', 'Liên hệ'],
+                            links: [
+                                { label: 'Giới thiệu', href: '/about' },
+                                { label: 'Blog', href: '/blog' },
+                                { label: 'Tuyển dụng', href: '/about' },
+                                { label: 'Liên hệ', href: '/contact' },
+                            ],
                         },
                         {
                             title: 'Hỗ trợ',
-                            links: ['Trung tâm trợ giúp', 'Cộng đồng', 'Trạng thái hệ thống', 'Chính sách bảo mật'],
+                            links: [
+                                { label: 'Trung tâm trợ giúp', href: '/help' },
+                                { label: 'Cộng đồng', href: '/blog' },
+                                { label: 'Trạng thái hệ thống', href: '/status' },
+                                { label: 'Chính sách bảo mật', href: '/privacy' },
+                            ],
                         },
                     ].map((col) => (
                         <div key={col.title}>
@@ -1389,9 +1390,9 @@ function Footer() {
                             </h4>
                             <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 10 }}>
                                 {col.links.map((link) => (
-                                    <li key={link}>
+                                    <li key={link.label}>
                                         <a
-                                            href="#"
+                                            href={link.href}
                                             style={{
                                                 color: 'var(--color-text-muted)',
                                                 textDecoration: 'none',
@@ -1401,7 +1402,7 @@ function Footer() {
                                             onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--color-primary)')}
                                             onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--color-text-muted)')}
                                         >
-                                            {link}
+                                            {link.label}
                                         </a>
                                     </li>
                                 ))}
@@ -1422,16 +1423,20 @@ function Footer() {
                     }}
                 >
                     <p style={{ color: 'var(--color-text-muted)', fontSize: 13 }}>
-                        © 2026 NemarChat. Mọi quyền được bảo lưu.
+                        © 2026 NemarkChat. Mọi quyền được bảo lưu.
                     </p>
                     <div style={{ display: 'flex', gap: 24 }}>
-                        {['Điều khoản', 'Bảo mật', 'Cookie'].map((item) => (
+                        {[
+                            { label: 'Điều khoản', href: '/terms' },
+                            { label: 'Bảo mật', href: '/privacy' },
+                            { label: 'Liên hệ', href: '/contact' },
+                        ].map((item) => (
                             <a
-                                key={item}
-                                href="#"
+                                key={item.label}
+                                href={item.href}
                                 style={{ color: 'var(--color-text-muted)', textDecoration: 'none', fontSize: 13 }}
                             >
-                                {item}
+                                {item.label}
                             </a>
                         ))}
                     </div>
@@ -1448,19 +1453,19 @@ export default function HomePage() {
     return (
         <>
             <Head>
-                <title>NemarChat — Nền tảng Live Chat thế hệ mới</title>
+                <title>NemarkChat — Nền tảng Live Chat thế hệ mới</title>
                 <meta
                     name="description"
-                    content="NemarChat giúp doanh nghiệp quản lý hội thoại đa kênh, phân quyền team linh hoạt, và tự động hoá hỗ trợ khách hàng."
+                    content="NemarkChat giúp doanh nghiệp quản lý hội thoại đa kênh, phân quyền team linh hoạt, và tự động hoá hỗ trợ khách hàng."
                 />
                 <meta name="viewport" content="width=device-width, initial-scale=1" />
                 <link rel="icon" href="/images/favicon.png" type="image/png" />
-                <meta property="og:title" content="NemarChat — Nền tảng Live Chat thế hệ mới" />
-                <meta property="og:description" content="NemarChat giúp doanh nghiệp quản lý hội thoại đa kênh, phân quyền team linh hoạt, và tự động hoá hỗ trợ khách hàng." />
+                <meta property="og:title" content="NemarkChat — Nền tảng Live Chat thế hệ mới" />
+                <meta property="og:description" content="NemarkChat giúp doanh nghiệp quản lý hội thoại đa kênh, phân quyền team linh hoạt, và tự động hoá hỗ trợ khách hàng." />
                 <meta property="og:image" content="/images/og-image.png" />
                 <meta property="og:type" content="website" />
                 <meta name="twitter:card" content="summary_large_image" />
-                <meta name="twitter:title" content="NemarChat — Nền tảng Live Chat thế hệ mới" />
+                <meta name="twitter:title" content="NemarkChat — Nền tảng Live Chat thế hệ mới" />
                 <meta name="twitter:description" content="Hệ thống live chat thông minh cho doanh nghiệp" />
                 <meta name="twitter:image" content="/images/og-image.png" />
             </Head>

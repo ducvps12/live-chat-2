@@ -101,6 +101,13 @@ export const macroService = {
     },
 
     /**
+     * Increment usage count for a macro
+     */
+    async incrementUsage(macroId: string) {
+        return macroRepo.incrementUsage(macroId);
+    },
+
+    /**
      * Apply placeholder substitution to macro content
      */
     applyPlaceholders(content: string, context: Record<string, string>): string {

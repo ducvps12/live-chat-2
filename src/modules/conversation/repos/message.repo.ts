@@ -145,4 +145,58 @@ export const messageRepo = {
 
         return MessageModel.countDocuments(query).exec();
     },
+
+    /**
+     * Search messages by content text, return distinct conversation IDs with matched snippet.
+     * Uses $regex for Vietnamese diacritics support (MongoDB $text doesn't handle Vietnamese well).
+     */
+    async searchByContent(
+        conversationIds: string[],
+        query: string,
+        limit: number = 50
+    ): Promise<Array<{ conversationId: string; matchedSnippet: string; messageId: string }>> {
+        if (!query || query.trim().length === 0 || conversationIds.length === 0) return [];
+
+        const mongoose = await import('mongoose');
+        const objectIds = conversationIds.map(id => new mongoose.Types.ObjectId(id));
+
+        // Escape regex special characters
+        const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+        const results = await MessageModel.aggregate([
+            {
+                $match: {
+                    conversationId: { $in: objectIds },
+                    content: { $regex: escaped, $options: 'i' },
+                    isDeleted: { $ne: true },
+                    isInternal: { $ne: true },
+                }
+            },
+            { $sort: { createdAt: -1 } },
+            {
+                $group: {
+                    _id: '$conversationId',
+                    matchedSnippet: { $first: '$content' },
+                    messageId: { $first: { $toString: '$_id' } },
+                }
+            },
+            { $limit: limit },
+            {
+                $project: {
+                    _id: 0,
+                    conversationId: { $toString: '$_id' },
+                    matchedSnippet: {
+                        $cond: {
+                            if: { $gt: [{ $strLenCP: '$matchedSnippet' }, 100] },
+                            then: { $concat: [{ $substrCP: ['$matchedSnippet', 0, 100] }, '…'] },
+                            else: '$matchedSnippet'
+                        }
+                    },
+                    messageId: 1,
+                }
+            }
+        ]).exec();
+
+        return results;
+    },
 };

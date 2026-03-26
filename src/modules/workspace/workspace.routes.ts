@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { workspaceController, widgetController, offlineMessageController } from './workspace.controller';
+import { workspaceController, widgetController, offlineMessageController, popupController } from './workspace.controller';
 import { workspaceValidate, widgetValidate, offlineMessageValidate } from './workspace.validate';
 import { validateRequest } from '../../middlewares/validateRequest';
 import { requireAuth } from '../../middlewares/auth.middleware';
@@ -7,7 +7,10 @@ import { requirePermission } from '../../middlewares/permission.middleware';
 import { zaloRoutes } from '../zalo/zalo.routes';
 import { facebookRoutes } from '../facebook/facebook.routes';
 import { subscriptionRoutes } from '../subscription/subscription.routes';
+import leadRoutes from '../lead/lead.routes';
+import knowledgeRoutes from '../knowledge/knowledge.routes';
 import { scopeCheck } from '../../middlewares/scopeCheck';
+import { campaignRoutes } from '../campaign/campaign.routes';
 import { PERMISSIONS } from '../../config/permissions';
 
 const router = Router();
@@ -114,6 +117,38 @@ router.patch(
     requirePermission(PERMISSIONS.WORKSPACE_UPDATE),
     workspaceController.updateTag
 );
+
+// ────────── Workspace Labels (Zalo-style colored tags) ──────────
+router.get(
+    '/:workspaceId/labels',
+    requireAuth,
+    scopeCheck,
+    workspaceController.getLabels
+);
+
+router.post(
+    '/:workspaceId/labels',
+    requireAuth,
+    scopeCheck,
+    requirePermission(PERMISSIONS.WORKSPACE_UPDATE),
+    workspaceController.addLabel
+);
+
+router.delete(
+    '/:workspaceId/labels',
+    requireAuth,
+    scopeCheck,
+    requirePermission(PERMISSIONS.WORKSPACE_UPDATE),
+    workspaceController.removeLabel
+);
+
+router.patch(
+    '/:workspaceId/labels',
+    requireAuth,
+    scopeCheck,
+    requirePermission(PERMISSIONS.WORKSPACE_UPDATE),
+    workspaceController.updateLabelItem
+);
 // ────────── Widget CRUD (under workspace scope) ──────────
 router.post(
     '/:workspaceId/widgets',
@@ -158,6 +193,40 @@ router.delete(
 // ────────── Public Widget endpoints (no auth) ──────────
 router.get('/public/widgets/:widgetId/config', widgetController.getPublicConfig);
 router.get('/public/widgets/:widgetId/check-domain', widgetController.checkDomain);
+
+// ────────── Popup CRUD (under workspace scope) ──────────
+router.post(
+    '/:workspaceId/popups',
+    requireAuth,
+    scopeCheck,
+    popupController.create
+);
+router.get(
+    '/:workspaceId/popups',
+    requireAuth,
+    scopeCheck,
+    popupController.getByWorkspace
+);
+router.patch(
+    '/:workspaceId/popups/:popupId',
+    requireAuth,
+    scopeCheck,
+    popupController.update
+);
+router.delete(
+    '/:workspaceId/popups/:popupId',
+    requireAuth,
+    scopeCheck,
+    popupController.delete
+);
+router.post(
+    '/public/popups/:popupId/stat',
+    popupController.incrementStat
+);
+router.get(
+    '/public/popups/workspace/:workspaceId/active',
+    popupController.getActive
+);
 router.post(
     '/public/widgets/:widgetId/offline-messages',
     validateRequest(offlineMessageValidate.create),
@@ -205,6 +274,9 @@ router.get(
 router.use('/:workspaceId/zalo', zaloRoutes); // Tích hợp API Zalo
 router.use('/:workspaceId/facebook', facebookRoutes); // Tích hợp Facebook Fanpage
 router.use('/:workspaceId/subscription', subscriptionRoutes); // Gói cước & thanh toán
+router.use('/:workspaceId/leads', leadRoutes); // CRM Lead Pipeline
+router.use('/:workspaceId/knowledge', knowledgeRoutes); // Kho kiến thức CSKH
+router.use('/:workspaceId/campaigns', campaignRoutes); // Campaign broadcast
 
 // ────────── Presence ──────────
 router.get(

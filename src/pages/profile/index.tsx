@@ -1,4 +1,4 @@
-import Head from 'next/head';
+﻿import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
 import { Button, Dropdown, Spin } from 'antd';
@@ -49,7 +49,7 @@ export default function ProfilePage() {
 
     return (
         <AppLayout headerTitle="Hồ sơ cá nhân">
-            <Head><title>Hồ sơ cá nhân | NemarChat</title></Head>
+            <Head><title>Hồ sơ cá nhân | NemarkChat</title></Head>
 
             {/* ─── Content ─── */}
             <main style={{ maxWidth: 800, margin: '0 auto', padding: '40px 24px' }}>

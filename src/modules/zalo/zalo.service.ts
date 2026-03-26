@@ -5,6 +5,7 @@ import { AppError } from '../../middlewares/errorHandler';
 import mongoose from 'mongoose';
 import crypto from 'crypto';
 import { conversationService } from '../conversation/conversation.service';
+import { leadService } from '../lead/lead.service';
 import { 
     createZaloSession, 
     restoreZaloSession, 
@@ -14,12 +15,22 @@ import {
     getZaloConversations,
     getZaloMessages,
     ZaloIncomingMessage,
-    isZaloSessionConnected
+    isZaloSessionConnected,
+    migrateZaloSession,
+    copyZaloCredentials,
+    getZaloGroups,
+    getZaloGroupMembers,
+    removeZaloGroupMember,
+    sendZaloFriendRequest,
+    getZaloFriendIds,
+    getZaloAliasList,
 } from '../../infra/zaloService';
 
 class ZaloService {
     // Map accountId → workspaceId for message routing
     private accountWorkspaceMap = new Map<string, string>();
+    // Track msgIds sent from web UI to prevent duplicate inbox entries when Zalo listener catches self-messages
+    private webSentMsgIds = new Set<string>();
 
     /**
      * Khởi động lại toàn bộ ZaloSession cho các workspace đã kết nối
@@ -37,12 +48,17 @@ class ZaloService {
                     // Use accountId as sessionId to support multiple accounts per workspace
                     await restoreZaloSession(
                         accountId,
-                        (msg) => this.handleMessage(workspaceId, msg),
+                        (msg) => this.handleMessage(workspaceId, msg, accountId),
                         (err) => console.error(`[ZaloService] Account ${accountId} listener error:`, err)
                     );
                     console.log(`[ZaloService] Successfully booted account ${accountId} for workspace ${workspaceId}`);
+                    // Auto-trigger avatar backfill + history sync after session restore
+                    setTimeout(() => this.backfillAvatars(workspaceId, accountId), 5000);
+                    setTimeout(() => this.syncAllHistory(workspaceId), 15000);
                 } catch (err) {
                     console.error(`[ZaloService] Failed to boot account ${accountId}:`, err);
+                    // Update DB status to reflect failed restore
+                    try { await zaloAccountRepo.updateStatus(accountId, 'disconnected'); } catch { /* silent */ }
                 }
             }
         } catch (err) {
@@ -59,6 +75,7 @@ class ZaloService {
 
         return new Promise((resolve, reject) => {
             let qrResolved = false;
+            let resolvedAccountId: string | undefined; // closure for onMessage callback
 
             createZaloSession(
                 tempSessionId,
@@ -120,13 +137,13 @@ class ZaloService {
                         const resolvedZaloId = typeof zaloId === 'object' ? (zaloId as any).userId || (zaloId as any).uid : String(zaloId);
                         const existing = await zaloAccountRepo.findByWorkspaceId(workspaceId);
                         const duplicate = existing.find(a => a.zaloId === resolvedZaloId);
+                        let accountId: string;
                         if (duplicate) {
                             // Update existing account instead of creating duplicate
                             await zaloAccountRepo.update(duplicate._id as unknown as string, {
                                 name, avatar, status: 'active'
                             });
-                            // Migrate session from temp to accountId
-                            const accountId = (duplicate._id as unknown as string).toString();
+                            accountId = (duplicate._id as unknown as string).toString();
                             this.accountWorkspaceMap.set(accountId, workspaceId);
                             console.log(`[ZaloService] Updated existing Zalo acc ${name} (${accountId})`);
                         } else {
@@ -141,15 +158,28 @@ class ZaloService {
                                 userAgent: 'Mozilla/5.0',
                                 status: 'active'
                             });
-                            const accountId = (newAccount._id as unknown as string).toString();
+                            accountId = (newAccount._id as unknown as string).toString();
                             this.accountWorkspaceMap.set(accountId, workspaceId);
                             console.log(`[ZaloService] Workspace ${workspaceId} linked NEW Zalo acc ${name} (${accountId})`);
                         }
+
+                        // Share accountId with the onMessage callback via closure
+                        resolvedAccountId = accountId;
+
+                        // ── CRITICAL: Migrate session from tempSessionId → accountId ──
+                        // Without this, isZaloSessionConnected(accountId) returns false
+                        // because the session is stored under the temp QR session ID
+                        migrateZaloSession(tempSessionId, accountId);
+                        copyZaloCredentials(tempSessionId, accountId);
+
+                        // Background: backfill avatars + sync history for existing conversations
+                        setTimeout(() => this.backfillAvatars(workspaceId, accountId), 3000);
+                        setTimeout(() => this.syncAllHistory(workspaceId), 10000);
                     } catch (err) {
                         console.error(`[ZaloService] Post QR-login setup failed for Workspace ${workspaceId}:`, err);
                     }
                 },
-                (msg) => this.handleMessage(workspaceId, msg),
+                (msg) => this.handleMessage(workspaceId, msg, resolvedAccountId),
                 (error) => {
                     console.error(`[ZaloService] QR Session error for ${workspaceId}:`, error);
                     if (!qrResolved) {
@@ -229,9 +259,9 @@ class ZaloService {
     }
 
     /**
-     * Gắn Listener: Khi có tin nhắn Zalo tới -> Đẩy vào hệ thống NemarChat Socket/Conversation
+     * Gắn Listener: Khi có tin nhắn Zalo tới -> Đẩy vào hệ thống NemarkChat Socket/Conversation
      */
-    private async handleMessage(workspaceId: string, message: ZaloIncomingMessage) {
+    private async handleMessage(workspaceId: string, message: ZaloIncomingMessage, accountId?: string) {
         // ── Luôn lưu vào DB (kể cả tin nhắn tự gửi) ──
         try {
             await zaloMessageRepo.saveMessage({
@@ -267,19 +297,16 @@ class ZaloService {
             }
         }
 
-        // ── Tin nhắn tự gửi: chỉ lưu DB, không route vào Inbox ──
-        if (message.isSelf) {
-            return;
-        }
-
-        console.log(`[ZaloService] Workspace ${workspaceId} received Zalo msg from ${message.senderId} (thread: ${message.threadId}, type: ${message.threadType})`);
+        console.log(`[ZaloService] Workspace ${workspaceId} received Zalo msg from ${message.senderId} (thread: ${message.threadId}, type: ${message.threadType}, self: ${message.isSelf})`);
         try {
             const senderId = message.senderId;
             const isGroupMsg = message.threadType === 'group';
             
             // For groups: use threadId as the conversation key (all members → 1 conversation)
             // For DMs: use senderId as the conversation key (1 person → 1 conversation)
-            const conversationKey = isGroupMsg ? message.threadId : senderId;
+            // For self-messages in DMs: use threadId as conversation key (same person they're chatting with)
+            const conversationKey = isGroupMsg ? message.threadId 
+                : (message.isSelf ? message.threadId : senderId);
             
             let conversationName = message.senderName || `Zalo User ${senderId}`;
             let avatar = '';
@@ -287,7 +314,15 @@ class ZaloService {
 
             // Fetch conversation/group info from Zalo API for avatar & display name
             try {
-                const convs = await getZaloConversations(workspaceId);
+                // accountId is the Zalo session ID — getZaloConversations needs this, NOT workspaceId
+                let sessionForConvs = accountId;
+                if (!sessionForConvs) {
+                    // Fallback: find any connected account for this workspace
+                    const accounts = await zaloAccountRepo.findByWorkspaceId(workspaceId);
+                    const connected = accounts.find(a => isZaloSessionConnected((a._id as unknown as string).toString()));
+                    if (connected) sessionForConvs = (connected._id as unknown as string).toString();
+                }
+                const convs = sessionForConvs ? await getZaloConversations(sessionForConvs) : [];
                 const conv = convs.find(c => c.threadId === message.threadId);
                 if (conv) {
                     if (conv.avatar) avatar = conv.avatar;
@@ -297,14 +332,14 @@ class ZaloService {
                         groupName = conv.displayName || `Nhóm ${message.threadId}`;
                         conversationName = groupName;
                     } else {
-                        // For DMs: only use displayName as fallback when no sender name
-                        if (!conversationName || conversationName === `Zalo User ${senderId}`) {
-                            if (conv.displayName) conversationName = conv.displayName;
+                        // For DMs: use the other person's name (the conv displayName)
+                        if (conv.displayName) {
+                            conversationName = conv.displayName;
                         }
                     }
                     
-                    // Update contact avatar
-                    if (avatar && !isGroupMsg) {
+                    // Update contact avatar (for DMs, not self)
+                    if (avatar && !isGroupMsg && !message.isSelf) {
                         try {
                             await zaloContactRepo.updateInfo(workspaceId, senderId, {
                                 displayName: conversationName,
@@ -327,7 +362,8 @@ class ZaloService {
                  if (imageUrl) {
                      attachments.push({
                          url: imageUrl,
-                         name: 'Zalo Image',
+                         data: '',
+                         filename: 'Zalo Image',
                          size: 0,
                          mimeType: 'image/jpeg'
                      });
@@ -340,7 +376,8 @@ class ZaloService {
                  if (stickerImageUrl) {
                      attachments.push({
                          url: stickerImageUrl,
-                         name: 'Zalo Sticker',
+                         data: '',
+                         filename: 'Zalo Sticker',
                          size: 0,
                          mimeType: 'image/webp'
                      });
@@ -361,18 +398,37 @@ class ZaloService {
                 ? (message.senderName || `Thành viên ${senderId.slice(-6)}`)
                 : conversationName;
 
-            // Route to Inbox
-            await conversationService.handleIncomingZaloMessage(
-                workspaceId,
-                conversationKey,  // threadId for groups, senderId for DMs
-                conversationName, // group name for groups, person name for DMs
-                avatar,
-                contentText,
-                msgType,
-                attachments,
-                message.msgId,
-                isGroupMsg ? senderDisplayName : undefined, // pass sender name for group messages
-            );
+            if (message.isSelf) {
+                // Skip if this was sent from web UI (already added to inbox)
+                if (this.webSentMsgIds.has(message.msgId)) {
+                    console.log(`[ZaloService] Skipping self-msg ${message.msgId} (already sent from web UI)`);
+                    return;
+                }
+                // ── Self-sent messages (from Zalo app): route as agent message ──
+                await conversationService.handleSelfZaloMessage(
+                    workspaceId,
+                    conversationKey,
+                    conversationName,
+                    avatar,
+                    contentText,
+                    msgType,
+                    attachments,
+                    message.msgId,
+                );
+            } else {
+                // ── Incoming from others: route as visitor message ──
+                await conversationService.handleIncomingZaloMessage(
+                    workspaceId,
+                    conversationKey,  // threadId for groups, senderId for DMs
+                    conversationName, // group name for groups, person name for DMs
+                    avatar,
+                    contentText,
+                    msgType,
+                    attachments,
+                    message.msgId,
+                    isGroupMsg ? senderDisplayName : undefined, // pass sender name for group messages
+                );
+            }
         } catch (err) {
             console.error(`[ZaloService] Error handling incoming Zalo message for Workspace ${workspaceId}:`, err);
         }
@@ -419,12 +475,16 @@ class ZaloService {
         }
 
         // ── Lưu tin nhắn đã gửi vào DB ──
+        const sentMsgId = result.msgId || `sent_${Date.now()}`;
+        // Track this msgId so Zalo listener won't route it to inbox again
+        this.webSentMsgIds.add(sentMsgId);
+        setTimeout(() => this.webSentMsgIds.delete(sentMsgId), 30_000); // cleanup after 30s
         try {
             await zaloMessageRepo.saveMessage({
                 workspaceId,
                 threadId,
                 threadType,
-                msgId: result.msgId || `sent_${Date.now()}`,
+                msgId: sentMsgId,
                 senderId: 'self',
                 senderName: 'Bạn',
                 content: text || (type === 'image' ? '[Hình ảnh]' : ''),
@@ -438,6 +498,74 @@ class ZaloService {
         }
 
         return { success: true };
+    }
+
+    /**
+     * Broadcast/forward messages to multiple Zalo friends with anti-spam delay
+     * @param delayMs - delay between each recipient (default 3000ms to avoid Zalo ban)
+     */
+    async broadcastMessages(
+        workspaceId: string,
+        messages: string[],  // Array of message content strings
+        recipientIds: string[],  // Array of Zalo threadIds (friend IDs)
+        options?: { delayMs?: number; accountId?: string }
+    ) {
+        const delayMs = options?.delayMs || 3000; // 3s between each recipient
+
+        // Find connected session
+        let sessionId = options?.accountId;
+        if (!sessionId || !isZaloSessionConnected(sessionId)) {
+            const accounts = await zaloAccountRepo.findByWorkspaceId(workspaceId);
+            const connected = accounts.find(a => isZaloSessionConnected((a._id as unknown as string).toString()));
+            if (connected) {
+                sessionId = (connected._id as unknown as string).toString();
+            }
+        }
+        if (!sessionId || !isZaloSessionConnected(sessionId)) {
+            throw new AppError('Tài khoản Zalo chưa kết nối', 400, 'ZALO_NOT_CONNECTED');
+        }
+
+        const results: Array<{ threadId: string; success: boolean; error?: string }> = [];
+
+        for (let i = 0; i < recipientIds.length; i++) {
+            const threadId = recipientIds[i];
+
+            // Anti-spam delay between recipients (skip delay for first one)
+            if (i > 0) {
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+            }
+
+            try {
+                // Send each message to this recipient with small delay between messages
+                for (let j = 0; j < messages.length; j++) {
+                    if (j > 0) {
+                        await new Promise(resolve => setTimeout(resolve, 1000)); // 1s between messages
+                    }
+                    const result = await sendZaloMsg(sessionId, threadId, 'user', messages[j]);
+                    if (!result.success) {
+                        results.push({ threadId, success: false, error: result.error || 'Gửi thất bại' });
+                        break; // Stop sending remaining messages to this recipient
+                    }
+                    
+                    // Track for dedup
+                    const msgId = result.msgId || `bc_${Date.now()}_${j}`;
+                    this.webSentMsgIds.add(msgId);
+                    setTimeout(() => this.webSentMsgIds.delete(msgId), 30_000);
+                }
+
+                results.push({ threadId, success: true });
+                console.log(`[ZaloService] Broadcast: sent ${messages.length} msg(s) to ${threadId} (${i + 1}/${recipientIds.length})`);
+            } catch (err: any) {
+                console.error(`[ZaloService] Broadcast failed for ${threadId}:`, err.message);
+                results.push({ threadId, success: false, error: err.message });
+            }
+        }
+
+        const successCount = results.filter(r => r.success).length;
+        const failedCount = results.filter(r => !r.success).length;
+        console.log(`[ZaloService] Broadcast complete: ${successCount} success, ${failedCount} failed`);
+
+        return { results, successCount, failedCount, total: recipientIds.length };
     }
 
     // ═══════════════════════════════════
@@ -463,6 +591,123 @@ class ZaloService {
      */
     async getContacts(query: ZaloContactQuery) {
         return zaloContactRepo.findByWorkspace(query);
+    }
+
+    /**
+     * Get Zalo friends list (from connected session) with search & pagination
+     */
+    async getFriends(workspaceId: string, options?: { search?: string; page?: number; limit?: number }) {
+        // Find active Zalo account for this workspace
+        const accounts = await zaloAccountRepo.findByWorkspaceId(workspaceId);
+        const connected = accounts.find(a => isZaloSessionConnected((a._id as unknown as string).toString()));
+        if (!connected) {
+            return { items: [], total: 0, connected: false };
+        }
+
+        const sessionId = (connected._id as unknown as string).toString();
+        const convs = await getZaloConversations(sessionId);
+        
+        // Filter to friends only (user type, not groups)
+        let friends = convs.filter(c => c.threadType === 'user');
+
+        // Search filter
+        if (options?.search) {
+            const q = options.search.toLowerCase();
+            friends = friends.filter(f => 
+                f.displayName.toLowerCase().includes(q) || 
+                f.threadId.includes(q)
+            );
+        }
+
+        // Sort alphabetically
+        friends.sort((a, b) => a.displayName.localeCompare(b.displayName, 'vi'));
+
+        const total = friends.length;
+        const page = options?.page || 1;
+        const limit = options?.limit || 50;
+        const start = (page - 1) * limit;
+        const items = friends.slice(start, start + limit);
+
+        return { items, total, connected: true };
+    }
+
+    /**
+     * Backfill avatars for all existing Zalo conversations in workspace
+     * Runs after Zalo session connects to fix conversations that were created before avatar fix
+     */
+    async backfillAvatars(workspaceId: string, accountId: string) {
+        try {
+            console.log(`[ZaloService] Starting avatar + alias backfill for workspace ${workspaceId}...`);
+            const convs = await getZaloConversations(accountId);
+            if (!convs || convs.length === 0) {
+                console.log(`[ZaloService] No Zalo conversations found for backfill`);
+                return;
+            }
+
+            // Fetch aliases (biệt danh / tên gọi nhớ) to merge with display names
+            let aliasMap = new Map<string, string>();
+            try {
+                const aliases = await getZaloAliasList(accountId);
+                aliasMap = new Map(aliases.map(a => [a.userId, a.alias]));
+                if (aliasMap.size > 0) {
+                    console.log(`[ZaloService] Loaded ${aliasMap.size} Zalo aliases for backfill`);
+                }
+            } catch { /* alias fetch is optional */ }
+
+            const ConvModel = (await import('../conversation/repos/conversation.model')).ConversationModel;
+            let updatedCount = 0;
+
+            for (const conv of convs) {
+                if (!conv.avatar && !conv.displayName && !aliasMap.has(conv.threadId)) continue;
+                
+                const visitorId = `zalo_${conv.threadId}`;
+                
+                // Prefer alias (biệt danh) > displayName from Zalo
+                const alias = aliasMap.get(conv.threadId);
+                const bestName = alias || conv.displayName;
+                
+                // Force-update ALL conversations for this visitor (refresh avatar + name)
+                const updateFields: Record<string, any> = {};
+                if (conv.avatar) {
+                    updateFields['visitorInfo.avatar'] = conv.avatar;
+                }
+                if (bestName) {
+                    updateFields['visitorInfo.name'] = bestName;
+                }
+                // Store alias separately in metadata for reference
+                if (alias) {
+                    updateFields['metadata.zaloAlias'] = alias;
+                    updateFields['metadata.zaloOriginalName'] = conv.displayName || '';
+                }
+                
+                if (Object.keys(updateFields).length === 0) continue;
+                
+                const result = await ConvModel.updateMany(
+                    { visitorId },
+                    { $set: updateFields }
+                );
+                if (result.modifiedCount > 0) updatedCount += result.modifiedCount;
+
+                // Also update the Visitor model so avatar + name persists across new conversations
+                try {
+                    const VisitorModel = (await import('../conversation/repos/visitor.model')).VisitorModel;
+                    const visitorUpdate: Record<string, any> = {};
+                    if (conv.avatar) visitorUpdate['attributes.avatar'] = conv.avatar;
+                    if (bestName) visitorUpdate.name = bestName;
+                    if (alias) visitorUpdate['attributes.zaloAlias'] = alias;
+                    if (Object.keys(visitorUpdate).length > 0) {
+                        await VisitorModel.updateMany(
+                            { visitorId },
+                            { $set: visitorUpdate }
+                        );
+                    }
+                } catch { /* silent — visitor model may not exist for all contacts */ }
+            }
+
+            console.log(`[ZaloService] Avatar + alias backfill complete: ${updatedCount} conversations updated (${aliasMap.size} aliases, ${convs.length} contacts)`);
+        } catch (err) {
+            console.error(`[ZaloService] Avatar backfill failed:`, err);
+        }
     }
 
     /**
@@ -501,6 +746,7 @@ class ZaloService {
      * - Fetch lịch sử tin nhắn cho mỗi thread
      * - Bulk upsert messages vào ZaloMessage collection
      * - Upsert contacts vào ZaloContact collection
+     * - Route messages vào Inbox (conversationService)
      * - Trích xuất SĐT, email, link từ nội dung tin nhắn
      */
     async syncAllHistory(workspaceId: string): Promise<{ jobId: string }> {
@@ -537,36 +783,50 @@ class ZaloService {
     private async runSync(workspaceId: string, job: SyncJobStatus) {
         console.log(`[ZaloService] ⚡ Starting full history sync for workspace ${workspaceId}...`);
 
-        // 1. Get all conversations
-        let conversations: Awaited<ReturnType<typeof getZaloConversations>>;
-        try {
-            conversations = await getZaloConversations(workspaceId);
-            job.totalThreads = conversations.length;
-            console.log(`[ZaloService] Found ${conversations.length} threads to sync`);
-        } catch (err: any) {
+        // ── Find ALL connected accounts for this workspace ──
+        const accounts = await zaloAccountRepo.findByWorkspaceId(workspaceId);
+        const connectedAccounts = accounts.filter(a => isZaloSessionConnected((a._id as unknown as string).toString()));
+        if (connectedAccounts.length === 0) {
             job.status = 'error';
-            job.errors.push(`Failed to get conversations: ${err.message}`);
+            job.errors.push('No connected Zalo account found for this workspace');
             return;
         }
+        console.log(`[ZaloService] Found ${connectedAccounts.length} connected account(s) to sync`);
 
         // Phone + Email regex for extraction
         const PHONE_RE = /(?:\+84|84|0)(3[2-9]|5[2689]|7[06-9]|8[1-9]|9[0-9])\d{7}/g;
         const EMAIL_RE = /[\w.+-]+@[\w-]+\.[\w.]+/g;
+
+        // Iterate over ALL connected accounts
+        for (const connectedAccount of connectedAccounts) {
+            const accountId = (connectedAccount._id as unknown as string).toString();
+            console.log(`[ZaloService] Syncing account ${accountId} (${(connectedAccount as any).zaloName || 'unknown'})...`);
+
+            // 1. Get all conversations using accountId
+            let conversations: Awaited<ReturnType<typeof getZaloConversations>>;
+            try {
+                conversations = await getZaloConversations(accountId);
+                job.totalThreads += conversations.length;
+                console.log(`[ZaloService] Account ${accountId}: Found ${conversations.length} threads to sync`);
+            } catch (err: any) {
+                job.errors.push(`Account ${accountId}: Failed to get conversations: ${err.message}`);
+                continue; // Skip this account, try next one
+            }
 
         // 2. For each conversation, fetch history and save
         for (const conv of conversations) {
             job.currentThread = `${conv.displayName} (${conv.threadType})`;
             
             try {
-                // Fetch messages from Zalo API
-                const messages = await getZaloMessages(workspaceId, conv.threadId, conv.threadType, 100);
+                // Fetch messages from Zalo API — use accountId as sessionId
+                const messages = await getZaloMessages(accountId, conv.threadId, conv.threadType, 200);
                 
                 if (messages.length === 0) {
                     job.processedThreads++;
                     continue;
                 }
 
-                // Prepare bulk upsert data
+                // Prepare bulk upsert data for ZaloMessage collection
                 const msgDocs = messages.map((m: any) => ({
                     workspaceId,
                     threadId: conv.threadId,
@@ -582,10 +842,65 @@ class ZaloService {
                     timestamp: new Date(m.createdAt || Date.now()),
                 }));
 
-                // Bulk save messages
+                // Bulk save messages to ZaloMessage collection
                 const savedCount = await zaloMessageRepo.saveMany(msgDocs);
                 job.totalMessages += messages.length;
                 job.newMessages += savedCount;
+
+                // ── Route to Inbox: create/update conversations for each historical message ──
+                // Sort messages chronologically (oldest first) so conversation timeline is correct
+                const sortedMessages = [...messages]
+                    .sort((a: any, b: any) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
+
+                for (const m of sortedMessages) {
+                    try {
+                        const senderId = m.senderId || '';
+                        const isSelf = m.senderType === 'me';
+                        const isGroupMsg = conv.threadType === 'group';
+
+                        // Re-use same key logic as real-time handleMessage
+                        const conversationKey = isGroupMsg ? conv.threadId
+                            : (isSelf ? conv.threadId : senderId);
+                        const conversationName = isGroupMsg
+                            ? (conv.displayName || `Nhóm ${conv.threadId}`)
+                            : (conv.displayName || m.senderName || `Zalo User ${senderId}`);
+
+                        const msgType: 'text' | 'image' | 'video' | 'file' = 
+                            (m.type === 'image' || m.type === 'media') ? 'image'
+                            : m.type === 'video' ? 'video'
+                            : m.type === 'file' ? 'file'
+                            : 'text';
+
+                        let attachments: any[] = [];
+                        if (m.attachmentUrl) {
+                            attachments.push({
+                                url: m.attachmentUrl,
+                                name: `Zalo ${msgType}`,
+                                size: 0,
+                                mimeType: msgType === 'image' ? 'image/jpeg' : 'application/octet-stream',
+                            });
+                        }
+
+                        const contentText = m.content || (attachments.length ? '[Đính kèm]' : '');
+                        const clientMsgId = m.id || `sync_${conv.threadId}_${Date.now()}`;
+
+                        if (isSelf) {
+                            await conversationService.handleSelfZaloMessage(
+                                workspaceId, conversationKey, conversationName,
+                                conv.avatar || '', contentText, msgType, attachments, clientMsgId,
+                            );
+                        } else {
+                            await conversationService.handleIncomingZaloMessage(
+                                workspaceId, conversationKey, conversationName,
+                                conv.avatar || '', contentText, msgType, attachments, clientMsgId,
+                                isGroupMsg ? (m.senderName || `Thành viên ${senderId.slice(-6)}`) : undefined,
+                            );
+                        }
+                    } catch (err: any) {
+                        // Don't let individual message errors stop the sync
+                        // Duplicate msgId errors are expected and fine
+                    }
+                }
 
                 // Extract contact data from non-self messages
                 const contactsMap = new Map<string, {
@@ -667,6 +982,8 @@ class ZaloService {
             await new Promise(resolve => setTimeout(resolve, 500));
         }
 
+        } // end for each connected account
+
         job.status = 'completed';
         job.completedAt = new Date().toISOString();
         job.currentThread = '';
@@ -678,6 +995,423 @@ class ZaloService {
      */
     getSyncStatus(workspaceId: string): SyncJobStatus | null {
         return this.syncJobs.get(workspaceId) || null;
+    }
+
+    // ═══════════════════════════════════
+    // GROUP MEMBERS
+    // ═══════════════════════════════════
+
+    /**
+     * Lấy danh sách nhóm Zalo (live từ session)
+     */
+    async getGroups(workspaceId: string) {
+        const accounts = await zaloAccountRepo.findByWorkspaceId(workspaceId);
+        const connected = accounts.find(a => isZaloSessionConnected((a._id as unknown as string).toString()));
+        if (!connected) {
+            return { items: [], total: 0, connected: false };
+        }
+        const sessionId = (connected._id as unknown as string).toString();
+        const groups = await getZaloGroups(sessionId);
+        return { items: groups, total: groups.length, connected: true };
+    }
+
+    /**
+     * Lấy danh sách thành viên 1 nhóm Zalo cụ thể
+     */
+    async getGroupMembers(workspaceId: string, groupId: string) {
+        const accounts = await zaloAccountRepo.findByWorkspaceId(workspaceId);
+        const connected = accounts.find(a => isZaloSessionConnected((a._id as unknown as string).toString()));
+        if (!connected) {
+            throw new AppError('Tài khoản Zalo chưa kết nối', 400, 'ZALO_NOT_CONNECTED');
+        }
+        const sessionId = (connected._id as unknown as string).toString();
+        const members = await getZaloGroupMembers(sessionId, groupId);
+        return { items: members, total: members.length, groupId };
+    }
+
+    /**
+     * Xóa một thành viên khỏi nhóm Zalo (kick)
+     */
+    async kickGroupMember(workspaceId: string, groupId: string, userId: string) {
+        const accounts = await zaloAccountRepo.findByWorkspaceId(workspaceId);
+        const connected = accounts.find(a => isZaloSessionConnected((a._id as unknown as string).toString()));
+        if (!connected) {
+            throw new AppError('Tài khoản Zalo chưa kết nối', 400, 'ZALO_NOT_CONNECTED');
+        }
+        const sessionId = (connected._id as unknown as string).toString();
+        const result = await removeZaloGroupMember(sessionId, groupId, userId);
+        if (!result.success) {
+            throw new AppError(result.error || 'Không thể xóa thành viên', 400, 'KICK_FAILED');
+        }
+        return { success: true, groupId, userId };
+    }
+
+    /**
+     * Bulk sync ALL groups → extract members → import to Leads
+     * Enriches with phone/email from chat history + contact data
+     */
+    async bulkSyncAllGroupsToLeads(workspaceId: string) {
+        const accounts = await zaloAccountRepo.findByWorkspaceId(workspaceId);
+        const connected = accounts.find(a => isZaloSessionConnected((a._id as unknown as string).toString()));
+        if (!connected) {
+            throw new AppError('Tài khoản Zalo chưa kết nối', 400, 'ZALO_NOT_CONNECTED');
+        }
+        const sessionId = (connected._id as unknown as string).toString();
+
+        // 1. Get all groups
+        const groups = await getZaloGroups(sessionId);
+        console.log(`[ZaloService] BulkSync: found ${groups.length} groups for workspace ${workspaceId}`);
+
+        let totalCreated = 0;
+        let totalSkipped = 0;
+        let totalMembers = 0;
+        const groupResults: Array<{ groupId: string; groupName: string; members: number; created: number; skipped: number }> = [];
+
+        // 2. Build phone/email lookup from contact data + zaloContactRepo
+        const contactInfoMap = new Map<string, { phone: string; email: string }>();
+        try {
+            // From contactDataStore (realtime extracted data)
+            const { getAllContactData } = await import('../../infra/zaloService');
+            const allContactData = getAllContactData(sessionId);
+            for (const cd of allContactData) {
+                if (cd.phones.length > 0 || cd.emails.length > 0) {
+                    contactInfoMap.set(cd.threadId, {
+                        phone: cd.phones[0] || '',
+                        email: cd.emails[0] || '',
+                    });
+                }
+            }
+        } catch { /* silent */ }
+
+        // From ZaloContact repo (persisted contact data)
+        try {
+            const dbContacts = await zaloContactRepo.findByWorkspace({ workspaceId, limit: 10000 });
+            const contactItems = (dbContacts as any).items || dbContacts;
+            if (Array.isArray(contactItems)) {
+                for (const c of contactItems) {
+                    if (c.phoneNumber && !contactInfoMap.has(c.zaloUserId)) {
+                        contactInfoMap.set(c.zaloUserId, {
+                            phone: c.phoneNumber || '',
+                            email: '',
+                        });
+                    }
+                }
+            }
+        } catch { /* silent */ }
+
+        // 3. For each group: fetch members and bulk convert to leads
+        for (const group of groups) {
+            try {
+                const members = await getZaloGroupMembers(sessionId, group.groupId);
+                totalMembers += members.length;
+
+                // Enrich members with phone data
+                const enrichedMembers = members.map(m => {
+                    const contactInfo = contactInfoMap.get(m.userId);
+                    return {
+                        userId: m.userId,
+                        displayName: m.displayName || `Thành viên ${m.userId.slice(-6)}`,
+                        avatar: m.avatar,
+                        phone: contactInfo?.phone || '',
+                        email: contactInfo?.email || '',
+                    };
+                });
+
+                const result = await leadService.bulkConvertFromGroupEnriched(workspaceId, {
+                    groupId: group.groupId,
+                    groupName: group.name || `Nhóm ${group.groupId}`,
+                    members: enrichedMembers,
+                });
+
+                totalCreated += result.created;
+                totalSkipped += result.skipped;
+                groupResults.push({
+                    groupId: group.groupId,
+                    groupName: group.name || group.groupId,
+                    members: members.length,
+                    created: result.created,
+                    skipped: result.skipped,
+                });
+
+                console.log(`[ZaloService] BulkSync group "${group.name}": ${result.created} new, ${result.skipped} existing`);
+
+                // Small delay between groups to avoid overloading
+                await new Promise(r => setTimeout(r, 500));
+            } catch (err: any) {
+                console.error(`[ZaloService] BulkSync error for group ${group.groupId}:`, err.message);
+                groupResults.push({
+                    groupId: group.groupId,
+                    groupName: group.name || group.groupId,
+                    members: 0,
+                    created: 0,
+                    skipped: 0,
+                });
+            }
+        }
+
+        console.log(`[ZaloService] BulkSync complete: ${totalCreated} leads created, ${totalSkipped} skipped from ${groups.length} groups (${totalMembers} total members)`);
+
+        return {
+            totalGroups: groups.length,
+            totalMembers,
+            totalCreated,
+            totalSkipped,
+            groups: groupResults,
+        };
+    }
+
+    // ═══════════════════════════════════
+    // AUTO FRIEND REQUEST
+    // ═══════════════════════════════════
+
+    private autoFriendJobs = new Map<string, AutoFriendJobStatus>();
+
+    /**
+     * Auto kết bạn tất cả thành viên trong nhóm (anti-spam delay)
+     */
+    async autoFriendGroupMembers(
+        workspaceId: string,
+        groupId: string,
+        message: string = 'Xin chào, mình muốn kết bạn!',
+        options?: { delayMs?: number; selectedUserIds?: string[] }
+    ): Promise<{ jobId: string }> {
+        const jobId = `${workspaceId}_${groupId}`;
+        const existing = this.autoFriendJobs.get(jobId);
+        if (existing && existing.status === 'running') {
+            return { jobId };
+        }
+
+        const job: AutoFriendJobStatus = {
+            status: 'running',
+            startedAt: new Date().toISOString(),
+            groupId,
+            totalMembers: 0,
+            sent: 0,
+            skipped: 0,
+            failed: 0,
+            alreadyFriends: 0,
+            currentMember: '',
+            errors: [],
+        };
+        this.autoFriendJobs.set(jobId, job);
+
+        // Run async in background
+        this.runAutoFriend(workspaceId, groupId, message, options || {}, job).catch(err => {
+            job.status = 'error';
+            job.errors.push(`Fatal: ${err.message}`);
+        });
+
+        return { jobId };
+    }
+
+    private async runAutoFriend(
+        workspaceId: string,
+        groupId: string,
+        message: string,
+        options: { delayMs?: number; selectedUserIds?: string[] },
+        job: AutoFriendJobStatus
+    ) {
+        const delayMs = options.delayMs || 8000; // 8s between each to avoid spam
+        const accounts = await zaloAccountRepo.findByWorkspaceId(workspaceId);
+        const connected = accounts.find(a => isZaloSessionConnected((a._id as unknown as string).toString()));
+        if (!connected) {
+            job.status = 'error';
+            job.errors.push('No connected Zalo account');
+            return;
+        }
+        const sessionId = (connected._id as unknown as string).toString();
+
+        // Get group members
+        const members = await getZaloGroupMembers(sessionId, groupId);
+        // Get current friends to skip
+        const friendIds = await getZaloFriendIds(sessionId);
+        // Get own ID
+        const ownId = connected.zaloId;
+
+        let targetMembers = members;
+        if (options.selectedUserIds?.length) {
+            const selected = new Set(options.selectedUserIds);
+            targetMembers = members.filter(m => selected.has(m.userId));
+        }
+
+        job.totalMembers = targetMembers.length;
+        console.log(`[ZaloService] Auto-friend: ${targetMembers.length} members in group ${groupId}, ${friendIds.size} existing friends`);
+
+        for (let i = 0; i < targetMembers.length; i++) {
+            const member = targetMembers[i];
+            job.currentMember = member.displayName || member.userId;
+
+            // Skip self
+            if (member.userId === ownId) {
+                job.skipped++;
+                continue;
+            }
+
+            // Skip already friended
+            if (friendIds.has(member.userId)) {
+                job.alreadyFriends++;
+                job.skipped++;
+                continue;
+            }
+
+            // Anti-spam delay
+            if (i > 0) {
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+            }
+
+            const result = await sendZaloFriendRequest(sessionId, member.userId, message);
+            if (result.success) {
+                job.sent++;
+            } else {
+                job.failed++;
+                job.errors.push(`${member.displayName}: ${result.error}`);
+            }
+        }
+
+        job.status = 'completed';
+        job.completedAt = new Date().toISOString();
+        job.currentMember = '';
+        console.log(`[ZaloService] Auto-friend completed: sent=${job.sent}, skipped=${job.skipped}, failed=${job.failed}`);
+    }
+
+    getAutoFriendStatus(workspaceId: string, groupId?: string): AutoFriendJobStatus | null {
+        if (groupId) {
+            return this.autoFriendJobs.get(`${workspaceId}_${groupId}`) || null;
+        }
+        // Return latest job for workspace
+        for (const [key, val] of this.autoFriendJobs) {
+            if (key.startsWith(workspaceId)) return val;
+        }
+        return null;
+    }
+
+    // ═══════════════════════════════════
+    // BEHAVIOR ANALYSIS
+    // ═══════════════════════════════════
+
+    /**
+     * Phân tích hành vi thành viên nhóm dựa trên lịch sử tin nhắn
+     * Trả về điểm tiềm năng: hot / warm / cold
+     */
+    async analyzeMemberBehavior(workspaceId: string, userId: string): Promise<MemberBehaviorAnalysis> {
+        // Pull message history for this user
+        const messages = await zaloMessageRepo.findByThread({
+            workspaceId,
+            threadId: userId,
+            limit: 200,
+        });
+
+        const now = Date.now();
+        const items = messages.items || [];
+        const totalMessages = items.length;
+        const incomingMsgs = items.filter((m: any) => !m.isSelf);
+        const outgoingMsgs = items.filter((m: any) => m.isSelf);
+
+        // Last active time
+        const lastMsg = items[0];
+        const lastActiveAt = lastMsg ? new Date(lastMsg.timestamp) : null;
+        const daysSinceActive = lastActiveAt ? (now - lastActiveAt.getTime()) / (1000 * 60 * 60 * 24) : 999;
+
+        // Response rate: % of outgoing messages that got a reply within 24h
+        let responseCount = 0;
+        for (const out of outgoingMsgs) {
+            const outTime = new Date(out.timestamp).getTime();
+            const hasReply = incomingMsgs.some((inc: any) => {
+                const incTime = new Date(inc.timestamp).getTime();
+                return incTime > outTime && incTime - outTime < 24 * 60 * 60 * 1000;
+            });
+            if (hasReply) responseCount++;
+        }
+        const responseRate = outgoingMsgs.length > 0 ? Math.round((responseCount / outgoingMsgs.length) * 100) : 0;
+
+        // Check for shared contact info (phone, email in messages)
+        const PHONE_RE = /(?:\+84|84|0)(3[2-9]|5[2689]|7[06-9]|8[1-9]|9[0-9])\d{7}/g;
+        const EMAIL_RE = /[\w.+-]+@[\w-]+\.[\w.]+/g;
+        let sharedPhone = false;
+        let sharedEmail = false;
+        const extractedPhones: string[] = [];
+        const extractedEmails: string[] = [];
+        for (const msg of incomingMsgs) {
+            const content = (msg as any).content || '';
+            const phones = content.match(PHONE_RE);
+            const emails = content.match(EMAIL_RE);
+            if (phones) { sharedPhone = true; extractedPhones.push(...phones); }
+            if (emails) { sharedEmail = true; extractedEmails.push(...emails); }
+        }
+
+        // Is conversation starter: did the customer initiate the first message?
+        const sortedByTime = [...items].sort((a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+        const isConversationStarter = sortedByTime.length > 0 && !sortedByTime[0].isSelf;
+
+        // Engagement score (0-100)
+        let engagementScore = 0;
+        engagementScore += Math.min(totalMessages * 2, 30);  // message volume (max 30)
+        engagementScore += Math.min(responseRate * 0.3, 25); // response rate (max 25)
+        engagementScore += daysSinceActive < 3 ? 20 : daysSinceActive < 7 ? 10 : daysSinceActive < 30 ? 5 : 0; // recency (max 20)
+        engagementScore += sharedPhone ? 10 : 0; // shared phone
+        engagementScore += sharedEmail ? 5 : 0;  // shared email
+        engagementScore += isConversationStarter ? 10 : 0; // initiated conversation
+        engagementScore = Math.min(engagementScore, 100);
+
+        // Potential level
+        const potentialLevel: 'hot' | 'warm' | 'cold' = 
+            engagementScore >= 60 ? 'hot' : engagementScore >= 30 ? 'warm' : 'cold';
+
+        return {
+            userId,
+            totalMessages,
+            incomingMessages: incomingMsgs.length,
+            outgoingMessages: outgoingMsgs.length,
+            lastActiveAt: lastActiveAt?.toISOString() || null,
+            daysSinceActive: Math.round(daysSinceActive),
+            responseRate,
+            engagementScore,
+            sharedContactInfo: sharedPhone || sharedEmail,
+            sharedPhone,
+            sharedEmail,
+            extractedPhones: [...new Set(extractedPhones)],
+            extractedEmails: [...new Set(extractedEmails)],
+            isConversationStarter,
+            potentialLevel,
+            recommendation: potentialLevel === 'hot' 
+                ? 'Lead nóng — Nên tư vấn ngay, khả năng chốt đơn cao'
+                : potentialLevel === 'warm'
+                ? 'Lead ấm — Cần nurture thêm, gửi thông tin sản phẩm'
+                : 'Lead lạnh — Theo dõi, chưa có tín hiệu quan tâm rõ ràng',
+        };
+    }
+
+    /**
+     * Batch phân tích hành vi cho nhiều members
+     */
+    async batchAnalyzeMembers(workspaceId: string, userIds: string[]): Promise<MemberBehaviorAnalysis[]> {
+        const results: MemberBehaviorAnalysis[] = [];
+        for (const userId of userIds) {
+            try {
+                const analysis = await this.analyzeMemberBehavior(workspaceId, userId);
+                results.push(analysis);
+            } catch {
+                results.push({
+                    userId,
+                    totalMessages: 0,
+                    incomingMessages: 0,
+                    outgoingMessages: 0,
+                    lastActiveAt: null,
+                    daysSinceActive: 999,
+                    responseRate: 0,
+                    engagementScore: 0,
+                    sharedContactInfo: false,
+                    sharedPhone: false,
+                    sharedEmail: false,
+                    extractedPhones: [],
+                    extractedEmails: [],
+                    isConversationStarter: false,
+                    potentialLevel: 'cold',
+                    recommendation: 'Chưa có dữ liệu',
+                });
+            }
+        }
+        return results;
     }
 }
 
@@ -696,5 +1430,41 @@ export interface SyncJobStatus {
     currentThread: string;
 }
 
+// ── Auto Friend Job type ──
+export interface AutoFriendJobStatus {
+    status: 'running' | 'completed' | 'error';
+    startedAt: string;
+    completedAt?: string;
+    groupId: string;
+    totalMembers: number;
+    sent: number;
+    skipped: number;
+    failed: number;
+    alreadyFriends: number;
+    currentMember: string;
+    errors: string[];
+}
+
+// ── Behavior Analysis type ──
+export interface MemberBehaviorAnalysis {
+    userId: string;
+    totalMessages: number;
+    incomingMessages: number;
+    outgoingMessages: number;
+    lastActiveAt: string | null;
+    daysSinceActive: number;
+    responseRate: number;
+    engagementScore: number;
+    sharedContactInfo: boolean;
+    sharedPhone: boolean;
+    sharedEmail: boolean;
+    extractedPhones: string[];
+    extractedEmails: string[];
+    isConversationStarter: boolean;
+    potentialLevel: 'hot' | 'warm' | 'cold';
+    recommendation: string;
+}
+
 export const zaloService = new ZaloService();
+
 
