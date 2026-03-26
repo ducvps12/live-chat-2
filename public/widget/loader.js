@@ -443,6 +443,9 @@
             '.nchat-tip-sub{font-size:12px;color:#64748b;font-weight:400}',
 
             // ── Chat Window ──
+            '#nchat-window{position:fixed;' + winPos + 'width:370px;max-width:calc(100vw - 24px);height:520px;max-height:min(520px,calc(100vh - 120px));border-radius:24px;overflow:hidden;box-shadow:0 12px 60px rgba(0,0,0,0.15), 0 4px 20px rgba(0,0,0,0.05);z-index:2147483647;background:#fff;opacity:0;pointer-events:none;transition:all .3s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column}',
+            '#nchat-window.nchat-open{transform:' + (isSide ? 'translateY(-50%)' : 'translateY(0)') + ' scale(1);opacity:1;pointer-events:auto}',
+
             // ── Header (Premium Apple/Google Design) ──
             '#nchat-hdr{background:linear-gradient(135deg, ' + color + ', ' + color + 'D0);padding:20px 20px 24px;color:#fff;position:relative;flex-shrink:0;border-bottom-left-radius:24px;border-bottom-right-radius:24px;box-shadow:0 4px 16px ' + color + '30;z-index:10}',
             '#nchat-hdr-inner{display:flex;align-items:center;gap:14px;position:relative;z-index:1}',
