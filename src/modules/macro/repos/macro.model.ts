@@ -44,4 +44,4 @@ macroSchema.index({ workspaceId: 1, userId: 1 });
 macroSchema.index({ workspaceId: 1, channel: 1 });
 macroSchema.index({ shortcut: 1, workspaceId: 1 });
 
-export const MacroModel = mongoose.model<IMacro>('Macro', macroSchema);
+export const MacroModel = (mongoose.models.Macro || mongoose.model<IMacro>('Macro', macroSchema)) as mongoose.Model<IMacro>;

@@ -1,0 +1,30 @@
+[
+  {
+    "_id": "69c17ca27e7eccab39a0564a",
+    "workspaceId": "69bfd57cfd909f6469310a48",
+    "name": "Zalo",
+    "config": {
+      "primaryColor": "#0068ff",
+      "greeting": "Xin chào! Chúng tôi có thể giúp gì cho bạn?",
+      "placeholder": "Nhập tin nhắn...",
+      "position": "bottom-right",
+      "language": "vi",
+      "showBranding": false,
+      "offlineMessage": "Hiện tại không có agent trực tuyến.",
+      "preChatForm": {
+        "enabled": false,
+        "title": "",
+        "fields": []
+      },
+      "launcherStyle": "bubble"
+    },
+    "domainRules": {
+      "mode": "allowlist",
+      "domains": []
+    },
+    "isActive": true,
+    "createdAt": "2026-03-23T17:47:14.354Z",
+    "updatedAt": "2026-03-23T17:47:14.354Z",
+    "__v": 0
+  }
+]

@@ -1,64 +1,74 @@
-import { VisitorModel, IVisitor } from './visitor.model';
+import prisma from '../../../infra/prisma';
+import type { Visitor } from '@prisma/client';
 
 export const visitorRepo = {
     async findOrCreate(
         visitorId: string,
         widgetId: string,
         workspaceId: string,
-        info: { name?: string; email?: string; phone?: string; [key: string]: any }
-    ): Promise<{ visitor: IVisitor; isNew: boolean }> {
-        let visitor = await VisitorModel.findOne({ visitorId, widgetId }).exec();
+        info: { name?: string; email?: string; phone?: string; avatar?: string; attributes?: Record<string, any>; [key: string]: any }
+    ): Promise<{ visitor: Visitor; isNew: boolean }> {
+        let visitor = await prisma.visitor.findUnique({
+            where: { visitorId_widgetId: { visitorId, widgetId } },
+        });
 
         if (visitor) {
-            // Update lastSeenAt + merge info
             const updates: any = { lastSeenAt: new Date() };
             if (info.name) updates.name = info.name;
             if (info.email) updates.email = info.email;
             if (info.phone) updates.phone = info.phone;
-            if (info.avatar) updates['attributes.avatar'] = info.avatar;
-            if (info.attributes) {
-                for (const [key, val] of Object.entries(info.attributes)) {
-                    updates[`attributes.${key}`] = val;
-                }
-            }
 
-            visitor = await VisitorModel.findByIdAndUpdate(visitor._id, { $set: updates }, { new: true }).exec();
-            return { visitor: visitor!, isNew: false };
+            // Merge attributes
+            const attrs = (visitor.attributes as Record<string, any>) || {};
+            if (info.avatar) attrs.avatar = info.avatar;
+            if (info.attributes) Object.assign(attrs, info.attributes);
+            updates.attributes = attrs;
+
+            visitor = await prisma.visitor.update({
+                where: { id: visitor.id },
+                data: updates,
+            });
+            return { visitor, isNew: false };
         }
 
         // Create new
-        visitor = await VisitorModel.create({
-            visitorId,
-            widgetId,
-            workspaceId,
-            name: info.name || '',
-            email: info.email || '',
-            phone: info.phone || '',
-            firstSeenAt: new Date(),
-            lastSeenAt: new Date(),
-            totalConversations: 0,
-            attributes: {},
+        visitor = await prisma.visitor.create({
+            data: {
+                visitorId,
+                widgetId,
+                workspaceId,
+                name: info.name || '',
+                email: info.email || '',
+                phone: info.phone || '',
+                firstSeenAt: new Date(),
+                lastSeenAt: new Date(),
+                totalConversations: 0,
+                attributes: {},
+            },
         });
         return { visitor, isNew: true };
     },
 
     async incrementConversations(visitorId: string, widgetId: string): Promise<void> {
-        await VisitorModel.findOneAndUpdate(
-            { visitorId, widgetId },
-            { $inc: { totalConversations: 1 }, lastSeenAt: new Date() }
-        ).exec();
+        await prisma.visitor.updateMany({
+            where: { visitorId, widgetId },
+            data: {
+                totalConversations: { increment: 1 },
+                lastSeenAt: new Date(),
+            },
+        });
     },
 
     async findByWorkspace(
         workspaceId: string,
         options?: { page?: number; limit?: number; search?: string }
-    ): Promise<{ items: IVisitor[]; total: number }> {
-        const filter: any = { workspaceId };
+    ): Promise<{ items: Visitor[]; total: number }> {
+        const where: any = { workspaceId };
         if (options?.search) {
-            filter.$or = [
-                { name: { $regex: options.search, $options: 'i' } },
-                { email: { $regex: options.search, $options: 'i' } },
-                { visitorId: { $regex: options.search, $options: 'i' } },
+            where.OR = [
+                { name: { contains: options.search } },
+                { email: { contains: options.search } },
+                { visitorId: { contains: options.search } },
             ];
         }
 
@@ -67,70 +77,68 @@ export const visitorRepo = {
         const skip = (page - 1) * limit;
 
         const [items, total] = await Promise.all([
-            VisitorModel.find(filter).sort({ lastSeenAt: -1 }).skip(skip).limit(limit).exec(),
-            VisitorModel.countDocuments(filter).exec(),
+            prisma.visitor.findMany({
+                where,
+                orderBy: { lastSeenAt: 'desc' },
+                skip,
+                take: limit,
+            }),
+            prisma.visitor.count({ where }),
         ]);
         return { items, total };
     },
 
-    async findOne(visitorId: string, widgetId: string): Promise<IVisitor | null> {
-        return VisitorModel.findOne({ visitorId, widgetId }).exec();
+    async findOne(visitorId: string, widgetId: string): Promise<Visitor | null> {
+        return prisma.visitor.findUnique({ where: { visitorId_widgetId: { visitorId, widgetId } } });
     },
 
     async enrichProfile(
         visitorId: string,
         widgetId: string,
         data: { name?: string; email?: string; phone?: string; attributes?: Record<string, any> }
-    ): Promise<IVisitor | null> {
-        const updates: any = { lastSeenAt: new Date() };
+    ): Promise<Visitor | null> {
+        const visitor = await prisma.visitor.findUnique({
+            where: { visitorId_widgetId: { visitorId, widgetId } },
+        });
+        if (!visitor) return null;
 
-        // Update contact fields if provided
+        const updates: any = { lastSeenAt: new Date() };
         if (data.name) updates.name = data.name;
         if (data.email) updates.email = data.email;
         if (data.phone) updates.phone = data.phone;
 
-        // Merge attributes (dot-notation $set = deep merge, not replace)
         if (data.attributes) {
-            for (const [key, val] of Object.entries(data.attributes)) {
-                updates[`attributes.${key}`] = val;
-            }
+            const attrs = (visitor.attributes as Record<string, any>) || {};
+            Object.assign(attrs, data.attributes);
+            updates.attributes = attrs;
         }
 
-        return VisitorModel.findOneAndUpdate(
-            { visitorId, widgetId },
-            { $set: updates },
-            { new: true }
-        ).exec();
+        return prisma.visitor.update({ where: { id: visitor.id }, data: updates });
     },
 
-    async findOneByWorkspaceAndVisitorId(workspaceId: string, visitorId: string): Promise<IVisitor | null> {
-        return VisitorModel.findOne({ workspaceId, visitorId }).exec();
+    async findOneByWorkspaceAndVisitorId(workspaceId: string, visitorId: string): Promise<Visitor | null> {
+        return prisma.visitor.findFirst({ where: { workspaceId, visitorId } });
     },
 
     async updateByWorkspaceAndVisitorId(
         workspaceId: string,
         visitorId: string,
         data: { name?: string; email?: string; phone?: string; attributes?: Record<string, any> }
-    ): Promise<IVisitor | null> {
-        const updates: any = {};
+    ): Promise<Visitor | null> {
+        const visitor = await prisma.visitor.findFirst({ where: { workspaceId, visitorId } });
+        if (!visitor) return null;
+
+        const updates: any = { lastSeenAt: new Date() };
         if (data.name !== undefined) updates.name = data.name;
         if (data.email !== undefined) updates.email = data.email;
         if (data.phone !== undefined) updates.phone = data.phone;
 
         if (data.attributes) {
-            for (const [key, val] of Object.entries(data.attributes)) {
-                updates[`attributes.${key}`] = val;
-            }
+            const attrs = (visitor.attributes as Record<string, any>) || {};
+            Object.assign(attrs, data.attributes);
+            updates.attributes = attrs;
         }
 
-        if (Object.keys(updates).length > 0) {
-            updates.lastSeenAt = new Date();
-            return VisitorModel.findOneAndUpdate(
-                { workspaceId, visitorId },
-                { $set: updates },
-                { new: true }
-            ).exec();
-        }
-        return VisitorModel.findOne({ workspaceId, visitorId }).exec();
+        return prisma.visitor.update({ where: { id: visitor.id }, data: updates });
     },
 };

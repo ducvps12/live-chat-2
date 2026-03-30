@@ -107,4 +107,4 @@ const CampaignSchema = new Schema<ICampaign>(
 // Indexes
 CampaignSchema.index({ workspaceId: 1, status: 1, createdAt: -1 });
 
-export const CampaignModel = mongoose.model<ICampaign>('Campaign', CampaignSchema);
+export const CampaignModel = (mongoose.models.Campaign || mongoose.model<ICampaign>('Campaign', CampaignSchema)) as mongoose.Model<ICampaign>;

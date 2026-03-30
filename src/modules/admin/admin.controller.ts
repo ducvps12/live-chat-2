@@ -1,69 +1,49 @@
 import { Request, Response } from 'express';
 import asyncHandler from 'express-async-handler';
-import mongoose from 'mongoose';
+import prisma from '../../infra/prisma';
 import os from 'os';
 import axios from 'axios';
 
 const AI_API_URL = process.env.AI_API_URL || 'http://163.61.111.226:8318/v1';
 const AI_API_KEY = process.env.AI_API_KEY || 'friend-key-alpha';
 
-function getDb() {
-    const db = mongoose.connection.db;
-    if (!db) throw new Error('Database not connected');
-    return db;
-}
-
 export const adminController = {
-    /**
-     * Get full system overview — counts, health, server info
-     */
     overview: asyncHandler(async (_req: Request, res: Response) => {
-        const db = getDb();
-
-        // Parallel collection counts
         const [
             workspaces, users, conversations, messages,
             visitors, widgets, aiBots, leads,
-            campaigns, knowledge, macros, labels,
+            campaigns, knowledge, macros,
         ] = await Promise.all([
-            db.collection('workspaces').countDocuments(),
-            db.collection('users').countDocuments(),
-            db.collection('conversations').countDocuments(),
-            db.collection('messages').countDocuments(),
-            db.collection('visitors').countDocuments(),
-            db.collection('widgets').countDocuments(),
-            db.collection('aibots').countDocuments(),
-            db.collection('leads').countDocuments().catch(() => 0),
-            db.collection('campaigns').countDocuments().catch(() => 0),
-            db.collection('knowledgebases').countDocuments().catch(() => 0),
-            db.collection('macros').countDocuments().catch(() => 0),
-            db.collection('labels').countDocuments().catch(() => 0),
+            prisma.workspace.count(),
+            prisma.user.count(),
+            prisma.conversation.count(),
+            prisma.message.count(),
+            prisma.visitor.count(),
+            prisma.widget.count(),
+            prisma.aIBot.count(),
+            prisma.lead.count().catch(() => 0),
+            prisma.campaign.count().catch(() => 0),
+            prisma.knowledgeEntry.count().catch(() => 0),
+            prisma.macro.count().catch(() => 0),
         ]);
 
-        // Conversation stats
         const [openConvs, closedConvs, pendingConvs] = await Promise.all([
-            db.collection('conversations').countDocuments({ status: 'open' }),
-            db.collection('conversations').countDocuments({ status: 'closed' }),
-            db.collection('conversations').countDocuments({ status: 'pending' }),
+            prisma.conversation.count({ where: { status: 'open' } }),
+            prisma.conversation.count({ where: { status: 'closed' } }),
+            prisma.conversation.count({ where: { status: 'pending' } }),
         ]);
 
-        // Active bots
-        const activeBots = await db.collection('aibots').countDocuments({ isActive: true });
+        const activeBots = await prisma.aIBot.count({ where: { isActive: true } });
 
-        // Recent activity — last 24h
         const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
         const [msgsToday, convsToday, visitorsToday] = await Promise.all([
-            db.collection('messages').countDocuments({ createdAt: { $gte: oneDayAgo } }),
-            db.collection('conversations').countDocuments({ createdAt: { $gte: oneDayAgo } }),
-            db.collection('visitors').countDocuments({ createdAt: { $gte: oneDayAgo } }),
+            prisma.message.count({ where: { createdAt: { gte: oneDayAgo } } }),
+            prisma.conversation.count({ where: { createdAt: { gte: oneDayAgo } } }),
+            prisma.visitor.count({ where: { createdAt: { gte: oneDayAgo } } }),
         ]);
 
-        // Server info
         const uptime = process.uptime();
         const memUsage = process.memoryUsage();
-
-        // MongoDB info
-        const dbStats = await db.stats();
 
         res.json({
             success: true,
@@ -71,23 +51,13 @@ export const adminController = {
                 collections: {
                     workspaces, users, conversations, messages,
                     visitors, widgets, aiBots, leads,
-                    campaigns, knowledge, macros, labels,
+                    campaigns, knowledge, macros, labels: 0,
                 },
                 conversationStats: {
-                    open: openConvs,
-                    closed: closedConvs,
-                    pending: pendingConvs,
-                    total: conversations,
+                    open: openConvs, closed: closedConvs, pending: pendingConvs, total: conversations,
                 },
-                botStats: {
-                    total: aiBots,
-                    active: activeBots,
-                },
-                recentActivity: {
-                    messagesToday: msgsToday,
-                    conversationsToday: convsToday,
-                    visitorsToday,
-                },
+                botStats: { total: aiBots, active: activeBots },
+                recentActivity: { messagesToday: msgsToday, conversationsToday: convsToday, visitorsToday },
                 server: {
                     uptime: Math.floor(uptime),
                     uptimeFormatted: formatUptime(uptime),
@@ -100,79 +70,54 @@ export const adminController = {
                     totalRAM: Math.round(os.totalmem() / 1024 / 1024 / 1024),
                     freeRAM: Math.round(os.freemem() / 1024 / 1024 / 1024),
                 },
-                database: {
-                    name: db.databaseName,
-                    collections: dbStats.collections,
-                    dataSize: Math.round((dbStats.dataSize || 0) / 1024 / 1024),
-                    storageSize: Math.round((dbStats.storageSize || 0) / 1024 / 1024),
-                    indexes: dbStats.indexes,
-                },
-                ai: {
-                    apiUrl: AI_API_URL,
-                    model: process.env.AI_MODEL || 'gpt-5',
-                },
+                database: { name: 'MySQL (Prisma)', collections: 0, dataSize: 0, storageSize: 0, indexes: 0 },
+                ai: { apiUrl: AI_API_URL, model: process.env.AI_MODEL || 'gpt-5' },
             },
         });
     }),
 
-    /**
-     * List all workspaces with basic info
-     */
     listWorkspaces: asyncHandler(async (_req: Request, res: Response) => {
-        const db = getDb();
-        const workspaces = await db.collection('workspaces').find({}).sort({ createdAt: -1 }).toArray();
+        const workspaces = await prisma.workspace.findMany({
+            orderBy: { createdAt: 'desc' },
+            include: {
+                members: true,
+                _count: { select: { conversations: true, widgets: true } },
+            },
+        });
 
-        // Enrich with counts
-        const enriched = await Promise.all(workspaces.map(async (ws) => {
-            const [convCount, memberCount, widgetCount] = await Promise.all([
-                db.collection('conversations').countDocuments({ workspaceId: ws._id }),
-                db.collection('users').countDocuments({ 'workspaces.workspaceId': ws._id }),
-                db.collection('widgets').countDocuments({ workspaceId: ws._id }),
-            ]);
-            return { ...ws, _convCount: convCount, _memberCount: memberCount, _widgetCount: widgetCount };
+        const enriched = workspaces.map(ws => ({
+            ...ws,
+            _convCount: (ws as any)._count.conversations,
+            _memberCount: ws.members.length,
+            _widgetCount: (ws as any)._count.widgets,
         }));
 
         res.json({ success: true, data: enriched });
     }),
 
-    /**
-     * List all users
-     */
     listUsers: asyncHandler(async (_req: Request, res: Response) => {
-        const db = getDb();
-        const users = await db.collection('users')
-            .find({}, { projection: { password: 0 } })
-            .sort({ createdAt: -1 })
-            .toArray();
+        const users = await prisma.user.findMany({
+            orderBy: { createdAt: 'desc' },
+            omit: { passwordHash: true },
+        });
         res.json({ success: true, data: users });
     }),
 
-    /**
-     * List all bots
-     */
     listBots: asyncHandler(async (_req: Request, res: Response) => {
-        const db = getDb();
-        const bots = await db.collection('aibots').find({}).sort({ createdAt: -1 }).toArray();
+        const bots = await prisma.aIBot.findMany({ orderBy: { createdAt: 'desc' } });
         res.json({ success: true, data: bots });
     }),
 
-    /**
-     * Toggle bot active status
-     */
     toggleBot: asyncHandler(async (req: Request, res: Response) => {
-        const db = getDb();
         const { botId } = req.params;
         const { isActive } = req.body;
-        await db.collection('aibots').updateOne(
-            { _id: new mongoose.Types.ObjectId(botId as string) },
-            { $set: { isActive, isDraft: !isActive, updatedAt: new Date() } }
-        );
+        await prisma.aIBot.update({
+            where: { id: botId as string },
+            data: { isActive, isDraft: !isActive },
+        });
         res.json({ success: true, message: isActive ? 'Bot activated' : 'Bot deactivated' });
     }),
 
-    /**
-     * Check AI API health
-     */
     aiHealth: asyncHandler(async (_req: Request, res: Response) => {
         try {
             const start = Date.now();
@@ -185,8 +130,7 @@ export const adminController = {
             res.json({
                 success: true,
                 data: {
-                    status: 'online',
-                    latency,
+                    status: 'online', latency,
                     models: models.map((m: any) => ({ id: m.id, owned_by: m.owned_by })),
                     modelCount: models.length,
                 },
@@ -195,41 +139,41 @@ export const adminController = {
             res.json({
                 success: true,
                 data: {
-                    status: 'offline',
-                    error: err?.response?.status || err.message,
-                    latency: -1,
-                    models: [],
-                    modelCount: 0,
+                    status: 'offline', error: err?.response?.status || err.message,
+                    latency: -1, models: [], modelCount: 0,
                 },
             });
         }
     }),
 
-    /**
-     * Get recent messages (last 50 across all conversations)
-     */
     recentMessages: asyncHandler(async (_req: Request, res: Response) => {
-        const db = getDb();
-        const msgs = await db.collection('messages')
-            .find({})
-            .sort({ createdAt: -1 })
-            .limit(50)
-            .toArray();
+        const msgs = await prisma.message.findMany({
+            orderBy: { createdAt: 'desc' },
+            take: 50,
+        });
         res.json({ success: true, data: msgs });
     }),
 
-    /**
-     * Get all collections and their counts
-     */
     collections: asyncHandler(async (_req: Request, res: Response) => {
-        const db = getDb();
-        const colls = await db.listCollections().toArray();
-        const counts = await Promise.all(
-            colls.map(async (c) => ({
-                name: c.name,
-                count: await db.collection(c.name).countDocuments(),
-            }))
-        );
+        // List all Prisma model counts
+        const counts = await Promise.all([
+            prisma.user.count().then(c => ({ name: 'User', count: c })),
+            prisma.workspace.count().then(c => ({ name: 'Workspace', count: c })),
+            prisma.conversation.count().then(c => ({ name: 'Conversation', count: c })),
+            prisma.message.count().then(c => ({ name: 'Message', count: c })),
+            prisma.visitor.count().then(c => ({ name: 'Visitor', count: c })),
+            prisma.widget.count().then(c => ({ name: 'Widget', count: c })),
+            prisma.aIBot.count().then(c => ({ name: 'AIBot', count: c })),
+            prisma.lead.count().then(c => ({ name: 'Lead', count: c })),
+            prisma.campaign.count().then(c => ({ name: 'Campaign', count: c })),
+            prisma.knowledgeEntry.count().then(c => ({ name: 'KnowledgeEntry', count: c })),
+            prisma.macro.count().then(c => ({ name: 'Macro', count: c })),
+            prisma.order.count().then(c => ({ name: 'Order', count: c })),
+            prisma.product.count().then(c => ({ name: 'Product', count: c })),
+            prisma.zaloAccount.count().then(c => ({ name: 'ZaloAccount', count: c })),
+            prisma.zaloContact.count().then(c => ({ name: 'ZaloContact', count: c })),
+            prisma.zaloMessage.count().then(c => ({ name: 'ZaloMessage', count: c })),
+        ]);
         counts.sort((a, b) => b.count - a.count);
         res.json({ success: true, data: counts });
     }),

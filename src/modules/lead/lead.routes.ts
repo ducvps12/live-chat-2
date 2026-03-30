@@ -12,6 +12,11 @@ router.post('/', requireAuth, scopeCheck, leadController.create);
 router.post('/convert', requireAuth, scopeCheck, leadController.convertFromContact);
 router.post('/convert-group', requireAuth, scopeCheck, leadController.bulkConvertFromGroup);
 
+// ── AI Analysis Routes ──
+router.post('/ai-analyze/:conversationId', requireAuth, scopeCheck, leadController.aiAnalyze);
+router.post('/ai-analyze-bulk', requireAuth, scopeCheck, leadController.aiAnalyzeBulk);
+router.get('/ai-analysis/:conversationId', requireAuth, scopeCheck, leadController.getAIAnalysis);
+
 router.get('/:leadId', requireAuth, scopeCheck, leadController.getById);
 router.patch('/:leadId', requireAuth, scopeCheck, leadController.update);
 router.patch('/:leadId/stage', requireAuth, scopeCheck, leadController.updateStage);

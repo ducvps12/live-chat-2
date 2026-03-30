@@ -1,50 +1,80 @@
-import { AIBotModel, IAIBot } from './chatbot.model';
+import prisma from '../../../infra/prisma';
+import type { AIBot } from '@prisma/client';
 
 export const chatbotRepo = {
     async findByWorkspace(workspaceId: string) {
-        return AIBotModel.find({ workspaceId })
-            .sort({ createdAt: -1 })
-            .lean();
+        return prisma.aIBot.findMany({ where: { workspaceId }, orderBy: { createdAt: 'desc' } });
     },
 
     async findById(id: string) {
-        return AIBotModel.findById(id).lean();
+        return prisma.aIBot.findUnique({ where: { id } });
     },
 
     async findActive(workspaceId: string, channel?: string) {
-        const query: any = { workspaceId, isActive: true };
-        if (channel) {
-            query[`channels.${channel}.enabled`] = true;
-        }
-        return AIBotModel.find(query).sort({ createdAt: -1 }).lean();
+        const bots = await prisma.aIBot.findMany({
+            where: { workspaceId, isActive: true },
+            orderBy: { createdAt: 'desc' },
+        });
+
+        if (!channel) return bots;
+
+        // Filter by channel in JSON
+        return bots.filter(bot => {
+            const channels = bot.channels as any;
+            return channels?.[channel]?.enabled === true;
+        });
     },
 
-    async create(data: Partial<IAIBot>) {
-        const bot = new AIBotModel(data);
-        return bot.save();
+    async create(data: {
+        workspaceId: string;
+        name?: string;
+        avatarUrl?: string;
+        brandName?: string;
+        brandDescription?: string;
+        aiModel?: string;
+        mainTask?: string;
+        conversationStyle?: string;
+        messageLength?: string;
+        customGreeting?: string;
+        welcomeMessage?: string;
+        channels?: any;
+        agentCondition?: string;
+        scenarios?: any[];
+        quickReplies?: any[];
+        followUp?: any;
+        isActive?: boolean;
+        isDraft?: boolean;
+    }) {
+        return prisma.aIBot.create({ data: data as any });
     },
 
-    async update(id: string, data: Partial<IAIBot>) {
-        return AIBotModel.findByIdAndUpdate(id, { $set: data }, { new: true }).lean();
+    async update(id: string, data: Partial<Omit<AIBot, 'id' | 'createdAt' | 'updatedAt'>>) {
+        return prisma.aIBot.update({ where: { id }, data: data as any });
     },
 
     async remove(id: string) {
-        return AIBotModel.findByIdAndDelete(id);
+        return prisma.aIBot.delete({ where: { id } });
     },
 
     async toggleActive(id: string, isActive: boolean) {
-        return AIBotModel.findByIdAndUpdate(id, { $set: { isActive, isDraft: false } }, { new: true }).lean();
+        return prisma.aIBot.update({
+            where: { id },
+            data: { isActive, isDraft: false },
+        });
     },
 
     async incrementStats(id: string, field: 'totalConversations' | 'totalReplies' | 'leadsCollected', amount = 1) {
-        return AIBotModel.findByIdAndUpdate(id, { $inc: { [`stats.${field}`]: amount } }, { new: true });
+        const bot = await prisma.aIBot.findUnique({ where: { id }, select: { stats: true } });
+        const stats = (bot?.stats as any) || {};
+        stats[field] = (stats[field] || 0) + amount;
+        return prisma.aIBot.update({ where: { id }, data: { stats } });
     },
 
     async count(workspaceId: string) {
-        return AIBotModel.countDocuments({ workspaceId });
+        return prisma.aIBot.count({ where: { workspaceId } });
     },
 
     async countActive(workspaceId: string) {
-        return AIBotModel.countDocuments({ workspaceId, isActive: true });
+        return prisma.aIBot.count({ where: { workspaceId, isActive: true } });
     },
 };

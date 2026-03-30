@@ -1,0 +1,16 @@
+[
+  {
+    "_id": "69c24da5a90f7171759d9cb4",
+    "workspaceId": "69bfd57cfd909f6469310a48",
+    "planId": "pro",
+    "status": "active",
+    "currentPeriodStart": "2026-03-24T09:23:58.405Z",
+    "currentPeriodEnd": "2026-04-23T09:23:58.405Z",
+    "trialEndsAt": "2026-04-23T08:39:01.560Z",
+    "billingCycle": "monthly",
+    "createdAt": "2026-03-24T08:39:01.562Z",
+    "updatedAt": "2026-03-24T09:23:58.405Z",
+    "__v": 0,
+    "cancelledAt": null
+  }
+]

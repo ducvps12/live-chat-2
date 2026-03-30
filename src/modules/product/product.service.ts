@@ -1,28 +1,26 @@
-import { ProductModel, IProduct } from './repos/product.model';
-import mongoose from 'mongoose';
+import prisma from '../../infra/prisma';
+import type { Product } from '@prisma/client';
 import axios from 'axios';
 
 class ProductService {
-    async create(workspaceId: string, userId: string, data: Partial<IProduct>) {
-        return ProductModel.create({
-            ...data,
-            workspaceId: new mongoose.Types.ObjectId(workspaceId),
-            createdBy: new mongoose.Types.ObjectId(userId),
+    async create(workspaceId: string, userId: string, data: Partial<Omit<Product, 'id' | 'createdAt' | 'updatedAt'>>) {
+        return prisma.product.create({
+            data: { ...data, workspaceId, createdById: userId, price: (data as any).price || 0 } as any,
         });
     }
 
-    async update(productId: string, workspaceId: string, data: Partial<IProduct>) {
-        const product = await ProductModel.findById(productId);
+    async update(productId: string, workspaceId: string, data: Partial<Omit<Product, 'id' | 'createdAt' | 'updatedAt'>>) {
+        const product = await prisma.product.findUnique({ where: { id: productId } });
         if (!product) throw new Error('Sản phẩm không tồn tại');
-        if (product.workspaceId.toString() !== workspaceId) throw new Error('Không có quyền');
-        return ProductModel.findByIdAndUpdate(productId, { $set: data }, { new: true });
+        if (product.workspaceId !== workspaceId) throw new Error('Không có quyền');
+        return prisma.product.update({ where: { id: productId }, data: data as any });
     }
 
     async delete(productId: string, workspaceId: string) {
-        const product = await ProductModel.findById(productId);
+        const product = await prisma.product.findUnique({ where: { id: productId } });
         if (!product) throw new Error('Sản phẩm không tồn tại');
-        if (product.workspaceId.toString() !== workspaceId) throw new Error('Không có quyền');
-        return ProductModel.findByIdAndDelete(productId);
+        if (product.workspaceId !== workspaceId) throw new Error('Không có quyền');
+        return prisma.product.delete({ where: { id: productId } });
     }
 
     async list(workspaceId: string, options?: {
@@ -32,40 +30,34 @@ class ProductService {
         limit?: number;
         activeOnly?: boolean;
     }) {
-        const filter: any = { workspaceId: new mongoose.Types.ObjectId(workspaceId) };
-        if (options?.category) filter.category = options.category;
-        if (options?.activeOnly) filter.isActive = true;
+        const where: any = { workspaceId };
+        if (options?.category) where.category = options.category;
+        if (options?.activeOnly) where.isActive = true;
         if (options?.search) {
-            filter.$or = [
-                { name: { $regex: options.search, $options: 'i' } },
-                { sku: { $regex: options.search, $options: 'i' } },
+            where.OR = [
+                { name: { contains: options.search } },
+                { sku: { contains: options.search } },
             ];
         }
 
         const page = options?.page || 1;
         const limit = options?.limit || 50;
         const [products, total] = await Promise.all([
-            ProductModel.find(filter).skip((page - 1) * limit).limit(limit).sort({ createdAt: -1 }).lean(),
-            ProductModel.countDocuments(filter),
+            prisma.product.findMany({ where, skip: (page - 1) * limit, take: limit, orderBy: { createdAt: 'desc' } }),
+            prisma.product.count({ where }),
         ]);
         return { products, total, page, totalPages: Math.ceil(total / limit) };
     }
 
     async getById(productId: string, workspaceId: string) {
-        const product = await ProductModel.findById(productId).lean();
+        const product = await prisma.product.findUnique({ where: { id: productId } });
         if (!product) throw new Error('Sản phẩm không tồn tại');
-        if (product.workspaceId.toString() !== workspaceId) throw new Error('Không có quyền');
+        if (product.workspaceId !== workspaceId) throw new Error('Không có quyền');
         return product;
     }
 
-    /**
-     * Sync products from a public Google Sheet
-     * Expected format: Sheet URL → CSV export → parse rows
-     */
     async syncFromGoogleSheet(workspaceId: string, userId: string, sheetUrl: string): Promise<{ imported: number; errors: string[] }> {
         let csvUrl = sheetUrl;
-
-        // Convert Google Sheets URL to CSV export URL
         const sheetMatch = sheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
         if (sheetMatch) {
             csvUrl = `https://docs.google.com/spreadsheets/d/${sheetMatch[1]}/export?format=csv`;
@@ -105,28 +97,30 @@ class ProductService {
                     }
 
                     const productData: any = {
-                        workspaceId: new mongoose.Types.ObjectId(workspaceId),
-                        createdBy: new mongoose.Types.ObjectId(userId),
+                        workspaceId,
+                        createdById: userId,
                         name,
                         price,
                         source: 'google_sheet',
                         sourceUrl: sheetUrl,
                         sku: skuIdx >= 0 ? (row[skuIdx] || '') : '',
-                        description: descIdx >= 0 ? (row[descIdx] || '') : '',
+                        description: descIdx >= 0 ? (row[descIdx] || '') : null,
                         category: categoryIdx >= 0 ? (row[categoryIdx] || '') : '',
                         stock: stockIdx >= 0 ? parseInt(row[stockIdx] || '0', 10) : 0,
                         images: imageIdx >= 0 && row[imageIdx] ? [row[imageIdx]] : [],
                     };
 
-                    // Upsert by SKU if available
                     if (productData.sku) {
-                        await ProductModel.findOneAndUpdate(
-                            { workspaceId: productData.workspaceId, sku: productData.sku },
-                            { $set: productData },
-                            { upsert: true }
-                        );
+                        const existing = await prisma.product.findFirst({
+                            where: { workspaceId, sku: productData.sku },
+                        });
+                        if (existing) {
+                            await prisma.product.update({ where: { id: existing.id }, data: productData });
+                        } else {
+                            await prisma.product.create({ data: productData });
+                        }
                     } else {
-                        await ProductModel.create(productData);
+                        await prisma.product.create({ data: productData });
                     }
                     imported++;
                 } catch (err: any) {
@@ -142,11 +136,12 @@ class ProductService {
     }
 
     async getCategories(workspaceId: string): Promise<string[]> {
-        const categories = await ProductModel.distinct('category', {
-            workspaceId: new mongoose.Types.ObjectId(workspaceId),
-            category: { $ne: '' },
+        const results = await prisma.product.findMany({
+            where: { workspaceId, category: { not: '' } },
+            select: { category: true },
+            distinct: ['category'],
         });
-        return categories;
+        return results.map(r => r.category);
     }
 }
 

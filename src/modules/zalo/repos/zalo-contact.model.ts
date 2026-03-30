@@ -53,4 +53,4 @@ ZaloContactSchema.index(
     { sparse: true }
 );
 
-export const ZaloContactModel = mongoose.model<IZaloContact>('ZaloContact', ZaloContactSchema);
+export const ZaloContactModel = (mongoose.models.ZaloContact || mongoose.model<IZaloContact>('ZaloContact', ZaloContactSchema)) as mongoose.Model<IZaloContact>;

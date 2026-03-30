@@ -61,4 +61,4 @@ leadSchema.index({ workspaceId: 1, createdAt: -1 });
 leadSchema.index({ workspaceId: 1, zaloUserId: 1 });
 leadSchema.index({ workspaceId: 1, tags: 1 });
 
-export const LeadModel = mongoose.model<ILead>('Lead', leadSchema);
+export const LeadModel = (mongoose.models.Lead || mongoose.model<ILead>('Lead', leadSchema)) as mongoose.Model<ILead>;

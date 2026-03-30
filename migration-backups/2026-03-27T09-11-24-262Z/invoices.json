@@ -1,0 +1,47 @@
+[
+  {
+    "_id": "69c2582c6b0e628b953616c3",
+    "workspaceId": "69bfd57cfd909f6469310a48",
+    "invoiceNumber": "INV-1774344236330-B55H",
+    "planId": "starter",
+    "amount": 199000,
+    "currency": "VND",
+    "status": "pending",
+    "billingCycle": "monthly",
+    "description": "Gói Khởi đầu — Tháng",
+    "createdAt": "2026-03-24T09:23:56.331Z",
+    "updatedAt": "2026-03-24T09:23:56.331Z",
+    "__v": 0
+  },
+  {
+    "_id": "69c2582e6b0e628b953616c9",
+    "workspaceId": "69bfd57cfd909f6469310a48",
+    "invoiceNumber": "INV-1774344238406-CEMC",
+    "planId": "pro",
+    "amount": 499000,
+    "currency": "VND",
+    "status": "paid",
+    "billingCycle": "monthly",
+    "description": "Gói Chuyên nghiệp — Tháng",
+    "createdAt": "2026-03-24T09:23:58.406Z",
+    "updatedAt": "2026-03-24T09:24:16.081Z",
+    "__v": 0,
+    "paidAt": "2026-03-24T09:24:16.081Z",
+    "paymentMethod": "demo",
+    "paymentReference": "PAY-1774344256081"
+  },
+  {
+    "_id": "69c28e67a61f1b36f789623e",
+    "workspaceId": "69bfd57cfd909f6469310a48",
+    "invoiceNumber": "INV-1774358119514MSR5",
+    "planId": "starter",
+    "amount": 199000,
+    "currency": "VND",
+    "status": "pending",
+    "billingCycle": "monthly",
+    "description": "Gói Khởi đầu — Tháng",
+    "createdAt": "2026-03-24T13:15:19.515Z",
+    "updatedAt": "2026-03-24T13:15:19.515Z",
+    "__v": 0
+  }
+]

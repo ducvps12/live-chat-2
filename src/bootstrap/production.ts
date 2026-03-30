@@ -56,7 +56,7 @@ const bootstrap = async () => {
     app.use('/api', rootRouter);
 
     // 7. Let Next.js handle EVERYTHING else (pages, _next statics, etc.)
-    app.all('*', (req: any, res: any) => {
+    app.all('{*path}', (req: any, res: any) => {
         return nextHandler(req, res);
     });
 

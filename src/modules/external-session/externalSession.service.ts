@@ -30,16 +30,16 @@ export const externalSessionService = {
 
         // Launch browser
         try {
-            await browserPool.create(session._id.toString());
+            await browserPool.create(session.id.toString());
         } catch (err: any) {
             // Cleanup DB if browser launch fails
-            await externalSessionRepo.updateStatus(session._id.toString(), 'disconnected');
+            await externalSessionRepo.updateStatus(session.id.toString(), 'disconnected');
             throw new AppError('Không thể khởi chạy trình duyệt: ' + err.message, 500, 'BROWSER_LAUNCH_FAILED');
         }
 
         // Audit log
         await externalSessionRepo.logAudit({
-            sessionId: session._id.toString(),
+            sessionId: session.id.toString(),
             workspaceId,
             userId,
             action: 'session_created',
@@ -59,7 +59,7 @@ export const externalSessionService = {
             const doc = s.toObject();
             return {
                 ...doc,
-                browserAlive: browserPool.isAlive(s._id.toString()),
+                browserAlive: browserPool.isAlive(s.id.toString()),
             };
         });
     },

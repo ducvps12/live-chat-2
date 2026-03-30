@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { leadService } from './lead.service';
+import { leadAIService } from './lead-ai.service';
 import asyncHandler from 'express-async-handler';
 
 export const leadController = {
@@ -87,5 +88,52 @@ export const leadController = {
             data: result,
             message: `Đã tạo ${result.created} lead mới, bỏ qua ${result.skipped} đã tồn tại`,
         });
+    }),
+
+    // ── AI Analysis Endpoints ──
+
+    aiAnalyze: asyncHandler(async (req: Request, res: Response) => {
+        const workspaceId = req.params.workspaceId as string;
+        const conversationId = req.params.conversationId as string;
+
+        if (!conversationId) {
+            res.status(400).json({ success: false, message: 'Cần conversationId' });
+            return;
+        }
+
+        const result = await leadAIService.analyzeConversation(workspaceId, conversationId, {
+            autoCreateLead: true,
+            forceReanalyze: req.body?.forceReanalyze || false,
+        });
+
+        res.status(200).json({
+            success: true,
+            data: result,
+            message: result.analysis
+                ? `✅ Phân tích thành công! ${result.analysis.intent ? `Ý định: ${result.analysis.intent}` : ''} ${result.analysis.score !== undefined ? `Score: ${result.analysis.score}/100` : ''}`
+                : 'Không đủ tin nhắn để phân tích',
+        });
+    }),
+
+    aiAnalyzeBulk: asyncHandler(async (req: Request, res: Response) => {
+        const workspaceId = req.params.workspaceId as string;
+        const { limit, forceReanalyze } = req.body || {};
+
+        const result = await leadAIService.analyzeBulk(workspaceId, {
+            limit: limit || 30,
+            forceReanalyze: forceReanalyze || false,
+        });
+
+        res.status(200).json({
+            success: true,
+            data: result,
+            message: `Phân tích ${result.analyzed}/${result.total} cuộc hội thoại, bỏ qua ${result.skipped}, lỗi ${result.failed}`,
+        });
+    }),
+
+    getAIAnalysis: asyncHandler(async (req: Request, res: Response) => {
+        const conversationId = req.params.conversationId as string;
+        const analysis = await leadAIService.getAnalysis(conversationId);
+        res.status(200).json({ success: true, data: analysis });
     }),
 };

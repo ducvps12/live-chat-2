@@ -1,42 +1,53 @@
-import { OfflineMessageModel, IOfflineMessage } from './offlineMessage.model';
+import prisma from '../../../infra/prisma';
+import type { OfflineMessage } from '@prisma/client';
 
 export const offlineMessageRepo = {
-    async create(data: Partial<IOfflineMessage>): Promise<IOfflineMessage> {
-        return OfflineMessageModel.create(data);
+    async create(data: {
+        widgetId: string;
+        workspaceId: string;
+        visitorId: string;
+        name: string;
+        email: string;
+        message: string;
+        status?: string;
+        metadata?: any;
+    }): Promise<OfflineMessage> {
+        return prisma.offlineMessage.create({ data: data as any });
     },
 
     async findByWorkspace(
         workspaceId: string,
         options?: { status?: string; page?: number; limit?: number }
-    ): Promise<{ items: IOfflineMessage[]; total: number }> {
-        const filter: any = { workspaceId };
-        if (options?.status) filter.status = options.status;
+    ): Promise<{ items: OfflineMessage[]; total: number }> {
+        const where: any = { workspaceId };
+        if (options?.status) where.status = options.status;
 
         const page = options?.page || 1;
         const limit = options?.limit || 20;
         const skip = (page - 1) * limit;
 
         const [items, total] = await Promise.all([
-            OfflineMessageModel.find(filter)
-                .sort({ createdAt: -1 })
-                .skip(skip)
-                .limit(limit)
-                .exec(),
-            OfflineMessageModel.countDocuments(filter).exec(),
+            prisma.offlineMessage.findMany({
+                where,
+                orderBy: { createdAt: 'desc' },
+                skip,
+                take: limit,
+            }),
+            prisma.offlineMessage.count({ where }),
         ]);
 
         return { items, total };
     },
 
-    async findById(id: string): Promise<IOfflineMessage | null> {
-        return OfflineMessageModel.findById(id).exec();
+    async findById(id: string): Promise<OfflineMessage | null> {
+        return prisma.offlineMessage.findUnique({ where: { id } });
     },
 
-    async updateStatus(id: string, status: string): Promise<IOfflineMessage | null> {
-        return OfflineMessageModel.findByIdAndUpdate(id, { status }, { new: true }).exec();
+    async updateStatus(id: string, status: string): Promise<OfflineMessage | null> {
+        return prisma.offlineMessage.update({ where: { id }, data: { status } });
     },
 
     async countPending(workspaceId: string): Promise<number> {
-        return OfflineMessageModel.countDocuments({ workspaceId, status: 'pending' }).exec();
+        return prisma.offlineMessage.count({ where: { workspaceId, status: 'pending' } });
     },
 };

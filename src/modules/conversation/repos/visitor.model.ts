@@ -37,4 +37,4 @@ visitorSchema.index({ workspaceId: 1, lastSeenAt: -1 });              // agent: 
 visitorSchema.index({ email: 1, workspaceId: 1 });                    // lookup by email
 visitorSchema.index({ createdAt: -1 });
 
-export const VisitorModel = mongoose.model<IVisitor>('Visitor', visitorSchema);
+export const VisitorModel = (mongoose.models.Visitor || mongoose.model<IVisitor>('Visitor', visitorSchema)) as mongoose.Model<IVisitor>;

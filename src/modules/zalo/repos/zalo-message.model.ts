@@ -56,4 +56,4 @@ ZaloMessageSchema.index({ workspaceId: 1, timestamp: -1 });
 // 5. Sender lookup: tìm tất cả tin nhắn của 1 user (customer history)
 ZaloMessageSchema.index({ workspaceId: 1, senderId: 1, timestamp: -1 });
 
-export const ZaloMessageModel = mongoose.model<IZaloMessage>('ZaloMessage', ZaloMessageSchema);
+export const ZaloMessageModel = (mongoose.models.ZaloMessage || mongoose.model<IZaloMessage>('ZaloMessage', ZaloMessageSchema)) as mongoose.Model<IZaloMessage>;

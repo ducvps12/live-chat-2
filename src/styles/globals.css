@@ -272,76 +272,192 @@ body {
 }
 
 /* ============================================
-   Sidebar Styles
+   Sidebar Styles — Dark Theme Premium
    ============================================ */
 
+/* Dark Sidebar Variables */
+:root {
+  --sidebar-bg: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+  --sidebar-surface: rgba(255, 255, 255, 0.04);
+  --sidebar-surface-hover: rgba(255, 255, 255, 0.08);
+  --sidebar-surface-active: rgba(99, 102, 241, 0.14);
+  --sidebar-border: rgba(255, 255, 255, 0.06);
+  --sidebar-text: #cbd5e1;
+  --sidebar-text-active: #ffffff;
+  --sidebar-text-muted: #64748b;
+  --sidebar-accent: #818cf8;
+  --sidebar-accent-glow: rgba(99, 102, 241, 0.35);
+}
+
+/* Section Labels */
+.sidebar-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--sidebar-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 16px 16px 6px;
+  line-height: 1;
+  user-select: none;
+}
+
+.sidebar-section-label.collapsed-label {
+  padding: 12px 0 6px;
+  text-align: center;
+  font-size: 8px;
+}
+
+/* Menu Items */
 .app-sidebar-menu .ant-menu-item {
   border-radius: 10px !important;
-  margin-bottom: 4px !important;
-  height: 44px !important;
-  line-height: 44px !important;
-  transition: all var(--transition-fast) !important;
+  margin-bottom: 2px !important;
+  height: 42px !important;
+  line-height: 42px !important;
+  transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1) !important;
   position: relative;
+  color: var(--sidebar-text) !important;
 }
 
 .app-sidebar-menu .ant-menu-item:hover {
-  background-color: var(--color-hover) !important;
+  background-color: var(--sidebar-surface-hover) !important;
+  color: var(--sidebar-text-active) !important;
 }
 
+.app-sidebar-menu .ant-menu-item:hover svg {
+  color: var(--sidebar-text-active) !important;
+}
+
+/* Active Menu Item */
 .app-sidebar-menu .ant-menu-item-selected {
-  background: var(--gradient-sidebar-active) !important;
-  color: var(--color-primary) !important;
+  background: var(--sidebar-surface-active) !important;
+  color: var(--sidebar-text-active) !important;
   font-weight: 600;
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.08);
+  box-shadow: inset 0 0 20px rgba(99, 102, 241, 0.06), 0 2px 12px rgba(99, 102, 241, 0.08);
 }
 
 .app-sidebar-menu .ant-menu-item-selected::before {
   content: '';
   position: absolute;
   left: 0;
-  top: 8px;
-  bottom: 8px;
+  top: 6px;
+  bottom: 6px;
   width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: var(--gradient-primary);
+  border-radius: 0 4px 4px 0;
+  background: linear-gradient(180deg, #818cf8 0%, #6366f1 100%);
+  box-shadow: 0 0 12px var(--sidebar-accent-glow), 0 0 4px var(--sidebar-accent-glow);
 }
 
 .app-sidebar-menu .ant-menu-item-selected a,
 .app-sidebar-menu .ant-menu-item-selected svg {
-  color: var(--color-primary) !important;
+  color: var(--sidebar-accent) !important;
 }
 
 .app-sidebar-menu .ant-menu-item a {
   color: inherit;
 }
 
-/* Sidebar interactive elements */
+.app-sidebar-menu .ant-menu-item svg {
+  color: var(--sidebar-text-muted) !important;
+  transition: color 200ms ease !important;
+}
+
+.app-sidebar-menu .ant-menu-item-selected svg {
+  color: var(--sidebar-accent) !important;
+}
+
+/* Override inline behavior of antd menu */
+.app-sidebar-menu.ant-menu-inline {
+  border-inline-end: none !important;
+}
+
+.app-sidebar-menu .ant-menu-item .ant-menu-title-content {
+  margin-inline-start: 8px !important;
+}
+
+/* ─── Sidebar Interactive Elements ─── */
+
+/* Workspace Switcher - Dark */
 .ws-switcher {
   transition: all var(--transition-fast) !important;
+  background: var(--sidebar-surface) !important;
+  border-color: var(--sidebar-border) !important;
 }
 
 .ws-switcher:hover {
-  background: var(--color-hover) !important;
-  border-color: var(--color-border-hover) !important;
+  background: var(--sidebar-surface-hover) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
 }
 
+/* User Profile - Dark */
 .user-profile-btn {
   transition: all var(--transition-fast) !important;
 }
 
 .user-profile-btn:hover {
-  background: var(--color-hover) !important;
+  background: var(--sidebar-surface-hover) !important;
 }
 
+/* Toggle Button - Dark */
 .sidebar-toggle-btn {
   transition: all var(--transition-fast) !important;
 }
 
 .sidebar-toggle-btn:hover {
-  background: var(--color-primary-50) !important;
-  border-color: var(--color-primary-light) !important;
-  color: var(--color-primary) !important;
+  background: #1e293b !important;
+  border-color: var(--sidebar-accent) !important;
+  color: var(--sidebar-accent) !important;
   transform: scale(1.1);
+  box-shadow: 0 0 12px var(--sidebar-accent-glow) !important;
+}
+
+/* Admin Button Glow on Dark */
+.admin-panel-btn {
+  transition: all 0.25s ease !important;
+}
+
+.admin-panel-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(79, 70, 229, 0.4), 0 0 30px rgba(124, 58, 237, 0.15) !important;
+}
+
+/* ─── Online Status Indicator ─── */
+@keyframes online-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(16, 185, 129, 0);
+  }
+}
+
+.online-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #10b981;
+  border: 2px solid #1e293b;
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  animation: online-pulse 2s ease-in-out infinite;
+}
+
+/* ─── Sidebar Scrollbar Dark ─── */
+.sidebar-nav-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar-nav-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-nav-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+}
+
+.sidebar-nav-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
 }
 
 /* ============================================
@@ -709,5 +825,208 @@ body {
 
   .hero-mockup-right {
     display: none !important;
+  }
+
+  /* ─── Mobile: Workspace Page ─── */
+  .workspace-page-main {
+    padding: 20px 16px 80px !important;
+  }
+
+  .workspace-page-header {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 12px !important;
+    margin-bottom: 24px !important;
+  }
+
+  .workspace-page-header h1 {
+    font-size: 20px !important;
+  }
+
+  .workspace-page-header .ws-create-btn {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+
+  /* ─── Mobile: Workspace Cards ─── */
+  .ws-card-row {
+    padding: 16px !important;
+    gap: 14px !important;
+  }
+
+  .ws-card-row .ws-card-actions {
+    opacity: 1 !important;
+  }
+
+  .ws-card-row .ws-card-meta {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+  }
+
+  /* ─── Mobile: Empty State ─── */
+  .empty-state {
+    padding: 40px 20px;
+  }
+
+  .empty-state-icon {
+    width: 64px;
+    height: 64px;
+  }
+
+  /* ─── Mobile: Modals ─── */
+  .ant-modal {
+    max-width: calc(100vw - 32px) !important;
+    margin: 16px auto !important;
+  }
+
+  .ant-modal-content {
+    border-radius: 16px !important;
+  }
+
+  .ant-modal .ant-modal-body {
+    padding: 24px 20px !important;
+  }
+
+  /* ─── Mobile: Cards ─── */
+  .card {
+    padding: 20px;
+    border-radius: 12px;
+  }
+
+  /* ─── Mobile: Auth Pages ─── */
+  .auth-page-container {
+    padding: 24px 16px !important;
+    min-height: calc(100vh - 60px) !important;
+  }
+
+  .auth-card {
+    padding: 28px 20px !important;
+    border-radius: 16px !important;
+    max-width: 100% !important;
+  }
+
+  .auth-card h1, .auth-card h2 {
+    font-size: 22px !important;
+  }
+
+  /* ─── Mobile: Admin Page ─── */
+  .admin-page-content {
+    padding: 16px !important;
+  }
+
+  .admin-stats-grid {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+
+  .admin-stat-card {
+    padding: 16px !important;
+  }
+
+  /* ─── Mobile: Profile Page ─── */
+  .profile-page-container {
+    padding: 20px 16px !important;
+    max-width: 100% !important;
+  }
+
+  /* ─── Mobile: General Inline Overrides ─── */
+  .app-main-content .ant-layout-content {
+    padding: 0 !important;
+  }
+
+  /* ─── Mobile: Bottom Navigation Enhancement ─── */
+  .mobile-bottom-nav {
+    height: 56px !important;
+    padding-bottom: env(safe-area-inset-bottom, 8px) !important;
+    box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.06);
+  }
+
+  .mobile-nav-item {
+    min-width: 48px !important;
+    padding: 4px 0 !important;
+  }
+
+  .mobile-nav-item span {
+    font-size: 9px !important;
+  }
+
+  /* ─── Mobile: Table Overrides ─── */
+  .ant-table-wrapper {
+    overflow-x: auto !important;
+  }
+
+  .ant-table {
+    min-width: 600px;
+  }
+
+  /* ─── Mobile: Form Items ─── */
+  .ant-form-item-label > label {
+    font-size: 13px !important;
+  }
+
+  .ant-input, .ant-select-selector {
+    height: 42px !important;
+    font-size: 14px !important;
+  }
+
+  /* ─── Mobile: Header Replace ─── */
+  .mobile-header-bar {
+    display: flex !important;
+  }
+
+  /* ─── Mobile: Notification Toasts ─── */
+  .ant-message {
+    top: 12px !important;
+  }
+
+  .ant-message .ant-message-notice-content {
+    padding: 8px 16px !important;
+    font-size: 13px !important;
+  }
+}
+
+/* ─── Extra Small Devices (< 400px) ─── */
+@media (max-width: 400px) {
+  .workspace-page-main {
+    padding: 16px 12px 80px !important;
+  }
+
+  .ws-card-row {
+    padding: 14px 12px !important;
+  }
+
+  .auth-card {
+    padding: 24px 16px !important;
+  }
+
+  .mobile-nav-item {
+    min-width: 40px !important;
+  }
+}
+
+/* ─── Mobile Header Bar (shown instead of sidebar header) ─── */
+.mobile-header-bar {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 56px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--color-border, #e2e8f0);
+  z-index: 200;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+}
+
+/* ─── Touch-friendly tap targets ─── */
+@media (pointer: coarse) {
+  button, a, .mobile-nav-item {
+    min-height: 44px;
+    min-width: 44px;
   }
 }

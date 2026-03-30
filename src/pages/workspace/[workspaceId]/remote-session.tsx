@@ -699,6 +699,14 @@ export default function ZaloPersonalPage() {
                 message.success('Đã thu hồi tin nhắn');
             } else {
                 message.error('Thu hồi thất bại: ' + (data.error || 'Lỗi'));
+                // Revert recalled state if undo failed
+                if (data.msgId) {
+                    setMessages(prev => prev.map(m => m._id === data.msgId && m.type === 'recalled' ? {
+                        ...m,
+                        type: (m as any)._originalType || 'text',
+                        content: (m as any)._originalContent || m.content,
+                    } : m));
+                }
             }
         });
         socket.on('zalo:messageRecalled', (data: { msgId: string; threadId: string }) => {
@@ -711,6 +719,17 @@ export default function ZaloPersonalPage() {
                 thumbUrl: undefined,
                 stickerUrl: undefined,
             } : m));
+        });
+        // ── Message delete handler ──
+        socket.on('zalo:deleteResult', (data: { success: boolean; error?: string; msgId?: string }) => {
+            if (data.success) {
+                message.success('Đã xóa tin nhắn');
+            } else {
+                message.error('Xóa thất bại: ' + (data.error || 'Lỗi'));
+            }
+        });
+        socket.on('zalo:messageDeleted', (data: { msgId: string; threadId: string }) => {
+            setMessages(prev => prev.filter(m => m._id !== data.msgId));
         });
 
         socket.on('zalo:zcaError', ({ sessionId: sid, error }: { sessionId: string; error: string }) => {
@@ -1151,24 +1170,91 @@ export default function ZaloPersonalPage() {
                 <title>Zalo Cá nhân | NemarkChat</title>
             </Head>
             <style>{`
+                :root {
+                    --zalo-bg-chat: #e8ecf3;
+                    --zalo-surface: #ffffff;
+                    --zalo-surface-soft: #f8fafc;
+                    --zalo-border: #e2e8f0;
+                    --zalo-text-primary: #0f172a;
+                    --zalo-text-secondary: #64748b;
+                    --zalo-accent: #6366f1;
+                    --zalo-accent-strong: #4f46e5;
+                    --zalo-agent-start: #5b6cff;
+                    --zalo-agent-end: #7788ff;
+                    --zalo-agent-text: #f8fbff;
+                    --zalo-customer-bg: #ffffff;
+                    --zalo-customer-text: #172033;
+                    --zalo-recalled-border: #94a3b8;
+                    --zalo-recalled-bg: rgba(148, 163, 184, 0.08);
+                    --zalo-danger: #ef4444;
+                    --zalo-warning: #f97316;
+                    --zalo-success: #16a34a;
+                    --zalo-radius-sm: 10px;
+                    --zalo-radius-md: 14px;
+                    --zalo-radius-lg: 18px;
+                    --zalo-radius-xl: 22px;
+                    --zalo-shadow-soft: 0 6px 18px rgba(15, 23, 42, 0.08);
+                    --zalo-shadow-float: 0 12px 34px rgba(15, 23, 42, 0.14);
+                    --zalo-motion-fast: 160ms cubic-bezier(.2,.8,.2,1);
+                    --zalo-motion-normal: 240ms cubic-bezier(.2,.8,.2,1);
+                }
                 @keyframes highlightPulse {
                     0% { background-color: rgba(99,102,241,0.15); }
                     50% { background-color: rgba(99,102,241,0.06); }
                     100% { background-color: rgba(99,102,241,0.15); }
                 }
+                @keyframes zaloMenuPop {
+                    0% { opacity: 0; transform: translateY(6px) scale(0.96); }
+                    100% { opacity: 1; transform: translateY(0) scale(1); }
+                }
+                @keyframes zaloSendPulse {
+                    0% { box-shadow: 0 0 0 0 rgba(79,70,229,0.28); }
+                    70% { box-shadow: 0 0 0 8px rgba(79,70,229,0); }
+                    100% { box-shadow: 0 0 0 0 rgba(79,70,229,0); }
+                }
                 .zalo-msg-row:hover .zalo-msg-actions {
                     opacity: 1 !important;
                     pointer-events: auto !important;
+                    transform: translateY(0) scale(1) !important;
+                }
+                .zalo-msg-actions {
+                    transform: translateY(6px) scale(0.96);
+                    transition: opacity var(--zalo-motion-fast), transform var(--zalo-motion-fast);
                 }
                 .zalo-msg-action-btn {
-                    width: 28px; height: 28px; border-radius: 50%; border: none;
-                    background: #f1f5f9; cursor: pointer; display: flex;
+                    width: 30px; height: 30px; border-radius: 999px; border: 1px solid transparent;
+                    background: var(--zalo-surface-soft); cursor: pointer; display: flex;
                     align-items: center; justify-content: center; font-size: 13px;
                     color: #475569;
-                    transition: all 0.15s ease;
+                    transition: all var(--zalo-motion-fast);
                 }
                 .zalo-msg-action-btn:hover {
-                    background: #e2e8f0; transform: scale(1.15);
+                    transform: translateY(-1px) scale(1.06);
+                    box-shadow: 0 5px 12px rgba(15,23,42,0.14);
+                }
+                .zalo-msg-action-btn.reply:hover { background: rgba(99,102,241,0.14); color: var(--zalo-accent-strong); border-color: rgba(99,102,241,0.22); }
+                .zalo-msg-action-btn.recall:hover { background: rgba(239,68,68,0.12); color: var(--zalo-danger); border-color: rgba(239,68,68,0.24); }
+                .zalo-msg-action-btn.delete:hover { background: rgba(249,115,22,0.12); color: var(--zalo-warning); border-color: rgba(249,115,22,0.24); }
+                .zalo-msg-action-btn.copy:hover { background: rgba(34,197,94,0.12); color: var(--zalo-success); border-color: rgba(34,197,94,0.24); }
+                .zalo-pretty-tooltip .ant-tooltip-inner {
+                    border-radius: 10px;
+                    background: #111827;
+                    font-size: 12px;
+                    padding: 6px 9px;
+                }
+                .zalo-send-btn:hover:not(:disabled) {
+                    transform: translateY(-1px) scale(1.04);
+                    box-shadow: 0 10px 20px rgba(79,70,229,0.35);
+                }
+                .zalo-send-btn:active:not(:disabled) {
+                    transform: translateY(0) scale(0.97);
+                }
+                .zalo-send-btn:not(:disabled) {
+                    animation: zaloSendPulse 2.2s ease-out infinite;
+                }
+                .zalo-context-menu {
+                    animation: zaloMenuPop var(--zalo-motion-normal);
+                    transform-origin: top left;
                 }
 
                 /* ═══ MOBILE RESPONSIVE ═══ */
@@ -2004,54 +2090,81 @@ export default function ZaloPersonalPage() {
                                                         className="zalo-msg-actions"
                                                         style={{
                                                             position: 'absolute',
-                                                            top: -6,
+                                                            top: -8,
                                                             ...(isAgent ? { right: 8 } : { left: 44 }),
                                                             display: 'flex',
-                                                            gap: 2,
-                                                            background: '#fff',
-                                                            borderRadius: 16,
-                                                            padding: '2px 4px',
-                                                            boxShadow: '0 1px 8px rgba(0,0,0,0.12)',
-                                                            border: '1px solid #e5e7eb',
+                                                            gap: 4,
+                                                            background: 'rgba(255,255,255,0.95)',
+                                                            backdropFilter: 'blur(10px)',
+                                                            borderRadius: 18,
+                                                            padding: '4px 6px',
+                                                            boxShadow: 'var(--zalo-shadow-soft)',
+                                                            border: '1px solid rgba(226,232,240,0.9)',
                                                             zIndex: 5,
                                                             opacity: 0,
                                                             pointerEvents: 'none' as const,
-                                                            transition: 'opacity 0.15s ease',
                                                         }}
                                                     >
-                                                        <button className="zalo-msg-action-btn" title="Trả lời" onClick={() => setReplyingTo(msg)}><Reply size={14} /></button>
-                                                        {isAgent && (
-                                                            <button className="zalo-msg-action-btn" title="Thu hồi" onClick={() => {
-                                                                if (!window.confirm('Thu hồi tin nhắn này cho tất cả mọi người?')) return;
-                                                                if (socketRef.current && selectedAccountId && selectedConvId) {
-                                                                    const conv = conversations.find(c => c._id === selectedConvId);
-                                                                    console.log('[Recall] Emitting zalo:undoMessage', { msgId: msg._id, cliMsgId: msg.cliMsgId });
-                                                                    socketRef.current.emit('zalo:undoMessage', {
-                                                                        sessionId: selectedAccountId,
-                                                                        msgId: msg._id,
-                                                                        cliMsgId: msg.cliMsgId || msg._id,
-                                                                        threadId: conv?.threadId || selectedConvId.replace('zca_', ''),
-                                                                        threadType: conv?.threadType || 'user',
-                                                                    });
-                                                                } else {
-                                                                    console.warn('[Recall] Missing socket/account/conv', { socket: !!socketRef.current, selectedAccountId, selectedConvId });
-                                                                }
-                                                                // Show "recalled" state instead of removing
-                                                                setMessages(prev => prev.map(m => m._id === msg._id ? {
-                                                                    ...m,
-                                                                    content: 'Tin nhắn đã được thu hồi',
-                                                                    type: 'recalled',
-                                                                    attachments: undefined,
-                                                                    attachmentUrl: undefined,
-                                                                    thumbUrl: undefined,
-                                                                    stickerUrl: undefined,
-                                                                } : m));
-                                                            }}><Undo2 size={14} /></button>
+                                                        <Tooltip title="Trả lời" overlayClassName="zalo-pretty-tooltip">
+                                                            <button className="zalo-msg-action-btn reply" title="Trả lời" onClick={() => setReplyingTo(msg)}><Reply size={14} /></button>
+                                                        </Tooltip>
+                                                        {isAgent && msg.type !== 'recalled' && (
+                                                            <Tooltip title="Thu hồi" overlayClassName="zalo-pretty-tooltip">
+                                                                <button className="zalo-msg-action-btn recall" title="Thu hồi" onClick={() => {
+                                                                    if (!window.confirm('Thu hồi tin nhắn này cho tất cả mọi người?')) return;
+                                                                    if (socketRef.current && selectedAccountId && selectedConvId) {
+                                                                        const conv = conversations.find(c => c._id === selectedConvId);
+                                                                        console.log('[Recall] Emitting zalo:undoMessage', { msgId: msg._id, cliMsgId: msg.cliMsgId });
+                                                                        socketRef.current.emit('zalo:undoMessage', {
+                                                                            sessionId: selectedAccountId,
+                                                                            msgId: msg._id,
+                                                                            cliMsgId: msg.cliMsgId || msg._id,
+                                                                            threadId: conv?.threadId || selectedConvId.replace('zca_', ''),
+                                                                            threadType: conv?.threadType || 'user',
+                                                                        });
+                                                                    }
+                                                                    // Show "recalled" state optimistically, store originals for revert
+                                                                    setMessages(prev => prev.map(m => m._id === msg._id ? {
+                                                                        ...m,
+                                                                        _originalContent: m.content,
+                                                                        _originalType: m.type,
+                                                                        content: 'Tin nhắn đã được thu hồi',
+                                                                        type: 'recalled',
+                                                                        attachments: undefined,
+                                                                        attachmentUrl: undefined,
+                                                                        thumbUrl: undefined,
+                                                                        stickerUrl: undefined,
+                                                                    } as any : m));
+                                                                }}><Undo2 size={14} /></button>
+                                                            </Tooltip>
                                                         )}
-                                                        <button className="zalo-msg-action-btn" title="Sao chép" onClick={() => {
-                                                            navigator.clipboard.writeText(msg.content);
-                                                            message.success('Đã sao chép!');
-                                                        }}><Copy size={14} /></button>
+                                                        {msg.type !== 'recalled' && (
+                                                            <Tooltip title="Xóa phía mình" overlayClassName="zalo-pretty-tooltip">
+                                                                <button className="zalo-msg-action-btn delete" title="Xóa phía mình" onClick={() => {
+                                                                    if (!window.confirm('Xóa tin nhắn này phía bạn?')) return;
+                                                                    if (socketRef.current && selectedAccountId && selectedConvId) {
+                                                                        const conv = conversations.find(c => c._id === selectedConvId);
+                                                                        socketRef.current.emit('zalo:deleteMessage', {
+                                                                            sessionId: selectedAccountId,
+                                                                            msgId: msg._id,
+                                                                            cliMsgId: msg.cliMsgId || msg._id,
+                                                                            uidFrom: msg.senderId || '',
+                                                                            threadId: conv?.threadId || selectedConvId.replace('zca_', ''),
+                                                                            threadType: conv?.threadType || 'user',
+                                                                            onlyMe: true,
+                                                                        });
+                                                                    }
+                                                                    // Optimistically remove from UI
+                                                                    setMessages(prev => prev.filter(m => m._id !== msg._id));
+                                                                }}><Trash2 size={14} /></button>
+                                                            </Tooltip>
+                                                        )}
+                                                        <Tooltip title="Sao chép" overlayClassName="zalo-pretty-tooltip">
+                                                            <button className="zalo-msg-action-btn copy" title="Sao chép" onClick={() => {
+                                                                navigator.clipboard.writeText(msg.content);
+                                                                message.success('Đã sao chép!');
+                                                            }}><Copy size={14} /></button>
+                                                        </Tooltip>
                                                     </div>
 
                                                     {/* Avatar for customer messages */}
@@ -2094,12 +2207,16 @@ export default function ZaloPersonalPage() {
                                                             ...(msg._id.startsWith('tmp_') ? { opacity: 0.6 } : {}),
                                                             ...(isSticker ? { background: 'transparent', padding: 4, boxShadow: 'none' } : {}),
                                                             ...(msg.type === 'recalled' ? {
-                                                                background: 'transparent',
-                                                                border: '1px dashed #ccc',
+                                                                background: 'var(--zalo-recalled-bg)',
+                                                                border: '1px dashed var(--zalo-recalled-border)',
                                                                 boxShadow: 'none',
                                                                 fontStyle: 'italic',
-                                                                color: '#999',
-                                                                padding: '6px 12px',
+                                                                color: '#64748b',
+                                                                padding: '8px 12px',
+                                                                opacity: 0.82,
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                gap: 8,
                                                             } : {}),
                                                             position: 'relative' as const,
                                                         }}
@@ -2108,6 +2225,8 @@ export default function ZaloPersonalPage() {
                                                             setContextMenu({ x: e.clientX, y: e.clientY, msg });
                                                         }}
                                                     >
+                                                        {msg.type === 'recalled' && <Undo2 size={13} color="#64748b" />}
+                                                        <div style={{ flex: 1, minWidth: 0 }}>
                                                         {/* Quote/Reply preview */}
                                                         {msg.quote && (() => {
                                                             // Find sender name from message history using quote.ownerId
@@ -2185,6 +2304,7 @@ export default function ZaloPersonalPage() {
                                                             )}
                                                         </div>
                                                     </div>
+                                                    </div>
                                                 </div>
                                                 </div>{/* END sender name wrapper */}
                                                 </div>
@@ -2198,28 +2318,31 @@ export default function ZaloPersonalPage() {
                             {/* Reply Preview Bar */}
                             {replyingTo && (
                                 <div style={{
-                                    padding: '8px 14px',
-                                    background: '#eef2ff',
-                                    borderTop: '1px solid #e0e7ff',
+                                    padding: '10px 14px',
+                                    background: 'linear-gradient(180deg, rgba(238,242,255,0.95) 0%, rgba(224,231,255,0.72) 100%)',
+                                    borderTop: '1px solid rgba(199,210,254,0.9)',
                                     display: 'flex',
                                     alignItems: 'center',
-                                    gap: 8,
+                                    gap: 10,
                                     fontSize: 12,
                                     color: '#4338ca',
+                                    transition: 'all var(--zalo-motion-fast)',
                                 }}>
-                                    <Reply size={14} color="#0068ff" />
-                                    <div style={{ flex: 1, overflow: 'hidden', borderLeft: '2px solid #0068ff', paddingLeft: 8 }}>
-                                        <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 1 }}>
+                                    <div style={{ width: 26, height: 26, borderRadius: 8, background: 'rgba(99,102,241,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                        <Reply size={14} color="var(--zalo-accent-strong)" />
+                                    </div>
+                                    <div style={{ flex: 1, overflow: 'hidden', borderLeft: '2px solid var(--zalo-accent)', paddingLeft: 10 }}>
+                                        <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 1, color: '#3730a3' }}>
                                             {replyingTo.sender?.name || (replyingTo.sender?.type === 'agent' ? 'Bạn' : 'Khách')}
                                         </div>
-                                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#555', fontSize: 12 }}>
+                                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#475569', fontSize: 12 }}>
                                             {replyingTo.attachments?.some(a => a.mimeType?.startsWith('image/')) || replyingTo.stickerUrl
                                                 ? (replyingTo.content ? replyingTo.content.substring(0, 60) : replyingTo.stickerUrl ? '🎭 Sticker' : '📷 Hình ảnh')
                                                 : (replyingTo.content || '[Tin nhắn]').substring(0, 80)
                                             }
                                         </div>
                                     </div>
-                                    <Button type="text" size="small" icon={<XIcon size={14} />} onClick={() => setReplyingTo(null)} style={{ flexShrink: 0 }} />
+                                    <Button type="text" size="small" icon={<XIcon size={14} />} onClick={() => setReplyingTo(null)} style={{ flexShrink: 0, borderRadius: 8, color: '#475569' }} />
                                 </div>
                             )}
 
@@ -2973,35 +3096,37 @@ export default function ZaloPersonalPage() {
                     onClick={() => setContextMenu(null)}
                     onContextMenu={e => { e.preventDefault(); setContextMenu(null); }}
                 >
-                    <div style={{
+                    <div className="zalo-context-menu" style={{
                         position: 'absolute',
                         top: contextMenu.y,
                         left: contextMenu.x,
-                        background: '#fff',
-                        borderRadius: 10,
-                        boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+                        background: 'rgba(255,255,255,0.98)',
+                        backdropFilter: 'blur(8px)',
+                        borderRadius: 12,
+                        boxShadow: 'var(--zalo-shadow-float)',
                         overflow: 'hidden',
-                        minWidth: 160,
+                        minWidth: 184,
                         fontSize: 13,
-                        border: '1px solid #e5e7eb',
+                        border: '1px solid rgba(226,232,240,0.95)',
+                        padding: 4,
                     }}>
                         <div
-                            style={{ padding: '10px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
-                            onMouseOver={e => (e.currentTarget.style.background = '#f5f3ff')}
-                            onMouseOut={e => (e.currentTarget.style.background = '#fff')}
+                            style={{ padding: '10px 12px', borderRadius: 9, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 9, transition: 'background var(--zalo-motion-fast)' }}
+                            onMouseOver={e => (e.currentTarget.style.background = 'rgba(99,102,241,0.12)')}
+                            onMouseOut={e => (e.currentTarget.style.background = 'transparent')}
                             onClick={() => {
                                 setReplyingTo(contextMenu.msg);
                                 setContextMenu(null);
                             }}
                         >
-                            <Reply size={14} color="#6366f1" />
-                            <span>Trả lời</span>
+                            <Reply size={14} color="var(--zalo-accent)" />
+                            <span style={{ color: 'var(--zalo-accent-strong)', fontWeight: 600 }}>Trả lời</span>
                         </div>
-                        {contextMenu.msg.sender.type === 'agent' && (
+                        {contextMenu.msg.sender.type === 'agent' && contextMenu.msg.type !== 'recalled' && (
                             <div
-                                style={{ padding: '10px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, borderTop: '1px solid #f0f0f0' }}
-                                onMouseOver={e => (e.currentTarget.style.background = '#fef2f2')}
-                                onMouseOut={e => (e.currentTarget.style.background = '#fff')}
+                                style={{ padding: '10px 12px', borderRadius: 9, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 9, transition: 'background var(--zalo-motion-fast)' }}
+                                onMouseOver={e => (e.currentTarget.style.background = 'rgba(239,68,68,0.12)')}
+                                onMouseOut={e => (e.currentTarget.style.background = 'transparent')}
                                 onClick={() => {
                                     if (socketRef.current && selectedAccountId && selectedConvId) {
                                         const conv = conversations.find(c => c._id === selectedConvId);
@@ -3013,15 +3138,64 @@ export default function ZaloPersonalPage() {
                                             threadType: conv?.threadType || 'user',
                                         });
                                     }
-                                    // Remove from local messages
+                                    // Show "recalled" state with revert data
+                                    setMessages(prev => prev.map(m => m._id === contextMenu.msg._id ? {
+                                        ...m,
+                                        _originalContent: m.content,
+                                        _originalType: m.type,
+                                        content: 'Tin nhắn đã được thu hồi',
+                                        type: 'recalled',
+                                        attachments: undefined,
+                                        attachmentUrl: undefined,
+                                        thumbUrl: undefined,
+                                        stickerUrl: undefined,
+                                    } as any : m));
+                                    setContextMenu(null);
+                                }}
+                            >
+                                <Undo2 size={14} color="var(--zalo-danger)" />
+                                <span style={{ color: 'var(--zalo-danger)', fontWeight: 600 }}>Thu hồi</span>
+                            </div>
+                        )}
+                        {contextMenu.msg.type !== 'recalled' && (
+                            <div
+                                style={{ padding: '10px 12px', borderRadius: 9, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 9, transition: 'background var(--zalo-motion-fast)' }}
+                                onMouseOver={e => (e.currentTarget.style.background = 'rgba(249,115,22,0.12)')}
+                                onMouseOut={e => (e.currentTarget.style.background = 'transparent')}
+                                onClick={() => {
+                                    if (socketRef.current && selectedAccountId && selectedConvId) {
+                                        const conv = conversations.find(c => c._id === selectedConvId);
+                                        socketRef.current.emit('zalo:deleteMessage', {
+                                            sessionId: selectedAccountId,
+                                            msgId: contextMenu.msg._id,
+                                            cliMsgId: contextMenu.msg.cliMsgId || contextMenu.msg._id,
+                                            uidFrom: contextMenu.msg.senderId || '',
+                                            threadId: conv?.threadId || selectedConvId.replace('zca_', ''),
+                                            threadType: conv?.threadType || 'user',
+                                            onlyMe: true,
+                                        });
+                                    }
                                     setMessages(prev => prev.filter(m => m._id !== contextMenu.msg._id));
                                     setContextMenu(null);
                                 }}
                             >
-                                <Undo2 size={14} color="#ef4444" />
-                                <span style={{ color: '#ef4444' }}>Thu hồi</span>
+                                <Trash2 size={14} color="var(--zalo-warning)" />
+                                <span style={{ color: 'var(--zalo-warning)', fontWeight: 600 }}>Xóa phía mình</span>
                             </div>
                         )}
+                        <div
+                            style={{ padding: '10px 12px', borderRadius: 9, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 9, transition: 'background var(--zalo-motion-fast)' }}
+                            onMouseOver={e => (e.currentTarget.style.background = 'rgba(22,163,74,0.12)')}
+                            onMouseOut={e => (e.currentTarget.style.background = 'transparent')}
+                            onClick={() => {
+                                navigator.clipboard.writeText(contextMenu.msg.content);
+                                message.success('Đã sao chép!');
+                                setContextMenu(null);
+                            }}
+                        >
+                            <Copy size={14} color="var(--zalo-success)" />
+                            <span style={{ color: 'var(--zalo-success)', fontWeight: 600 }}>Sao chép</span>
+                        </div>
                     </div>
                 </div>
             )}
@@ -3285,32 +3459,36 @@ const styles: Record<string, React.CSSProperties> = {
     convList: {
         flex: 1,
         overflowY: 'auto' as const,
-        padding: '4px 0',
+        padding: '8px 4px',
     },
     convItem: {
         display: 'flex',
         gap: 12,
-        padding: '14px 14px',
+        padding: '13px 13px',
         cursor: 'pointer',
         borderBottom: 'none',
-        transition: 'all .2s ease',
-        margin: '2px 8px',
-        borderRadius: 14,
+        transition: 'all var(--zalo-motion-fast)',
+        margin: '4px 8px',
+        borderRadius: 16,
+        border: '1px solid transparent',
+        background: 'linear-gradient(180deg, rgba(255,255,255,0.75) 0%, rgba(255,255,255,0.45) 100%)',
     },
     convItemActive: {
-        background: '#eef2ff',
-        boxShadow: 'inset 0 0 0 1px rgba(99,102,241,0.12)',
+        background: 'linear-gradient(135deg, rgba(99,102,241,0.14) 0%, rgba(99,102,241,0.06) 100%)',
+        boxShadow: 'inset 0 0 0 1px rgba(99,102,241,0.2), 0 7px 16px rgba(99,102,241,0.08)',
     },
     convAvatar: {
         width: 44,
         height: 44,
         borderRadius: '50%',
-        background: '#eef2ff',
+        background: 'linear-gradient(135deg, rgba(99,102,241,0.2) 0%, rgba(129,140,248,0.13) 100%)',
+        border: '1px solid rgba(129,140,248,0.25)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         flexShrink: 0,
         overflow: 'hidden' as const,
+        boxShadow: '0 4px 10px rgba(99,102,241,0.12)',
     },
     convName: {
         fontWeight: 600,
@@ -3336,7 +3514,7 @@ const styles: Record<string, React.CSSProperties> = {
         flex: 1,
         display: 'flex',
         flexDirection: 'column',
-        background: '#e5e7eb',
+        background: 'var(--zalo-bg-chat)',
     },
     chatHeader: {
         padding: '14px 20px',
@@ -3361,8 +3539,8 @@ const styles: Record<string, React.CSSProperties> = {
     messagesArea: {
         flex: 1,
         overflowY: 'auto' as const,
-        padding: '16px 20px',
-        background: '#e5e7eb',
+        padding: '18px 22px',
+        background: 'var(--zalo-bg-chat)',
     },
     msgRow: {
         display: 'flex',
@@ -3371,24 +3549,26 @@ const styles: Record<string, React.CSSProperties> = {
         gap: 8,
     },
     msgBubble: {
-        maxWidth: '60%',
-        padding: '10px 14px',
-        borderRadius: 18,
+        maxWidth: '64%',
+        padding: '11px 15px',
+        borderRadius: 'var(--zalo-radius-xl)',
         fontSize: 14,
-        lineHeight: 1.5,
+        lineHeight: 1.52,
         wordBreak: 'break-word' as const,
+        transition: 'transform var(--zalo-motion-fast), box-shadow var(--zalo-motion-fast), background var(--zalo-motion-fast)',
     },
     msgAgent: {
-        background: '#dbebff',
-        color: '#1a1a2e',
-        borderBottomRightRadius: 4,
-        boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
+        background: 'linear-gradient(135deg, var(--zalo-agent-start) 0%, var(--zalo-agent-end) 100%)',
+        color: 'var(--zalo-agent-text)',
+        borderBottomRightRadius: 8,
+        boxShadow: '0 7px 18px rgba(79, 70, 229, 0.22)',
     },
     msgCustomer: {
-        background: '#ffffff',
-        color: '#1a1a2e',
-        borderBottomLeftRadius: 4,
-        boxShadow: '0 1px 2px rgba(0,0,0,0.08)',
+        background: 'var(--zalo-customer-bg)',
+        color: 'var(--zalo-customer-text)',
+        borderBottomLeftRadius: 8,
+        border: '1px solid rgba(226,232,240,0.92)',
+        boxShadow: '0 4px 12px rgba(15,23,42,0.08)',
     },
     systemMsg: {
         textAlign: 'center' as const,
@@ -3414,23 +3594,24 @@ const styles: Record<string, React.CSSProperties> = {
         fontWeight: 500,
     },
     inputArea: {
-        padding: '12px 20px',
-        background: '#ffffff',
-        borderTop: '1px solid #e2e8f0',
+        padding: '12px 16px',
+        background: 'var(--zalo-surface)',
+        borderTop: '1px solid var(--zalo-border)',
         display: 'flex',
-        gap: 8,
+        gap: 10,
         alignItems: 'center',
-        minHeight: 68,
+        minHeight: 70,
+        boxShadow: '0 -6px 18px rgba(15,23,42,0.04)',
     },
     textInput: {
         flex: 1,
         padding: '11px 18px',
-        border: '1.5px solid #e2e8f0',
+        border: '1.5px solid #d7deea',
         borderRadius: 24,
         fontSize: 13.5,
         outline: 'none',
-        transition: 'all .2s ease',
-        background: '#f8fafc',
+        transition: 'all var(--zalo-motion-fast)',
+        background: '#f8fbff',
     },
 
     // ── Shared states ──
@@ -3633,18 +3814,18 @@ const MessageComposer = ({ sending, onSend, onImageSend, onStickerSend, socketRe
                 />
                 <Button
                     type="text"
-                    icon={<Paperclip size={18} color="#666" />}
+                    icon={<Paperclip size={18} color="#64748b" />}
                     onClick={() => fileInputRef.current?.click()}
-                    style={{ padding: '4px 8px' }}
+                    style={{ padding: '6px 9px', borderRadius: 12, background: '#f8fafc' }}
                 />
                 <Button
                     type="text"
-                    icon={<Smile size={18} color={showStickerPicker ? '#0068ff' : '#666'} />}
+                    icon={<Smile size={18} color={showStickerPicker ? '#4f46e5' : '#64748b'} />}
                     onClick={() => setShowStickerPicker(!showStickerPicker)}
-                    style={{ padding: '4px 8px' }}
+                    style={{ padding: '6px 9px', borderRadius: 12, background: showStickerPicker ? 'rgba(99,102,241,0.12)' : '#f8fafc' }}
                 />
                 <textarea
-                    style={{ ...styles.textInput, resize: 'none', overflow: 'hidden', minHeight: 40, maxHeight: 120, lineHeight: '20px' }}
+                    style={{ ...styles.textInput, resize: 'none', overflow: 'hidden', minHeight: 40, maxHeight: 120, lineHeight: '20px', boxShadow: 'inset 0 1px 2px rgba(15,23,42,0.04)' }}
                     placeholder="Nhập tin nhắn..."
                     rows={1}
                     value={inputText}
@@ -3653,6 +3834,7 @@ const MessageComposer = ({ sending, onSend, onImageSend, onStickerSend, socketRe
                         // Auto-resize
                         e.target.style.height = 'auto';
                         e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+                        e.target.style.borderColor = '#b8c3d9';
                     }}
                     onKeyDown={e => {
                         if (e.key === 'Enter' && e.altKey) {
@@ -3697,7 +3879,8 @@ const MessageComposer = ({ sending, onSend, onImageSend, onStickerSend, socketRe
                     icon={<Send size={16} />}
                     onClick={handleSendClick}
                     loading={sending}
-                    style={{ borderRadius: 24, background: '#0068ff', border: 'none', width: 40, height: 40 }}
+                    className="zalo-send-btn"
+                    style={{ borderRadius: 24, background: 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)', border: 'none', width: 42, height: 42, boxShadow: '0 8px 16px rgba(79,70,229,0.25)', transition: 'all var(--zalo-motion-fast)' }}
                 />
             </div>
         </div>

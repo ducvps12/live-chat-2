@@ -1,20 +1,32 @@
-import { DistributionRuleModel, IDistributionRule, IRuleCondition } from './repos/distributionRule.model';
-import mongoose from 'mongoose';
+import prisma from '../../infra/prisma';
+import type { DistributionRule } from '@prisma/client';
+
+export interface IRuleCondition {
+    field: string;
+    operator: 'eq' | 'neq' | 'contains' | 'not_contains' | 'gt' | 'lt';
+    value: string;
+}
 
 class DistributionService {
-
     async create(workspaceId: string, userId: string, data: {
         name: string;
         description?: string;
         priority?: number;
         conditions: IRuleCondition[];
         conditionLogic?: 'all' | 'any';
-        action: IDistributionRule['action'];
+        action: any;
     }) {
-        return DistributionRuleModel.create({
-            workspaceId: new mongoose.Types.ObjectId(workspaceId),
-            ...data,
-            createdBy: new mongoose.Types.ObjectId(userId),
+        return prisma.distributionRule.create({
+            data: {
+                workspaceId,
+                name: data.name,
+                description: data.description || null,
+                priority: data.priority || 0,
+                conditions: data.conditions as any,
+                conditionLogic: data.conditionLogic || 'all',
+                action: data.action,
+                createdById: userId,
+            },
         });
     }
 
@@ -25,38 +37,35 @@ class DistributionService {
         isActive: boolean;
         conditions: IRuleCondition[];
         conditionLogic: 'all' | 'any';
-        action: IDistributionRule['action'];
+        action: any;
     }>) {
-        const rule = await DistributionRuleModel.findById(ruleId);
+        const rule = await prisma.distributionRule.findUnique({ where: { id: ruleId } });
         if (!rule) throw new Error('Rule không tồn tại');
-        if (rule.workspaceId.toString() !== workspaceId) throw new Error('Không có quyền');
-        return DistributionRuleModel.findByIdAndUpdate(ruleId, { $set: data }, { new: true });
+        if (rule.workspaceId !== workspaceId) throw new Error('Không có quyền');
+        return prisma.distributionRule.update({ where: { id: ruleId }, data: data as any });
     }
 
     async delete(ruleId: string, workspaceId: string) {
-        const rule = await DistributionRuleModel.findById(ruleId);
+        const rule = await prisma.distributionRule.findUnique({ where: { id: ruleId } });
         if (!rule) throw new Error('Rule không tồn tại');
-        if (rule.workspaceId.toString() !== workspaceId) throw new Error('Không có quyền');
-        return DistributionRuleModel.findByIdAndDelete(ruleId);
+        if (rule.workspaceId !== workspaceId) throw new Error('Không có quyền');
+        return prisma.distributionRule.delete({ where: { id: ruleId } });
     }
 
     async list(workspaceId: string) {
-        return DistributionRuleModel
-            .find({ workspaceId: new mongoose.Types.ObjectId(workspaceId) })
-            .sort({ priority: -1, createdAt: -1 })
-            .lean();
+        return prisma.distributionRule.findMany({
+            where: { workspaceId },
+            orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
+        });
     }
 
     async getById(ruleId: string, workspaceId: string) {
-        const rule = await DistributionRuleModel.findById(ruleId).lean();
+        const rule = await prisma.distributionRule.findUnique({ where: { id: ruleId } });
         if (!rule) throw new Error('Rule không tồn tại');
-        if (rule.workspaceId.toString() !== workspaceId) throw new Error('Không có quyền');
+        if (rule.workspaceId !== workspaceId) throw new Error('Không có quyền');
         return rule;
     }
 
-    /**
-     * Evaluate all active rules against a conversation and return the assigned agent ID
-     */
     async evaluateRules(workspaceId: string, conversationData: {
         channel: string;
         source?: string;
@@ -66,19 +75,22 @@ class DistributionService {
         visitorVisits?: number;
         previousAgentId?: string;
     }): Promise<string | null> {
-        const rules = await DistributionRuleModel
-            .find({ workspaceId: new mongoose.Types.ObjectId(workspaceId), isActive: true })
-            .sort({ priority: -1 })
-            .lean();
+        const rules = await prisma.distributionRule.findMany({
+            where: { workspaceId, isActive: true },
+            orderBy: { priority: 'desc' },
+        });
 
         for (const rule of rules) {
             if (this.matchesConditions(rule, conversationData)) {
                 const agentId = await this.resolveAction(rule, conversationData);
                 if (agentId) {
                     // Update stats
-                    await DistributionRuleModel.findByIdAndUpdate(rule._id, {
-                        $inc: { 'stats.totalMatched': 1 },
-                        $set: { 'stats.lastMatchedAt': new Date() },
+                    const stats = (rule.stats as any) || {};
+                    stats.totalMatched = (stats.totalMatched || 0) + 1;
+                    stats.lastMatchedAt = new Date();
+                    await prisma.distributionRule.update({
+                        where: { id: rule.id },
+                        data: { stats },
                     });
                     return agentId;
                 }
@@ -88,8 +100,9 @@ class DistributionService {
         return null;
     }
 
-    private matchesConditions(rule: IDistributionRule, data: any): boolean {
-        const results = rule.conditions.map(cond => this.evaluateCondition(cond, data));
+    private matchesConditions(rule: DistributionRule, data: any): boolean {
+        const conditions = (rule.conditions as IRuleCondition[]) || [];
+        const results = conditions.map(cond => this.evaluateCondition(cond, data));
         return rule.conditionLogic === 'any'
             ? results.some(r => r)
             : results.every(r => r);
@@ -118,26 +131,25 @@ class DistributionService {
         }
     }
 
-    private async resolveAction(rule: IDistributionRule, data: any): Promise<string | null> {
-        switch (rule.action.type) {
+    private async resolveAction(rule: DistributionRule, data: any): Promise<string | null> {
+        const action = rule.action as any;
+        switch (action.type) {
             case 'assign_agent':
-                return rule.action.agentIds?.[0]?.toString() || null;
-
+                return action.agentIds?.[0] || null;
             case 'round_robin': {
-                const agents = rule.action.agentIds || [];
+                const agents = action.agentIds || [];
                 if (agents.length === 0) return null;
                 const nextIndex = (rule.lastAssignedIndex + 1) % agents.length;
-                await DistributionRuleModel.findByIdAndUpdate(rule._id, { lastAssignedIndex: nextIndex });
-                return agents[nextIndex].toString();
+                await prisma.distributionRule.update({
+                    where: { id: rule.id },
+                    data: { lastAssignedIndex: nextIndex },
+                });
+                return agents[nextIndex];
             }
-
             case 'previous_agent':
                 return data.previousAgentId || null;
-
             case 'least_busy':
-                // Fallback to first agent — full implementation would query active conversation counts
-                return rule.action.agentIds?.[0]?.toString() || null;
-
+                return action.agentIds?.[0] || null;
             default:
                 return null;
         }

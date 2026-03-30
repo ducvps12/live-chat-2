@@ -526,4 +526,38 @@ export const conversationController = {
         );
         res.status(200).json({ success: true, data: result });
     }),
+
+    // ── Forward messages to internal conversations ──
+
+    forwardMessages: asyncHandler(async (req: Request, res: Response) => {
+        const workspaceId = req.params.workspaceId as string;
+        const userId = (req as any).user.id;
+        const userName = (req as any).user.name || 'Agent';
+        const { messageIds, targetConversationIds } = req.body;
+
+        if (!messageIds?.length || !targetConversationIds?.length) {
+            throw new (require('../../middlewares/errorHandler').AppError)(
+                'Cần chọn ít nhất 1 tin nhắn và 1 cuộc hội thoại đích',
+                400,
+                'VALIDATION_ERROR'
+            );
+        }
+
+        if (messageIds.length > 20) {
+            throw new (require('../../middlewares/errorHandler').AppError)(
+                'Tối đa 20 tin nhắn mỗi lần chuyển tiếp',
+                400,
+                'VALIDATION_ERROR'
+            );
+        }
+
+        const result = await conversationService.forwardMessages(
+            workspaceId,
+            { id: userId, name: userName },
+            messageIds,
+            targetConversationIds
+        );
+
+        res.status(200).json({ success: true, data: result });
+    }),
 };

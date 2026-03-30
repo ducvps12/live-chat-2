@@ -157,4 +157,4 @@ widgetSchema.index({ workspaceId: 1, isActive: 1 });      // active widgets per 
 widgetSchema.index({ isActive: 1, createdAt: -1 });       // active widgets listing
 widgetSchema.index({ createdAt: -1 });                    // chronological sort
 
-export const WidgetModel = mongoose.model<IWidget>('Widget', widgetSchema);
+export const WidgetModel = (mongoose.models.Widget || mongoose.model<IWidget>('Widget', widgetSchema)) as mongoose.Model<IWidget>;

@@ -1,0 +1,783 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ═══════════════════════════════════════════════
+// AUTH
+// ═══════════════════════════════════════════════
+
+model User {
+  id                  String    @id @default(cuid())
+  email               String    @unique
+  passwordHash        String
+  name                String
+  role                String    @default("agent") // admin | agent | member
+  avatarUrl           String?   @db.Text
+  isActive            Boolean   @default(true)
+  resetPasswordToken  String?
+  resetPasswordExpires DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  sessions            Session[]
+  workspaceMembers    WorkspaceMember[]
+  externalSessions    ExternalSession[]   @relation("CreatedBy")
+  controlledSessions  ExternalSession[]   @relation("ControlledBy")
+  auditLogs           SessionAuditLog[]
+  macros              Macro[]
+  leads               Lead[]              @relation("AssignedLeads")
+  orders              Order[]             @relation("CreatedOrders")
+  processedOrders     Order[]             @relation("ProcessedOrders")
+  products            Product[]
+  taxes               Tax[]
+  emailAccounts       EmailAccount[]
+  distributionRules   DistributionRule[]
+  campaigns           Campaign[]
+
+  @@index([role])
+  @@index([isActive])
+  @@index([email, isActive])
+  @@index([createdAt])
+}
+
+model Session {
+  id           String    @id @default(cuid())
+  userId       String
+  refreshToken String    @unique
+  userAgent    String?   @db.Text
+  ipAddress    String?
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([createdAt])
+}
+
+// ═══════════════════════════════════════════════
+// WORKSPACE
+// ═══════════════════════════════════════════════
+
+model Workspace {
+  id        String    @id @default(cuid())
+  name      String
+  slug      String    @unique
+  logoUrl   String?   @db.Text
+  ownerId   String
+  plan      String    @default("free") // free | starter | pro | enterprise
+  settings  Json      @default("{}") // { timezone, language, businessHours }
+  tags      Json      @default("[]") // string[]
+  labels    Json      @default("[]") // { name, color }[]
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  members          WorkspaceMember[]
+  widgets          Widget[]
+  conversations    Conversation[]
+  visitors         Visitor[]
+  zaloAccounts     ZaloAccount[]
+  zaloContacts     ZaloContact[]
+  zaloMessages     ZaloMessage[]
+  fbPages          FBPage[]
+  externalSessions ExternalSession[]
+  knowledgeEntries KnowledgeEntry[]
+  campaigns        Campaign[]
+  chatbots         AIBot[]
+  macros           Macro[]
+  leads            Lead[]
+  orders           Order[]
+  products         Product[]
+  subscriptions    Subscription[]
+  invoices         Invoice[]
+  taxes            Tax[]
+  offlineMessages  OfflineMessage[]
+  popups           Popup[]
+  distributionRules DistributionRule[]
+  businessHours    BusinessHours?
+  emailAccounts    EmailAccount[]
+  auditLogs        SessionAuditLog[]
+
+  @@index([ownerId])
+  @@index([isActive, createdAt])
+}
+
+model WorkspaceMember {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        String   @default("member") // owner | admin | agent | member
+  joinedAt    DateTime @default(now())
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@index([userId, workspaceId])
+}
+
+model Widget {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  config      Json     // IWidgetConfig (primaryColor, greeting, preChatForm, etc.)
+  domainRules Json     @default("{\"mode\":\"allowlist\",\"domains\":[]}") // { mode, domains[] }
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace     Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+  visitors      Visitor[]
+  offlineMessages OfflineMessage[]
+
+  @@index([workspaceId, isActive])
+  @@index([isActive, createdAt])
+  @@index([createdAt])
+}
+
+model Popup {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  type        String   @default("popup") // popup | notification
+  category    String   @default("general")
+  status      String   @default("paused") // active | paused
+  design      Json     // { imageUrl, width, height, layout, fields[], buttonText, buttonColor }
+  thankYou    Json     @default("{}") // { title, message, buttonText?, buttonUrl? }
+  settings    Json     @default("{}") // { triggerMode, triggerDelay, frequency, urlRules }
+  stats       Json     @default("{\"views\":0,\"submissions\":0,\"closes\":0}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status])
+  @@index([workspaceId, createdAt])
+}
+
+model OfflineMessage {
+  id          String   @id @default(cuid())
+  widgetId    String
+  workspaceId String
+  visitorId   String
+  name        String
+  email       String
+  message     String   @db.Text
+  status      String   @default("pending") // pending | read | replied
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  widget      Widget    @relation(fields: [widgetId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status, createdAt])
+  @@index([widgetId, status, createdAt])
+  @@index([email, workspaceId])
+  @@index([visitorId, createdAt])
+  @@index([createdAt])
+}
+
+// ═══════════════════════════════════════════════
+// CONVERSATION
+// ═══════════════════════════════════════════════
+
+model Conversation {
+  id                 String    @id @default(cuid())
+  workspaceId        String
+  widgetId           String
+  visitorId          String
+  visitorInfo        Json      @default("{}") // { name?, email?, phone?, avatar? }
+  status             String    @default("open") // open | pending | closed | resolved
+  priority           String    @default("normal") // urgent | high | normal | low
+  slaDeadline        DateTime?
+  assignedTo         String?
+  tags               Json      @default("[]") // string[]
+  channel            String    @default("widget")
+  lastMessageAt      DateTime  @default(now())
+  lastMessageSnippet String?   @db.Text
+  lastSenderType     String?   // visitor | agent | system
+  lastSenderName     String?
+  unreadCount        Int       @default(0)
+  isPinned           Boolean   @default(false)
+  readContext        Json      @default("[]") // [{ participantId, participantType, lastReadMessageId }]
+  metadata           Json?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  workspace  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  widget     Widget    @relation(fields: [widgetId], references: [id], onDelete: Cascade)
+  messages   Message[]
+
+  @@index([visitorId, widgetId, status])
+  @@index([workspaceId, status, lastMessageAt])
+  @@index([assignedTo, status])
+  @@index([widgetId, createdAt])
+  @@index([createdAt])
+  @@index([slaDeadline, status])
+}
+
+model Message {
+  id              String    @id @default(cuid())
+  conversationId  String
+  clientMessageId String?
+  senderType      String    // visitor | agent | system
+  senderId        String
+  senderName      String?
+  content         String    @db.LongText
+  type            String    @default("text") // text | image | file | system
+  status          String    @default("sent") // sent | delivered | read | error
+  attachments     Json      @default("[]") // [{ data, url, filename, mimeType, size }]
+  sanitizeFlags   Json      @default("[]") // string[]
+  isInternal      Boolean   @default(false)
+  replyToMessageId String?
+  replyToContent   String?  @db.Text
+  replyToSenderName String?
+  editedAt        DateTime?
+  isDeleted       Boolean   @default(false)
+  originalContent String?   @db.LongText
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, clientMessageId])
+  @@index([conversationId, createdAt])
+  @@index([createdAt])
+  @@fulltext([content])
+}
+
+model Visitor {
+  id                 String   @id @default(cuid())
+  visitorId          String
+  widgetId           String
+  workspaceId        String
+  name               String   @default("")
+  email              String   @default("")
+  phone              String   @default("")
+  firstSeenAt        DateTime @default(now())
+  lastSeenAt         DateTime @default(now())
+  totalConversations Int      @default(0)
+  attributes         Json     @default("{}")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  widget    Widget    @relation(fields: [widgetId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([visitorId, widgetId])
+  @@index([workspaceId, lastSeenAt])
+  @@index([email, workspaceId])
+  @@index([createdAt])
+}
+
+// ═══════════════════════════════════════════════
+// ZALO
+// ═══════════════════════════════════════════════
+
+model ZaloAccount {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  zaloId       String
+  name         String   @default("Unknown Zalo")
+  avatar       String   @default("")
+  phone        String   @default("")
+  imei         String
+  cookie       Json     // flexible JSON
+  userAgent    String   @db.Text
+  status       String   @default("active") // active | disconnected | banned
+  lastActiveAt DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+model ZaloContact {
+  id                 String    @id @default(cuid())
+  workspaceId        String
+  zaloUserId         String
+  displayName        String    @default("")
+  avatar             String    @default("")
+  phoneNumber        String    @default("")
+  source             String    @default("stranger") // friend | stranger | group
+  totalMessages      Int       @default(0)
+  lastMessageAt      DateTime?
+  lastMessagePreview String    @default("") @db.VarChar(500)
+  firstContactAt     DateTime  @default(now())
+  metadata           Json      @default("{}")
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  workspace          Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, zaloUserId])
+  @@index([workspaceId, lastMessageAt])
+  @@index([workspaceId, phoneNumber])
+  @@fulltext([displayName])
+}
+
+model ZaloMessage {
+  id            String   @id @default(cuid())
+  workspaceId   String
+  threadId      String
+  threadType    String   @default("user") // user | group
+  msgId         String
+  senderId      String   @default("")
+  senderName    String   @default("")
+  content       String   @db.LongText
+  msgType       String   @default("text") // text | image | media | sticker | file
+  attachmentUrl String?  @db.Text
+  thumbUrl      String?  @db.Text
+  isSelf        Boolean  @default(false)
+  timestamp     DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, msgId])
+  @@index([workspaceId, threadId, timestamp])
+  @@index([workspaceId, timestamp])
+  @@index([workspaceId, senderId, timestamp])
+  @@fulltext([content])
+}
+
+// ═══════════════════════════════════════════════
+// FACEBOOK
+// ═══════════════════════════════════════════════
+
+model FBPage {
+  id               String   @id @default(cuid())
+  workspaceId      String
+  pageId           String
+  pageName         String   @default("Facebook Page")
+  pageAvatar       String   @default("")
+  accessToken      String   @db.Text
+  userAccessToken  String?  @db.Text
+  status           String   @default("active") // active | disconnected | token_expired
+  subscribedFields Json     @default("[\"messages\",\"messaging_postbacks\"]") // string[]
+  lastActiveAt     DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([pageId, workspaceId])
+}
+
+// ═══════════════════════════════════════════════
+// EXTERNAL SESSION (Zalo Remote)
+// ═══════════════════════════════════════════════
+
+model ExternalSession {
+  id               String    @id @default(cuid())
+  workspaceId      String
+  provider         String    @default("zalo")
+  label            String
+  status           String    @default("pending_login") // pending_login | connected | disconnected | expired | revoked
+  createdById      String
+  connectedAt      DateTime?
+  lastActiveAt     DateTime  @default(now())
+  controlledById   String?
+  controlLockedAt  DateTime?
+  viewers          Json      @default("[]") // string[] of userIds
+  browserProfileId String
+  metadataAccountName String?
+  metadataAvatarUrl  String?  @db.Text
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy    User      @relation("CreatedBy", fields: [createdById], references: [id])
+  controlledBy User?     @relation("ControlledBy", fields: [controlledById], references: [id])
+
+  auditLogs    SessionAuditLog[]
+
+  @@index([workspaceId, status])
+}
+
+model SessionAuditLog {
+  id          String   @id @default(cuid())
+  sessionId   String
+  workspaceId String
+  userId      String
+  action      String   // session_created | qr_rendered | login_success | etc.
+  details     Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  session     ExternalSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User            @relation(fields: [userId], references: [id])
+
+  @@index([sessionId, createdAt])
+}
+
+// ═══════════════════════════════════════════════
+// KNOWLEDGE
+// ═══════════════════════════════════════════════
+
+model KnowledgeEntry {
+  id            String   @id @default(cuid())
+  workspaceId   String
+  product       String
+  question      String   @db.Text
+  answer        String   @db.Text
+  upsaleText    String?  @db.Text
+  keywords      Json     @default("[]") // string[]
+  source        String   @default("manual") // google_sheets | manual
+  sheetRowIndex Int?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, product])
+  @@index([workspaceId, source])
+  @@fulltext([question, answer, product])
+}
+
+// ═══════════════════════════════════════════════
+// CAMPAIGN
+// ═══════════════════════════════════════════════
+
+model Campaign {
+  id               String    @id @default(cuid())
+  workspaceId      String
+  name             String
+  status           String    @default("draft") // draft | scheduled | running | paused | completed | failed
+  messages         Json      @default("[]") // string[]
+  audience         Json      @default("{}") // ICampaignAudience
+  schedule         Json      @default("{}") // ICampaignSchedule
+  antiSpam         Json      @default("{\"delayBetweenMs\":8000,\"maxPerHour\":30,\"randomizeDelay\":true}")
+  stats            Json      @default("{\"total\":0,\"sent\":0,\"failed\":0,\"pending\":0}")
+  recipientIds     Json      @default("[]") // string[]
+  failedRecipients Json      @default("[]") // [{ threadId, error, timestamp }]
+  currentIndex     Int       @default(0)
+  createdById      String?
+  completedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy        User?     @relation(fields: [createdById], references: [id])
+
+  @@index([workspaceId, status, createdAt])
+}
+
+// ═══════════════════════════════════════════════
+// CHATBOT (AI Bot)
+// ═══════════════════════════════════════════════
+
+model AIBot {
+  id                 String   @id @default(cuid())
+  workspaceId        String
+  name               String   @default("Chatbot AI")
+  avatarUrl          String?  @db.Text
+  brandName          String   @default("")
+  brandDescription   String?  @db.Text
+  aiModel            String   @default("")
+  mainTask           String   @default("customer_care") // customer_care | sales | technical_support
+  conversationStyle  String   @default("friendly")      // friendly | professional | casual
+  messageLength      String   @default("medium")        // short | medium | long
+  customGreeting     String?  @db.Text
+  welcomeMessage     String?  @db.Text
+  channels           Json     @default("{}") // { website, messenger, facebook, zalo, instagram }
+  agentCondition     String   @default("no_condition")
+  scenarios          Json     @default("[]") // IScenario[]
+  quickReplies       Json     @default("[]") // IQuickReply[]
+  followUp           Json     @default("{\"enabled\":false,\"delaySeconds\":30,\"message\":\"\"}")
+  isActive           Boolean  @default(false)
+  isDraft            Boolean  @default(true)
+  stats              Json     @default("{\"totalConversations\":0,\"totalReplies\":0,\"leadsCollected\":0}")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  workspace          Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, isActive])
+  @@index([workspaceId, isDraft])
+}
+
+// ═══════════════════════════════════════════════
+// MACRO
+// ═══════════════════════════════════════════════
+
+model Macro {
+  id               String   @id @default(cuid())
+  workspaceId      String
+  userId           String?
+  scope            String   @default("personal") // personal | team
+  title            String
+  content          String   @db.Text
+  shortcut         String?
+  category         String?
+  channel          String   @default("all") // widget | zalo | facebook | email | all
+  mediaAttachments Json     @default("[]") // [{ type, url, name }]
+  variables        Json     @default("[]") // string[]
+  usageCount       Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user             User?     @relation(fields: [userId], references: [id])
+
+  @@index([workspaceId, scope])
+  @@index([workspaceId, userId])
+  @@index([workspaceId, channel])
+  @@index([shortcut, workspaceId])
+}
+
+// ═══════════════════════════════════════════════
+// LEAD
+// ═══════════════════════════════════════════════
+
+model Lead {
+  id                String    @id @default(cuid())
+  workspaceId       String
+  name              String
+  phone             String    @default("")
+  email             String    @default("")
+  avatar            String    @default("")
+  stage             String    @default("mới") // mới | tiềm_năng | đang_tư_vấn | chốt_đơn | khách_hàng | từ_chối
+  source            String    @default("manual") // zalo | facebook | widget | manual
+  tags              Json      @default("[]") // string[]
+  assignedTo        String?
+  score             Int       @default(0)
+  notes             Json      @default("[]") // [{ text, createdAt, createdBy }]
+  zaloUserId        String    @default("")
+  fbUserId          String    @default("")
+  lastContactedAt   DateTime?
+  conversationCount Int       @default(0)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  assignedUser      User?     @relation("AssignedLeads", fields: [assignedTo], references: [id])
+
+  @@index([workspaceId, stage])
+  @@index([workspaceId, source])
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, zaloUserId])
+}
+
+// ═══════════════════════════════════════════════
+// ORDER
+// ═══════════════════════════════════════════════
+
+model Order {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  orderNumber     String
+  customerId      String?
+  customerName    String   @default("")
+  customerPhone   String   @default("")
+  customerEmail   String   @default("")
+  conversationId  String?
+  items           Json     @default("[]") // IOrderItem[]
+  subtotal        Float    @default(0)
+  taxId           String?
+  taxRate         Float    @default(0)
+  taxAmount       Float    @default(0)
+  discount        Float    @default(0)
+  shippingFee     Float    @default(0)
+  total           Float    @default(0)
+  status          String   @default("draft") // draft | pending | confirmed | shipping | delivered | cancelled | returned
+  shippingAddress String?  @db.Text
+  notes           String?  @db.Text
+  tags            Json     @default("[]") // string[]
+  createdById     String
+  processedById   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy       User      @relation("CreatedOrders", fields: [createdById], references: [id])
+  processedBy     User?     @relation("ProcessedOrders", fields: [processedById], references: [id])
+
+  @@unique([workspaceId, orderNumber])
+  @@index([workspaceId, status, createdAt])
+  @@index([workspaceId, customerId])
+}
+
+// ═══════════════════════════════════════════════
+// PRODUCT
+// ═══════════════════════════════════════════════
+
+model Product {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  sku         String   @default("")
+  description String?  @db.Text
+  price       Float
+  salePrice   Float?
+  currency    String   @default("VND")
+  images      Json     @default("[]") // string[]
+  category    String   @default("")
+  stock       Int      @default(0)
+  variants    Json     @default("[]") // IProductVariant[]
+  source      String   @default("manual") // manual | google_sheet | website
+  sourceUrl   String?  @db.Text
+  isActive    Boolean  @default(true)
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy   User      @relation(fields: [createdById], references: [id])
+
+  @@index([workspaceId, isActive])
+  @@index([workspaceId, sku])
+  @@index([workspaceId, category])
+  @@fulltext([name, description])
+}
+
+// ═══════════════════════════════════════════════
+// SUBSCRIPTION & INVOICE
+// ═══════════════════════════════════════════════
+
+model Subscription {
+  id                 String   @id @default(cuid())
+  workspaceId        String   @unique
+  planId             String   @default("trial")
+  status             String   @default("active") // active | expired | cancelled | past_due
+  currentPeriodStart DateTime @default(now())
+  currentPeriodEnd   DateTime
+  trialEndsAt        DateTime?
+  cancelledAt        DateTime?
+  billingCycle       String   @default("monthly") // monthly | yearly
+  metadata           Json     @default("{}")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  workspace          Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([status, currentPeriodEnd])
+}
+
+model Invoice {
+  id               String    @id @default(cuid())
+  workspaceId      String
+  invoiceNumber    String    @unique
+  planId           String
+  amount           Float
+  currency         String    @default("VND")
+  status           String    @default("pending") // pending | paid | failed | refunded
+  billingCycle     String    @default("monthly") // monthly | yearly
+  paidAt           DateTime?
+  paymentMethod    String?
+  paymentReference String?
+  description      String?   @db.Text
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+}
+
+// ═══════════════════════════════════════════════
+// TAX
+// ═══════════════════════════════════════════════
+
+model Tax {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  rate        Float    // percentage (e.g. 10 = 10%)
+  locale      String   @default("vi-VN")
+  isActive    Boolean  @default(true)
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy   User      @relation(fields: [createdById], references: [id])
+
+  @@index([workspaceId, isActive])
+}
+
+// ═══════════════════════════════════════════════
+// EMAIL
+// ═══════════════════════════════════════════════
+
+model EmailAccount {
+  id          String    @id @default(cuid())
+  workspaceId String
+  email       String
+  displayName String    @default("")
+  smtp        Json      @default("{}") // { host, port, secure, user, password }
+  imap        Json      @default("{}") // { host, port, secure, user, password }
+  isActive    Boolean   @default(true)
+  allowReceive Boolean  @default(true)
+  allowSend   Boolean   @default(true)
+  ticketType  String    @default("support")
+  lastSyncAt  DateTime?
+  createdById String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy   User      @relation(fields: [createdById], references: [id])
+
+  @@unique([workspaceId, email])
+}
+
+// ═══════════════════════════════════════════════
+// DISTRIBUTION
+// ═══════════════════════════════════════════════
+
+model DistributionRule {
+  id               String    @id @default(cuid())
+  workspaceId      String
+  name             String
+  description      String?   @db.Text
+  priority         Int       @default(0)
+  isActive         Boolean   @default(true)
+  conditions       Json      @default("[]") // IRuleCondition[]
+  conditionLogic   String    @default("all") // all | any
+  action           Json      @default("{}") // { type, agentIds?, groupId? }
+  lastAssignedIndex Int      @default(0)
+  stats            Json      @default("{\"totalMatched\":0}")
+  createdById      String
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy        User      @relation(fields: [createdById], references: [id])
+
+  @@index([workspaceId, isActive, priority])
+}
+
+// ═══════════════════════════════════════════════
+// BUSINESS HOURS
+// ═══════════════════════════════════════════════
+
+model BusinessHours {
+  id             String   @id @default(cuid())
+  workspaceId    String   @unique
+  timezone       String   @default("Asia/Ho_Chi_Minh")
+  schedule       Json     @default("[]") // IDaySchedule[]
+  holidays       Json     @default("[]") // IHoliday[]
+  offlineAction  String   @default("custom_message") // bot_reply | show_form | custom_message
+  offlineMessage String?  @db.Text
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}

@@ -1,93 +1,106 @@
-import { KnowledgeEntryModel, IKnowledgeEntry } from './knowledge.model';
+import prisma from '../../../infra/prisma';
+import type { KnowledgeEntry } from '@prisma/client';
 
 export const knowledgeRepo = {
-    async create(data: Partial<IKnowledgeEntry>) {
-        return KnowledgeEntryModel.create(data);
+    async create(data: {
+        workspaceId: string;
+        product: string;
+        question: string;
+        answer: string;
+        upsaleText?: string;
+        keywords?: string[];
+        source?: string;
+        sheetRowIndex?: number;
+    }) {
+        return prisma.knowledgeEntry.create({ data: data as any });
     },
 
-    async createMany(entries: Partial<IKnowledgeEntry>[]) {
-        // Use bulkWrite with upsert to avoid duplicates (by workspaceId + sheetRowIndex for sheets)
+    async createMany(entries: Array<{
+        workspaceId: string;
+        product: string;
+        question: string;
+        answer: string;
+        upsaleText?: string;
+        keywords?: string[];
+        source?: string;
+        sheetRowIndex?: number;
+    }>) {
         if (entries.length === 0) return 0;
 
-        const ops = entries.map(entry => ({
-            updateOne: {
-                filter: entry.source === 'google_sheets'
-                    ? { workspaceId: entry.workspaceId, source: 'google_sheets', sheetRowIndex: entry.sheetRowIndex }
-                    : { _id: entry._id || new (require('mongoose').Types.ObjectId)() },
-                update: { $set: entry },
-                upsert: true,
+        let count = 0;
+        for (const entry of entries) {
+            if (entry.source === 'google_sheets' && entry.sheetRowIndex !== undefined) {
+                // Upsert by workspace + source + sheetRowIndex
+                const existing = await prisma.knowledgeEntry.findFirst({
+                    where: { workspaceId: entry.workspaceId, source: 'google_sheets', sheetRowIndex: entry.sheetRowIndex },
+                });
+                if (existing) {
+                    await prisma.knowledgeEntry.update({ where: { id: existing.id }, data: entry as any });
+                } else {
+                    await prisma.knowledgeEntry.create({ data: entry as any });
+                }
+            } else {
+                await prisma.knowledgeEntry.create({ data: entry as any });
             }
-        }));
-
-        const result = await KnowledgeEntryModel.bulkWrite(ops);
-        return result.upsertedCount + result.modifiedCount;
+            count++;
+        }
+        return count;
     },
 
     async findByWorkspace(workspaceId: string, filters?: { product?: string; source?: string }) {
-        const query: any = { workspaceId };
-        if (filters?.product) query.product = filters.product;
-        if (filters?.source) query.source = filters.source;
-        return KnowledgeEntryModel.find(query).sort({ product: 1, createdAt: -1 }).lean();
+        const where: any = { workspaceId };
+        if (filters?.product) where.product = filters.product;
+        if (filters?.source) where.source = filters.source;
+        return prisma.knowledgeEntry.findMany({
+            where,
+            orderBy: [{ product: 'asc' }, { createdAt: 'desc' }],
+        });
     },
 
     async search(workspaceId: string, queryText: string, limit = 5) {
-        // Strategy 1: MongoDB $text search
-        try {
-            const textResults = await KnowledgeEntryModel.find(
-                { workspaceId, $text: { $search: queryText } },
-                { score: { $meta: 'textScore' } }
-            )
-                .sort({ score: { $meta: 'textScore' } })
-                .limit(limit)
-                .lean();
-
-            if (textResults.length > 0) return textResults;
-        } catch { /* text index might not exist yet */ }
-
-        // Strategy 2: Regex fallback for Vietnamese text
+        // Strategy: LIKE search for Vietnamese text (MySQL FULLTEXT doesn't handle Vietnamese well)
         const words = queryText.toLowerCase().split(/\s+/).filter(w => w.length > 1);
         if (words.length === 0) return [];
 
-        const regexConditions = words.map(w => ({
-            $or: [
-                { question: { $regex: w, $options: 'i' } },
-                { answer: { $regex: w, $options: 'i' } },
-                { product: { $regex: w, $options: 'i' } },
-                { keywords: { $regex: w, $options: 'i' } },
-            ]
-        }));
+        // Build OR conditions: each word matches any of question/answer/product
+        const orConditions = words.flatMap(w => [
+            { question: { contains: w } },
+            { answer: { contains: w } },
+            { product: { contains: w } },
+        ]);
 
-        return KnowledgeEntryModel.find({
-            workspaceId,
-            $or: regexConditions.length > 1
-                ? [{ $and: regexConditions }, ...regexConditions]
-                : regexConditions,
-        })
-            .limit(limit)
-            .lean();
+        return prisma.knowledgeEntry.findMany({
+            where: { workspaceId, OR: orConditions },
+            take: limit,
+        });
     },
 
     async findById(id: string) {
-        return KnowledgeEntryModel.findById(id).lean();
+        return prisma.knowledgeEntry.findUnique({ where: { id } });
     },
 
-    async update(id: string, data: Partial<IKnowledgeEntry>) {
-        return KnowledgeEntryModel.findByIdAndUpdate(id, data, { new: true }).lean();
+    async update(id: string, data: Partial<Omit<KnowledgeEntry, 'id' | 'createdAt' | 'updatedAt'>>) {
+        return prisma.knowledgeEntry.update({ where: { id }, data: data as any });
     },
 
     async remove(id: string) {
-        return KnowledgeEntryModel.findByIdAndDelete(id);
+        return prisma.knowledgeEntry.delete({ where: { id } });
     },
 
     async removeByWorkspaceAndSource(workspaceId: string, source: string) {
-        return KnowledgeEntryModel.deleteMany({ workspaceId, source });
+        return prisma.knowledgeEntry.deleteMany({ where: { workspaceId, source } });
     },
 
     async getProducts(workspaceId: string) {
-        return KnowledgeEntryModel.distinct('product', { workspaceId });
+        const results = await prisma.knowledgeEntry.findMany({
+            where: { workspaceId },
+            select: { product: true },
+            distinct: ['product'],
+        });
+        return results.map(r => r.product);
     },
 
     async count(workspaceId: string) {
-        return KnowledgeEntryModel.countDocuments({ workspaceId });
+        return prisma.knowledgeEntry.count({ where: { workspaceId } });
     },
 };

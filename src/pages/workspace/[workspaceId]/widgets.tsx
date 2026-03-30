@@ -604,23 +604,49 @@ export default function WorkspaceDetailPage() {
                 open={!!testModal}
                 onCancel={() => setTestModal(null)}
                 footer={
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
                         <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
-                            💡 Widget đang chạy trên môi trường local — test trước khi xuất bản.
+                            Widget đang chạy trên môi trường local — test trước khi xuất bản.
                         </span>
                         <Button onClick={() => setTestModal(null)}>Đóng</Button>
                     </div>
                 }
-                width={900}
-                styles={{ body: { padding: 0, height: '70vh', overflow: 'hidden' } }}
+                width={960}
+                centered
+                styles={{
+                    body: {
+                        padding: 0,
+                        height: 'min(78vh, 860px)',
+                        overflow: 'hidden',
+                        borderTop: '1px solid var(--color-border)'
+                    },
+                    footer: {
+                        marginTop: 0,
+                        borderTop: '1px solid var(--color-border)',
+                        paddingTop: 12
+                    }
+                }}
                 destroyOnClose
             >
-                {testModal && (() => {
-                    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3010';
-                    // Derive backend base URL from NEXT_PUBLIC_API_URL or fall back to SERVER_PORT
-                    const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
-                    const backendBase = apiUrl ? apiUrl.replace(/\/api\/?$/, '') : origin;
-                    const testHtml = `<!DOCTYPE html>
+                <div style={{ height: '100%', background: 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)' }}>
+                    <div style={{
+                        height: 44,
+                        display: 'flex',
+                        alignItems: 'center',
+                        padding: '0 14px',
+                        fontSize: 12,
+                        color: 'var(--color-text-secondary)',
+                        borderBottom: '1px solid var(--color-border)',
+                        background: '#fff'
+                    }}>
+                        Mô phỏng website local có nhúng widget
+                    </div>
+                    <div style={{ height: 'calc(100% - 44px)' }}>
+                        {testModal ? (() => {
+                            const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3010';
+                            const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
+                            const backendBase = apiUrl ? apiUrl.replace(/\/api\/?$/, '') : origin;
+                            const testHtml = `<!DOCTYPE html>
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
@@ -766,20 +792,18 @@ export default function WorkspaceDetailPage() {
     </script>
 </body>
 </html>`;
-                    const blob = new Blob([testHtml], { type: 'text/html' });
-                    const blobUrl = URL.createObjectURL(blob);
-                    return (
-                        <iframe
-                            src={blobUrl}
-                            style={{ width: '100%', height: '100%', border: 'none' }}
-                            title="Widget Local Test"
-                            onLoad={() => {
-                                // Revoke blob URL after iframe loads to free memory
-                                setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
-                            }}
-                        />
-                    );
-                })()}
+
+                            return (
+                                <iframe
+                                    srcDoc={testHtml}
+                                    style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
+                                    title="Widget Local Test"
+                                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                                />
+                            );
+                        })() : null}
+                    </div>
+                </div>
             </Modal>
 
             {/* ─── Config Drawer ─── */}

@@ -1,0 +1,58 @@
+[
+  {
+    "_id": "69c4254f7928c85f88c69d0e",
+    "workspaceId": "69bfd57cd909fb466310aa48",
+    "name": "Chatbot AI",
+    "brandName": "NemarkChat",
+    "brandDescription": "Hệ thống chăm sóc khách hàng đa kênh",
+    "aiModel": "gpt-5",
+    "mainTask": "customer_care",
+    "conversationStyle": "friendly",
+    "messageLength": "medium",
+    "customGreeting": "Xin chào! Tôi là trợ lý AI của NemarkChat. Tôi có thể giúp gì cho bạn?",
+    "welcomeMessage": "Chào mừng bạn ghé thăm website của chúng tôi 👋",
+    "channels": {
+      "website": {
+        "enabled": true
+      },
+      "messenger": {
+        "enabled": true
+      },
+      "facebook": {
+        "enabled": true
+      },
+      "zalo": {
+        "enabled": true
+      },
+      "instagram": {
+        "enabled": false
+      }
+    },
+    "agentCondition": "no_condition",
+    "scenarios": [],
+    "quickReplies": [
+      {
+        "label": "Báo giá 💰",
+        "value": "Tôi muốn xem báo giá"
+      },
+      {
+        "label": "Hỗ trợ tôi ❓",
+        "value": "Tôi cần hỗ trợ"
+      }
+    ],
+    "followUp": {
+      "enabled": false,
+      "delaySeconds": 30,
+      "message": "Bạn còn cần hỗ trợ gì thêm không ạ?"
+    },
+    "isActive": true,
+    "isDraft": false,
+    "stats": {
+      "totalConversations": 0,
+      "totalReplies": 0,
+      "leadsCollected": 0
+    },
+    "createdAt": "2026-03-25T18:11:27.148Z",
+    "updatedAt": "2026-03-25T18:11:27.148Z"
+  }
+]

@@ -43,4 +43,4 @@ const sessionAuditLogSchema = new Schema<ISessionAuditLog>(
 
 sessionAuditLogSchema.index({ sessionId: 1, createdAt: -1 });
 
-export const SessionAuditLogModel = mongoose.model<ISessionAuditLog>('SessionAuditLog', sessionAuditLogSchema);
+export const SessionAuditLogModel = (mongoose.models.SessionAuditLog || mongoose.model<ISessionAuditLog>('SessionAuditLog', sessionAuditLogSchema)) as mongoose.Model<ISessionAuditLog>;

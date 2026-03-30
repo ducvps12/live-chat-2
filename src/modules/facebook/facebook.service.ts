@@ -127,7 +127,7 @@ class FacebookService {
     async getPages(workspaceId: string) {
         const pages = await fbPageRepo.findByWorkspaceId(workspaceId);
         return pages.map(p => ({
-            id: (p._id as unknown as string).toString(),
+            id: (p.id).toString(),
             pageId: p.pageId,
             pageName: p.pageName,
             pageAvatar: p.pageAvatar,
@@ -564,7 +564,7 @@ class FacebookService {
 
             for (const page of allPages) {
                 try {
-                    const pageDbId = (page._id as any).toString();
+                    const pageDbId = (page.id).toString();
                     const workspaceId = page.workspaceId.toString();
                     console.log(`[FacebookService]   → Syncing page "${page.pageName}" (${page.pageId})`);
                     const result = await this.syncPageConversations(workspaceId, pageDbId);

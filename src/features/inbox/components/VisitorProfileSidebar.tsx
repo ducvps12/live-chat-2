@@ -1,24 +1,138 @@
 import React, { useState, useEffect } from 'react';
-import { Spin, Button, Form, Input, Divider, Typography, Empty, message, Tag, Select, Mentions } from 'antd';
-import { Edit2, ExternalLink, Mail, Phone, User, MonitorSmartphone, MapPin, Tag as TagIcon, StickyNote, Star, Target, Facebook, Image, FileText, Link as LinkIcon, ChevronDown, ChevronRight, MessageCircle } from 'lucide-react';
+import { Spin, Button, Form, Input, Empty, message, Tag, Select, Mentions } from 'antd';
+import { Edit2, Mail, Phone, User, MonitorSmartphone, MapPin, Tag as TagIcon, StickyNote, Star, Target, Facebook, Image, FileText, Link as LinkIcon, ChevronDown, MessageCircle, Copy, Clock, Eye, Sparkles, Hash, Globe, Shield } from 'lucide-react';
 import { useGetVisitor, useUpdateVisitor } from '../hooks/useVisitor';
 
-const { Text, Title } = Typography;
-
 const LEAD_STAGES = [
-    { key: 'intake', label: 'Intake', color: '#94a3b8', bg: '#f1f5f9' },
-    { key: 'qualified', label: 'Qualified', color: '#3b82f6', bg: '#eff6ff' },
-    { key: 'potential', label: 'Tiềm năng', color: '#f59e0b', bg: '#fffbeb' },
-    { key: 'purchased', label: 'Đã mua', color: '#10b981', bg: '#ecfdf5' },
-    { key: 'skipped', label: 'Bỏ qua', color: '#6b7280', bg: '#f9fafb' },
+    { key: 'intake', label: 'Intake', color: '#1a73e8', bg: '#e8f0fe', icon: '📥' },
+    { key: 'qualified', label: 'Qualified', color: '#0d652d', bg: '#e6f4ea', icon: '✅' },
+    { key: 'potential', label: 'Tiềm năng', color: '#e37400', bg: '#fef7e0', icon: '🔥' },
+    { key: 'purchased', label: 'Đã mua', color: '#137333', bg: '#ceead6', icon: '🛒' },
+    { key: 'skipped', label: 'Bỏ qua', color: '#5f6368', bg: '#f1f3f4', icon: '⏭️' },
 ];
 
 const SUGGESTED_LABELS = [
-    { name: 'Khách hàng mới', color: '#3b82f6' },
-    { name: `Ngày hôm nay (${new Date().toLocaleDateString('vi-VN')})`, color: '#f59e0b' },
-    { name: 'Tiếp nhận', color: '#10b981' },
-    { name: 'Đã giao', color: '#8b5cf6' },
+    { name: 'Khách hàng mới', color: '#1a73e8', icon: '🆕' },
+    { name: `Hôm nay (${new Date().toLocaleDateString('vi-VN')})`, color: '#e37400', icon: '📅' },
+    { name: 'Tiếp nhận', color: '#0d652d', icon: '📋' },
+    { name: 'Đã giao', color: '#7c4dff', icon: '📦' },
 ];
+
+/* ─── Google-style Section ─── */
+const Section: React.FC<{
+    title: string;
+    icon: React.ReactNode;
+    defaultOpen?: boolean;
+    count?: number | string;
+    children: React.ReactNode;
+}> = ({ title, icon, defaultOpen = true, count, children }) => {
+    const [open, setOpen] = useState(defaultOpen);
+    return (
+        <div style={{ marginBottom: 2 }}>
+            <button
+                onClick={() => setOpen(!open)}
+                style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '13px 20px',
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontSize: 11,
+                    fontWeight: 500,
+                    color: '#5f6368',
+                    letterSpacing: '0.07em',
+                    textTransform: 'uppercase',
+                    transition: 'background 0.15s',
+                    borderRadius: 12,
+                }}
+                onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,0,0,0.03)')}
+                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            >
+                <span style={{ display: 'flex', color: '#5f6368' }}>{icon}</span>
+                <span style={{ flex: 1, textAlign: 'left' }}>{title}</span>
+                {count !== undefined && (
+                    <span style={{
+                        fontSize: 11,
+                        fontWeight: 500,
+                        color: '#1a73e8',
+                        background: '#e8f0fe',
+                        padding: '1px 8px',
+                        borderRadius: 100,
+                        lineHeight: '18px',
+                    }}>{count}</span>
+                )}
+                <ChevronDown
+                    size={16}
+                    color="#9aa0a6"
+                    style={{
+                        transition: 'transform 0.2s ease',
+                        transform: open ? 'rotate(0)' : 'rotate(-90deg)',
+                    }}
+                />
+            </button>
+            <div style={{
+                overflow: 'hidden',
+                maxHeight: open ? 800 : 0,
+                transition: 'max-height 0.25s ease',
+                padding: open ? '0 20px 12px' : '0 20px 0',
+            }}>
+                {children}
+            </div>
+        </div>
+    );
+};
+
+/* ─── Info Row (Google Contacts style) ─── */
+const InfoRow: React.FC<{
+    icon: React.ReactNode;
+    iconBg: string;
+    label: string;
+    value: string;
+    copyable?: boolean;
+    isLink?: boolean;
+}> = ({ icon, iconBg, label, value, copyable, isLink }) => (
+    <div style={{
+        display: 'flex', alignItems: 'center', gap: 12,
+        padding: '10px 14px',
+        borderRadius: 12,
+        background: '#fff',
+        border: '1px solid #e8eaed',
+        transition: 'all 0.15s',
+        cursor: copyable ? 'pointer' : 'default',
+    }}
+    onClick={() => {
+        if (copyable) {
+            navigator.clipboard.writeText(value);
+            message.success('Đã sao chép');
+        }
+    }}
+    onMouseEnter={e => {
+        (e.currentTarget as HTMLElement).style.background = '#f8f9fa';
+        (e.currentTarget as HTMLElement).style.borderColor = '#dadce0';
+    }}
+    onMouseLeave={e => {
+        (e.currentTarget as HTMLElement).style.background = '#fff';
+        (e.currentTarget as HTMLElement).style.borderColor = '#e8eaed';
+    }}
+    >
+        <div style={{
+            width: 36, height: 36, borderRadius: 10, background: iconBg,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        }}>{icon}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 10, color: '#9aa0a6', fontWeight: 500, letterSpacing: '0.03em', marginBottom: 1 }}>{label}</div>
+            {isLink ? (
+                <a href={value} target="_blank" rel="noreferrer" style={{ fontSize: 13, color: '#1a73e8', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', textDecoration: 'none' }}>{value}</a>
+            ) : (
+                <div style={{ fontSize: 13, color: '#202124', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</div>
+            )}
+        </div>
+        {copyable && <Copy size={14} color="#9aa0a6" style={{ flexShrink: 0 }} />}
+    </div>
+);
 
 interface VisitorProfileSidebarProps {
     workspaceId: string;
@@ -30,11 +144,9 @@ interface VisitorProfileSidebarProps {
     onAddTag?: (tag: string) => void;
     onRemoveTag?: (tag: string) => void;
     onAddNote?: (content: string, mentionedUserIds?: string[]) => void;
-    // Meta Business Suite features
     conversationMetadata?: any;
     conversationChannel?: string;
     onUpdateMetadata?: (data: { leadStage?: string; isStarred?: boolean }) => void;
-    // Chat messages for media extraction
     messages?: Array<{
         _id: string;
         content: string;
@@ -55,798 +167,545 @@ export const VisitorProfileSidebar: React.FC<VisitorProfileSidebarProps> = ({
 
     const [isEditing, setIsEditing] = useState(false);
     const [noteText, setNoteText] = useState('');
-    const [expandMedia, setExpandMedia] = useState(false);
-    const [expandFiles, setExpandFiles] = useState(false);
-    const [expandLinks, setExpandLinks] = useState(false);
+    const [showAllMedia, setShowAllMedia] = useState(false);
+    const [showAllFiles, setShowAllFiles] = useState(false);
+    const [showAllLinks, setShowAllLinks] = useState(false);
     const [form] = Form.useForm();
 
     useEffect(() => {
         if (visitor && isEditing) {
             form.setFieldsValue({
-                name: visitor.name || '',
-                email: visitor.email || '',
-                phone: visitor.phone || '',
-                notes: visitor.attributes?.notes || '',
-                tags: visitor.attributes?.tags || [],
+                name: visitor.name || '', email: visitor.email || '',
+                phone: visitor.phone || '', notes: visitor.attributes?.notes || '',
             });
         }
     }, [visitor, isEditing, form]);
 
+    // ── Empty / Loading states (Google style) ──
     if (!visitorId) {
         return (
-            <div style={styles.emptyContainer}>
-                <Empty description="Chọn cuộc hội thoại để xem hồ sơ" />
+            <div style={{ width: '100%', height: '100%', background: '#f8f9fa', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
+                <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#e8eaed', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <User size={28} color="#9aa0a6" />
+                </div>
+                <div style={{ fontSize: 14, color: '#5f6368', fontWeight: 500, textAlign: 'center', maxWidth: 200, lineHeight: 1.5 }}>
+                    Chọn cuộc hội thoại để xem hồ sơ
+                </div>
             </div>
         );
     }
-
     if (isLoading) {
-        return (
-            <div style={styles.loadingContainer}>
-                <Spin />
-            </div>
-        );
+        return <div style={{ width: '100%', height: '100%', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Spin /></div>;
     }
-
     if (!visitor) {
-        return (
-            <div style={styles.emptyContainer}>
-                <Empty description="Không tìm thấy hồ sơ visitor" />
-            </div>
-        );
+        return <div style={{ width: '100%', height: '100%', background: '#f8f9fa', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Empty description="Không tìm thấy hồ sơ" /></div>;
     }
 
     const handleSave = async (values: any) => {
-        updateVisitor(
-            {
-                workspaceId,
-                visitorId,
-                data: {
-                    name: values.name,
-                    email: values.email,
-                    phone: values.phone,
-                    attributes: {
-                        ...visitor.attributes,
-                        notes: values.notes,
-                        tags: values.tags,
-                    },
-                },
-            },
-            {
-                onSuccess: () => {
-                    message.success('Đã cập nhật hồ sơ visitor');
-                    setIsEditing(false);
-                    refetch();
-                },
-                onError: () => {
-                    message.error('Lỗi khi cập nhật hồ sơ');
-                },
-            }
-        );
+        updateVisitor({ workspaceId, visitorId, data: { name: values.name, email: values.email, phone: values.phone, attributes: { ...visitor.attributes, notes: values.notes } } }, {
+            onSuccess: () => { message.success('Đã cập nhật'); setIsEditing(false); refetch(); },
+            onError: () => message.error('Lỗi cập nhật'),
+        });
     };
 
-    const hasContactInfo = visitor.email || visitor.phone;
-
-    // Attributes derived values
+    const displayName = visitor.name || visitor.email || `Khách ${visitor.visitorId.slice(0, 8)}`;
     const lastPageUrl = visitor.attributes?.lastPageUrl || visitor.attributes?.pageUrl;
     const notes = visitor.attributes?.notes;
     const locationInfo = visitor.attributes?.location;
-    const tags = visitor.attributes?.tags || [];
+    const isStarred = conversationMetadata?.isStarred;
+
+    // ── Media extraction ──
+    const IMG_RE = /\.(jpg|jpeg|png|gif|webp|bmp|svg)/i;
+    const mediaItems = messages.flatMap(m => {
+        const results: Array<{ url: string; date: string }> = [];
+        m.attachments?.forEach(a => {
+            const src = a.url || a.data || '';
+            if (a.mimeType?.startsWith('image/') || a.mimeType?.startsWith('video/') || IMG_RE.test(src))
+                results.push({ url: src, date: new Date(m.createdAt).toLocaleDateString('vi-VN') });
+        });
+        const urlMatches = m.content?.match(/https?:\/\/\S+\.(jpg|jpeg|png|gif|webp)[^\s]*/gi) || [];
+        urlMatches.forEach(u => results.push({ url: u, date: new Date(m.createdAt).toLocaleDateString('vi-VN') }));
+        return results;
+    }).reverse();
+
+    const fileItems = messages.flatMap(m =>
+        (m.attachments || []).filter(a => a.filename && !a.mimeType?.startsWith('image/') && !a.mimeType?.startsWith('video/')).map(a => ({
+            name: a.filename || 'file', url: a.url || a.data || '#', date: new Date(m.createdAt).toLocaleDateString('vi-VN'),
+        }))
+    ).reverse();
+
+    const URL_RE = /https?:\/\/[^\s<>"']+/gi;
+    const IMG_EXT = /\.(jpg|jpeg|png|gif|webp|bmp|svg)(\?.*)?$/i;
+    const seen = new Set<string>();
+    const linkItems = messages.flatMap(m => {
+        URL_RE.lastIndex = 0;
+        return (m.content?.match(URL_RE) || []).filter(u => !IMG_EXT.test(u)).map(u => ({
+            url: u, domain: (() => { try { return new URL(u).hostname; } catch { return u; } })(),
+            date: new Date(m.createdAt).toLocaleDateString('vi-VN'),
+            sender: m.sender.name || (m.sender.type === 'agent' ? 'Bạn' : 'Khách'),
+        }));
+    }).reverse().filter(l => { if (seen.has(l.url)) return false; seen.add(l.url); return true; });
+
+    // ── Google Contacts-style avatar color ──
+    const avatarColors = ['#1a73e8', '#ea4335', '#fbbc04', '#34a853', '#ff6d01', '#46bdc6', '#7c4dff', '#e91e63'];
+    const avatarColor = avatarColors[displayName.charCodeAt(0) % avatarColors.length];
 
     return (
-        <div style={styles.container}>
-            {/* Header section */}
-            <div style={styles.header}>
-                <div style={styles.avatarLarge}>
-                    <User size={32} color="#fff" />
-                </div>
-                <Title level={5} style={{ margin: '12px 0 4px', fontSize: 16 }}>
-                    {visitor.name || visitor.email || `Khách ${visitor.visitorId.slice(0, 8)}`}
-                </Title>
-                <Text type="secondary" style={{ fontSize: 13 }}>
-                    Online {new Date(visitor.lastSeenAt).toLocaleString('vi-VN')}
-                </Text>
+        <div style={{
+            width: '100%', height: '100%', background: '#fff',
+            display: 'flex', flexDirection: 'column', overflowY: 'auto', overflowX: 'hidden',
+            fontFamily: "'Google Sans', 'Segoe UI', Roboto, -apple-system, sans-serif",
+        }}>
+            <style>{`
+                .goog-sidebar::-webkit-scrollbar { width: 4px; }
+                .goog-sidebar::-webkit-scrollbar-thumb { background: #dadce0; border-radius: 4px; }
+                .goog-sidebar::-webkit-scrollbar-thumb:hover { background: #bdc1c6; }
+            `}</style>
 
-                {!isEditing && (
-                    <Button
-                        size="small"
-                        icon={<Edit2 size={14} />}
-                        onClick={() => setIsEditing(true)}
-                        style={{ marginTop: 16, borderRadius: 16 }}
+            {/* ═══════ PROFILE HEADER ═══════ */}
+            <div style={{
+                padding: '28px 20px 20px',
+                display: 'flex', flexDirection: 'column', alignItems: 'center',
+                textAlign: 'center',
+                borderBottom: '1px solid #e8eaed',
+                background: '#fff',
+            }}>
+                {/* Avatar — Google Contacts style */}
+                <div style={{ position: 'relative', marginBottom: 14 }}>
+                    <div style={{
+                        width: 80, height: 80, borderRadius: '50%',
+                        background: avatarColor,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 34, fontWeight: 400, color: '#fff',
+                        fontFamily: "'Google Sans', sans-serif",
+                        letterSpacing: '-0.02em',
+                    }}>
+                        {displayName.charAt(0).toUpperCase()}
+                    </div>
+                    {/* Online indicator */}
+                    <div style={{
+                        position: 'absolute', bottom: 2, right: 2,
+                        width: 14, height: 14, borderRadius: '50%',
+                        background: '#34a853', border: '2.5px solid #fff',
+                    }} />
+                </div>
+
+                {/* Name */}
+                <h2 style={{
+                    margin: 0, fontSize: 22, fontWeight: 400, color: '#202124',
+                    fontFamily: "'Google Sans', sans-serif", lineHeight: 1.3,
+                    letterSpacing: '-0.01em',
+                }}>
+                    {displayName}
+                </h2>
+
+                {/* Status */}
+                <div style={{ fontSize: 12, color: '#5f6368', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#34a853' }} />
+                    Online · {new Date(visitor.lastSeenAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                </div>
+
+                {/* Action buttons — Apple/Google pill style */}
+                <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+                    {!isEditing && (
+                        <button
+                            onClick={() => setIsEditing(true)}
+                            style={{
+                                height: 36, padding: '0 20px',
+                                borderRadius: 18, border: '1px solid #dadce0',
+                                background: '#fff', color: '#1a73e8',
+                                fontSize: 13, fontWeight: 500,
+                                cursor: 'pointer',
+                                display: 'flex', alignItems: 'center', gap: 6,
+                                transition: 'all 0.15s',
+                                fontFamily: "'Google Sans', sans-serif",
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.background = '#f8f9fa'; e.currentTarget.style.borderColor = '#1a73e8'; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.borderColor = '#dadce0'; }}
+                        >
+                            <Edit2 size={14} /> Chỉnh sửa
+                        </button>
+                    )}
+                    <button
+                        onClick={() => onUpdateMetadata?.({ isStarred: !isStarred })}
+                        style={{
+                            height: 36, padding: '0 20px',
+                            borderRadius: 18,
+                            border: isStarred ? '1px solid #fdd663' : '1px solid #dadce0',
+                            background: isStarred ? '#fef7e0' : '#fff',
+                            color: isStarred ? '#e37400' : '#5f6368',
+                            fontSize: 13, fontWeight: 500,
+                            cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: 6,
+                            transition: 'all 0.15s',
+                            fontFamily: "'Google Sans', sans-serif",
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.background = isStarred ? '#feefc3' : '#f8f9fa'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = isStarred ? '#fef7e0' : '#fff'; }}
                     >
-                        Chỉnh sửa
-                    </Button>
-                )}
+                        <Star size={14} fill={isStarred ? '#e37400' : 'none'} /> {isStarred ? 'Quan trọng' : 'Đánh dấu'}
+                    </button>
+                </div>
             </div>
 
-            <Divider style={{ margin: '0' }} />
+            {/* ═══════ BODY ═══════ */}
+            <div style={{ flex: 1, paddingTop: 4, paddingBottom: 24 }}>
 
-            {/* Content Body */}
-            <div style={styles.body}>
                 {isEditing ? (
-                    <Form form={form} layout="vertical" onFinish={handleSave}>
-                        <Form.Item name="name" label="Tên">
-                            <Input placeholder="Nhập họ tên" prefix={<User size={14} color="#aaa" />} />
-                        </Form.Item>
-                        <Form.Item name="email" label="Email">
-                            <Input placeholder="Nhập email" prefix={<Mail size={14} color="#aaa" />} />
-                        </Form.Item>
-                        <Form.Item name="phone" label="Số điện thoại">
-                            <Input placeholder="Nhập số điện thoại" prefix={<Phone size={14} color="#aaa" />} />
-                        </Form.Item>
-                        <Form.Item name="tags" label="Thẻ (Tags)">
-                            <Select mode="tags" style={{ width: '100%' }} placeholder="Thêm thẻ, nhấn enter" />
-                        </Form.Item>
-                        <Form.Item name="notes" label="Ghi chú">
-                            <Input.TextArea placeholder="Ghi chú nội bộ về khách hàng này..." rows={4} />
-                        </Form.Item>
-                        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 24 }}>
-                            <Button onClick={() => setIsEditing(false)}>Hủy</Button>
-                            <Button type="primary" htmlType="submit" loading={isUpdating}>
-                                Lưu
-                            </Button>
-                        </div>
-                    </Form>
+                    <div style={{ padding: '16px 20px' }}>
+                        <Form form={form} layout="vertical" onFinish={handleSave}>
+                            <Form.Item name="name" label={<span style={{ fontSize: 12, fontWeight: 500, color: '#5f6368' }}>Tên</span>} style={{ marginBottom: 14 }}>
+                                <Input placeholder="Họ tên" prefix={<User size={14} color="#9aa0a6" />} style={{ borderRadius: 8, height: 40 }} />
+                            </Form.Item>
+                            <Form.Item name="email" label={<span style={{ fontSize: 12, fontWeight: 500, color: '#5f6368' }}>Email</span>} style={{ marginBottom: 14 }}>
+                                <Input placeholder="Email" prefix={<Mail size={14} color="#9aa0a6" />} style={{ borderRadius: 8, height: 40 }} />
+                            </Form.Item>
+                            <Form.Item name="phone" label={<span style={{ fontSize: 12, fontWeight: 500, color: '#5f6368' }}>SĐT</span>} style={{ marginBottom: 14 }}>
+                                <Input placeholder="Số điện thoại" prefix={<Phone size={14} color="#9aa0a6" />} style={{ borderRadius: 8, height: 40 }} />
+                            </Form.Item>
+                            <Form.Item name="notes" label={<span style={{ fontSize: 12, fontWeight: 500, color: '#5f6368' }}>Ghi chú</span>} style={{ marginBottom: 16 }}>
+                                <Input.TextArea placeholder="Ghi chú..." rows={3} style={{ borderRadius: 8 }} />
+                            </Form.Item>
+                            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                                <Button onClick={() => setIsEditing(false)} style={{ borderRadius: 20, height: 36, fontWeight: 500 }}>Hủy</Button>
+                                <Button type="primary" htmlType="submit" loading={isUpdating} style={{ borderRadius: 20, height: 36, fontWeight: 500, background: '#1a73e8' }}>Lưu thay đổi</Button>
+                            </div>
+                        </Form>
+                    </div>
                 ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-                        {/* Contact Info */}
-                        <div style={styles.section}>
-                            <Title level={5} style={styles.sectionTitle}>Thông tin liên hệ</Title>
-                            {!hasContactInfo && !visitor.name ? (
-                                <Text type="secondary" style={{ fontSize: 13, fontStyle: 'italic' }}>Chưa có thông tin</Text>
-                            ) : (
-                                <div style={styles.infoList}>
-                                    {visitor.name && (
-                                        <div style={styles.infoRow}>
-                                            <User size={14} style={styles.infoIcon} />
-                                            <Text>{visitor.name}</Text>
-                                        </div>
-                                    )}
-                                    {visitor.email && (
-                                        <div style={styles.infoRow}>
-                                            <Mail size={14} style={styles.infoIcon} />
-                                            <Text copyable={{ text: visitor.email }}>{visitor.email}</Text>
-                                        </div>
-                                    )}
-                                    {visitor.phone && (
-                                        <div style={styles.infoRow}>
-                                            <Phone size={14} style={styles.infoIcon} />
-                                            <Text copyable={{ text: visitor.phone }}>{visitor.phone}</Text>
-                                        </div>
-                                    )}
+                    <>
+                        {/* ── Contact Info ── */}
+                        <Section title="Thông tin liên hệ" icon={<User size={15} />}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                {visitor.name && <InfoRow icon={<User size={16} color="#1a73e8" />} iconBg="#e8f0fe" label="Tên" value={visitor.name} />}
+                                {visitor.email && <InfoRow icon={<Mail size={16} color="#ea4335" />} iconBg="#fce8e6" label="Email" value={visitor.email} copyable />}
+                                {visitor.phone && <InfoRow icon={<Phone size={16} color="#34a853" />} iconBg="#e6f4ea" label="Số điện thoại" value={visitor.phone} copyable />}
+                                {!visitor.name && !visitor.email && !visitor.phone && (
+                                    <div style={{ padding: '20px 16px', textAlign: 'center', background: '#f8f9fa', borderRadius: 12 }}>
+                                        <div style={{ fontSize: 13, color: '#5f6368', marginBottom: 10 }}>Chưa có thông tin liên hệ</div>
+                                        <button onClick={() => setIsEditing(true)} style={{
+                                            padding: '8px 20px', borderRadius: 20, border: '1px solid #dadce0',
+                                            background: '#fff', color: '#1a73e8', fontSize: 13, fontWeight: 500,
+                                            cursor: 'pointer', fontFamily: "'Google Sans', sans-serif",
+                                        }}>+ Thêm thông tin</button>
+                                    </div>
+                                )}
+                            </div>
+                        </Section>
+
+                        {/* ── Tags ── */}
+                        <Section title="Tags hội thoại" icon={<TagIcon size={15} />} count={conversationTags.length || undefined}>
+                            {conversationTags.length > 0 && (
+                                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+                                    {conversationTags.map(t => {
+                                        const lb = workspaceLabels.find(l => l.name === t);
+                                        return (
+                                            <Tag key={t} closable onClose={() => onRemoveTag?.(t)} style={{
+                                                borderRadius: 16, margin: 0, fontSize: 12, fontWeight: 500,
+                                                padding: '2px 12px', border: 'none',
+                                                background: lb ? lb.color + '18' : '#e8f0fe',
+                                                color: lb ? lb.color : '#1a73e8',
+                                                height: 28, display: 'inline-flex', alignItems: 'center',
+                                            }}>
+                                                {lb && <span style={{ width: 6, height: 6, borderRadius: '50%', background: lb.color, marginRight: 6, display: 'inline-block' }} />}
+                                                {t}
+                                            </Tag>
+                                        );
+                                    })}
                                 </div>
                             )}
-                        </div>
-
-                        {/* Notes */}
-                        {notes && (
-                            <div style={styles.section}>
-                                <Title level={5} style={styles.sectionTitle}>Ghi chú visitor</Title>
-                                <div style={styles.noteBox}>
-                                    <Text style={{ fontSize: 13 }}>{notes}</Text>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* ── Conversation Tags ── */}
-                        <div style={styles.section}>
-                            <Title level={5} style={styles.sectionTitle}>
-                                <TagIcon size={14} style={{ marginRight: 6, verticalAlign: 'middle' }} />
-                                Tags hội thoại
-                            </Title>
-                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
-                                {conversationTags.map(t => {
-                                    const lb = workspaceLabels.find(l => l.name === t);
-                                    return (
-                                        <Tag
-                                            key={t}
-                                            closable
-                                            color={lb ? undefined : 'blue'}
-                                            onClose={() => onRemoveTag?.(t)}
-                                            style={{
-                                                borderRadius: 8, margin: 0,
-                                                ...(lb ? {
-                                                    background: lb.color + '18',
-                                                    color: lb.color,
-                                                    border: `1px solid ${lb.color}40`,
-                                                } : {}),
-                                            }}
-                                        >
-                                            {lb && <span style={{ width: 8, height: 8, borderRadius: '50%', background: lb.color, display: 'inline-block', marginRight: 4, verticalAlign: 'middle' }} />}
-                                            {t}
-                                        </Tag>
-                                    );
-                                })}
-                            </div>
                             <Select
                                 size="small"
                                 mode="tags"
-                                placeholder="+ Nhập tag mới hoặc chọn..."
+                                placeholder="+ Thêm tag..."
                                 style={{ width: '100%' }}
                                 value={[]}
                                 onChange={(vals: string[]) => {
-                                    // Only add the last typed/selected value
                                     const newTag = vals[vals.length - 1];
-                                    if (newTag && !conversationTags.includes(newTag)) {
-                                        onAddTag?.(newTag.trim());
-                                    }
+                                    if (newTag && !conversationTags.includes(newTag)) onAddTag?.(newTag.trim());
                                 }}
-                                options={workspaceTags
-                                    .filter(t => !conversationTags.includes(t))
-                                    .map(t => ({ label: t, value: t }))}
-                                popupMatchSelectWidth={true}
-                                allowClear={false}
+                                options={workspaceTags.filter(t => !conversationTags.includes(t)).map(t => ({ label: t, value: t }))}
                                 tokenSeparators={[',']}
                             />
-                        </div>
+                        </Section>
 
-                        {/* ── Source OA/Page Info ── */}
+                        {/* ── Zalo/Facebook Source ── */}
                         {(conversationChannel === 'facebook' || conversationChannel === 'zalo') && conversationMetadata?.pageName && (
-                            <div style={styles.section}>
-                                <Title level={5} style={styles.sectionTitle}>
-                                    {conversationChannel === 'facebook' ? (
-                                        <Facebook size={14} style={{ marginRight: 6, verticalAlign: 'middle', color: '#1877F2' }} />
-                                    ) : (
-                                        <MessageCircle size={14} style={{ marginRight: 6, verticalAlign: 'middle', color: '#0068ff' }} />
-                                    )}
-                                    {conversationChannel === 'facebook' ? 'Trang nhận tin (Facebook)' : 'Tài khoản nhận tin (Zalo)'}
-                                </Title>
-                                <div style={{ padding: '10px 12px', background: conversationChannel === 'facebook' ? '#f0f7ff' : '#eff6ff', borderRadius: 10, border: '1px solid #bfdbfe', display: 'flex', alignItems: 'center', gap: 10 }}>
-                                    <div style={{ width: 36, height: 36, borderRadius: 10, background: conversationChannel === 'facebook' ? '#1877F2' : '#0068ff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 16, flexShrink: 0 }}>
-                                        {conversationMetadata.pageName?.charAt(0) || (conversationChannel === 'facebook' ? 'F' : 'Z')}
+                            <Section
+                                title={conversationChannel === 'facebook' ? 'Trang Facebook' : 'Tài khoản Zalo'}
+                                icon={conversationChannel === 'facebook' ? <Facebook size={15} /> : <MessageCircle size={15} />}
+                            >
+                                <div style={{
+                                    display: 'flex', alignItems: 'center', gap: 12,
+                                    padding: '12px 14px', borderRadius: 12,
+                                    background: '#f8f9fa', border: '1px solid #e8eaed',
+                                }}>
+                                    <div style={{
+                                        width: 40, height: 40, borderRadius: 10,
+                                        background: conversationChannel === 'facebook' ? '#1877F2' : '#0068ff',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        color: '#fff', fontWeight: 500, fontSize: 16, flexShrink: 0,
+                                    }}>
+                                        {conversationMetadata.pageName?.charAt(0) || 'Z'}
                                     </div>
                                     <div style={{ flex: 1, minWidth: 0 }}>
-                                        <div style={{ fontWeight: 600, fontSize: 13, color: '#1e3a5f', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                        <div style={{ fontWeight: 500, fontSize: 13, color: '#202124', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                             {conversationMetadata.pageName}
                                         </div>
-                                        <div style={{ fontSize: 11, color: '#64748b' }}>
-                                            {conversationChannel === 'facebook' ? 'Fanpage gốc' : 'Tài khoản Zalo'}
+                                        <div style={{ fontSize: 11, color: '#9aa0a6', marginTop: 2 }}>
+                                            {conversationChannel === 'facebook' ? 'Fanpage' : 'Tài khoản Zalo'}
                                         </div>
                                     </div>
                                 </div>
-                            </div>
+                            </Section>
                         )}
 
-                        {/* ── Lead Stages (Giai đoạn KH tiềm năng) ── */}
-                        <div style={styles.section}>
-                            <Title level={5} style={styles.sectionTitle}>
-                                <Target size={14} style={{ marginRight: 6, verticalAlign: 'middle' }} />
-                                Giai đoạn khách hàng tiềm năng
-                            </Title>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-                                {LEAD_STAGES.map(stage => {
-                                    const isActive = conversationMetadata?.leadStage === stage.key;
+                        {/* ── Lead Stage (Material Design chips) ── */}
+                        <Section title="Giai đoạn khách hàng" icon={<Target size={15} />}>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                                {LEAD_STAGES.map(s => {
+                                    const active = conversationMetadata?.leadStage === s.key;
                                     return (
-                                        <button
-                                            key={stage.key}
-                                            onClick={() => onUpdateMetadata?.({ leadStage: isActive ? '' : stage.key })}
+                                        <button key={s.key}
+                                            onClick={() => onUpdateMetadata?.({ leadStage: active ? '' : s.key })}
                                             style={{
-                                                padding: '4px 12px',
-                                                borderRadius: 14,
-                                                border: `1.5px solid ${isActive ? stage.color : '#e2e8f0'}`,
-                                                background: isActive ? stage.bg : '#fff',
-                                                color: isActive ? stage.color : '#94a3b8',
-                                                fontWeight: isActive ? 600 : 500,
+                                                height: 32, padding: '0 14px',
+                                                borderRadius: 16,
+                                                border: active ? `1.5px solid ${s.color}` : '1px solid #dadce0',
+                                                background: active ? s.bg : '#fff',
+                                                color: active ? s.color : '#3c4043',
+                                                fontWeight: active ? 600 : 400,
                                                 fontSize: 12,
                                                 cursor: 'pointer',
-                                                transition: 'all 0.2s',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: 4,
+                                                display: 'flex', alignItems: 'center', gap: 5,
+                                                transition: 'all 0.15s',
+                                                fontFamily: "'Google Sans', sans-serif",
                                             }}
+                                            onMouseEnter={e => { if (!active) e.currentTarget.style.background = '#f8f9fa'; }}
+                                            onMouseLeave={e => { if (!active) e.currentTarget.style.background = '#fff'; }}
                                         >
-                                            {isActive && <span style={{ width: 6, height: 6, borderRadius: '50%', background: stage.color }} />}
-                                            {stage.label}
+                                            <span style={{ fontSize: 14 }}>{s.icon}</span> {s.label}
                                         </button>
                                     );
                                 })}
                             </div>
+                            {/* Quick "Tiềm năng" CTA */}
                             <button
-                                onClick={() => onUpdateMetadata?.({ leadStage: 'potential' })}
+                                onClick={() => onUpdateMetadata?.({ leadStage: conversationMetadata?.leadStage === 'potential' ? '' : 'potential' })}
                                 style={{
-                                    width: '100%',
-                                    padding: '8px 12px',
-                                    borderRadius: 10,
-                                    border: '1.5px solid #fde68a',
-                                    background: conversationMetadata?.leadStage === 'potential' ? '#fffbeb' : '#fff',
-                                    color: '#92400e',
-                                    fontWeight: 600,
-                                    fontSize: 12,
+                                    width: '100%', marginTop: 10, height: 40,
+                                    borderRadius: 20,
+                                    border: conversationMetadata?.leadStage === 'potential' ? '1.5px solid #e37400' : '1px solid #fdd663',
+                                    background: conversationMetadata?.leadStage === 'potential' ? '#fef7e0' : '#fff',
+                                    color: '#e37400', fontWeight: 500, fontSize: 13,
                                     cursor: 'pointer',
-                                    transition: 'all 0.2s',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    gap: 6,
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                                    transition: 'all 0.15s',
+                                    fontFamily: "'Google Sans', sans-serif",
                                 }}
+                                onMouseEnter={e => (e.currentTarget.style.background = '#fef7e0')}
+                                onMouseLeave={e => (e.currentTarget.style.background = conversationMetadata?.leadStage === 'potential' ? '#fef7e0' : '#fff')}
                             >
-                                <Star size={13} fill={conversationMetadata?.leadStage === 'potential' ? '#f59e0b' : 'none'} color="#f59e0b" />
-                                Đánh dấu là khách hàng tiềm năng
+                                <Sparkles size={15} />
+                                {conversationMetadata?.leadStage === 'potential' ? '✓ Khách tiềm năng' : 'Đánh dấu khách tiềm năng'}
                             </button>
-                        </div>
+                        </Section>
 
-                        {/* ── Suggested Labels (Nhãn gợi ý) ── */}
-                        <div style={styles.section}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                                <Title level={5} style={{ ...styles.sectionTitle, marginBottom: 0 }}>Nhãn gợi ý</Title>
-                            </div>
+                        {/* ── Suggested Labels ── */}
+                        <Section title="Nhãn gợi ý" icon={<Shield size={15} />} defaultOpen={false}>
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                                 {SUGGESTED_LABELS.map(sl => {
                                     const isApplied = conversationTags.includes(sl.name);
                                     return (
-                                        <button
-                                            key={sl.name}
-                                            onClick={() => {
-                                                if (isApplied) {
-                                                    onRemoveTag?.(sl.name);
-                                                } else {
-                                                    onAddTag?.(sl.name);
-                                                }
-                                            }}
+                                        <button key={sl.name}
+                                            onClick={() => isApplied ? onRemoveTag?.(sl.name) : onAddTag?.(sl.name)}
                                             style={{
-                                                padding: '4px 10px',
-                                                borderRadius: 14,
-                                                border: `1.5px solid ${isApplied ? sl.color : sl.color + '40'}`,
-                                                background: isApplied ? sl.color + '15' : '#fff',
-                                                color: isApplied ? sl.color : '#64748b',
-                                                fontWeight: 500,
-                                                fontSize: 11,
-                                                cursor: 'pointer',
-                                                transition: 'all 0.2s',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: 4,
+                                                height: 30, padding: '0 12px', borderRadius: 15,
+                                                border: `1px solid ${isApplied ? sl.color : '#dadce0'}`,
+                                                background: isApplied ? sl.color + '12' : '#fff',
+                                                color: isApplied ? sl.color : '#5f6368',
+                                                fontSize: 11, fontWeight: 500, cursor: 'pointer',
+                                                display: 'flex', alignItems: 'center', gap: 5,
+                                                transition: 'all 0.15s',
                                             }}
                                         >
-                                            {isApplied ? '✓' : '○'} {sl.name}
+                                            {sl.icon} {isApplied ? '✓ ' : ''}{sl.name}
                                         </button>
                                     );
                                 })}
                             </div>
-                        </div>
+                        </Section>
 
-                        {/* ── Star / Bookmark ── */}
-                        <div style={styles.section}>
-                            <button
-                                onClick={() => onUpdateMetadata?.({ isStarred: !conversationMetadata?.isStarred })}
-                                style={{
-                                    width: '100%',
-                                    padding: '8px 12px',
-                                    borderRadius: 10,
-                                    border: `1.5px solid ${conversationMetadata?.isStarred ? '#fbbf24' : '#e2e8f0'}`,
-                                    background: conversationMetadata?.isStarred ? '#fffbeb' : '#fff',
-                                    color: conversationMetadata?.isStarred ? '#92400e' : '#64748b',
-                                    fontWeight: 600,
-                                    fontSize: 12,
-                                    cursor: 'pointer',
-                                    transition: 'all 0.2s',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    gap: 6,
-                                }}
-                            >
-                                <Star size={14} fill={conversationMetadata?.isStarred ? '#fbbf24' : 'none'} color={conversationMetadata?.isStarred ? '#fbbf24' : '#94a3b8'} />
-                                {conversationMetadata?.isStarred ? 'Đã đánh dấu quan trọng' : 'Đánh dấu quan trọng'}
-                            </button>
-                        </div>
+                        {/* ── Visitor Notes ── */}
+                        {notes && (
+                            <Section title="Ghi chú visitor" icon={<StickyNote size={15} />} defaultOpen={false}>
+                                <div style={{
+                                    padding: '12px 14px', borderRadius: 12,
+                                    background: '#fef7e0', border: '1px solid #fdd663',
+                                    fontSize: 13, color: '#3c4043', lineHeight: 1.6, whiteSpace: 'pre-wrap',
+                                }}>{notes}</div>
+                            </Section>
+                        )}
 
-                        {/* ── Ảnh/Video ── */}
-                        {(() => {
-                            const IMAGE_REGEX = /\.(jpg|jpeg|png|gif|webp|bmp|svg)/i;
-                            const mediaItems = messages
-                                .filter(m => {
-                                    if (m.attachments?.some(a => a.mimeType?.startsWith('image/') || a.mimeType?.startsWith('video/') || IMAGE_REGEX.test(a.url || a.data || ''))) return true;
-                                    if (m.content && /https?:\/\/\S+\.(jpg|jpeg|png|gif|webp)/i.test(m.content)) return true;
-                                    return false;
-                                })
-                                .flatMap(m => {
-                                    const results: Array<{ url: string; date: string }> = [];
-                                    m.attachments?.forEach(a => {
-                                        const src = a.url || a.data || '';
-                                        if (a.mimeType?.startsWith('image/') || a.mimeType?.startsWith('video/') || IMAGE_REGEX.test(src)) {
-                                            results.push({ url: src, date: new Date(m.createdAt).toLocaleDateString('vi-VN') });
-                                        }
-                                    });
-                                    const urlMatches = m.content?.match(/https?:\/\/\S+\.(jpg|jpeg|png|gif|webp)[^\s]*/gi) || [];
-                                    urlMatches.forEach(u => results.push({ url: u, date: new Date(m.createdAt).toLocaleDateString('vi-VN') }));
-                                    return results;
-                                })
-                                .reverse();
-                            const showMedia = expandMedia ? mediaItems : mediaItems.slice(0, 6);
-                            return (
-                                <div style={styles.section}>
-                                    <div onClick={() => setExpandMedia(!expandMedia)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: 8 }}>
-                                        <Title level={5} style={{ ...styles.sectionTitle, marginBottom: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-                                            <Image size={14} /> Ảnh/Video
-                                            {mediaItems.length > 0 && <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 400 }}>({mediaItems.length})</span>}
-                                        </Title>
-                                        {mediaItems.length > 0 && (
-                                            <span style={{ fontSize: 12, color: '#6366f1', fontWeight: 500 }}>Xem tất cả</span>
-                                        )}
+                        {/* ── Media ── */}
+                        <Section title="Ảnh / Video" icon={<Image size={15} />} count={mediaItems.length || undefined} defaultOpen={false}>
+                            {mediaItems.length === 0 ? (
+                                <div style={{ fontSize: 13, color: '#9aa0a6', textAlign: 'center', padding: '12px 0' }}>Chưa có ảnh/video</div>
+                            ) : (
+                                <>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4 }}>
+                                        {(showAllMedia ? mediaItems : mediaItems.slice(0, 9)).map((item, i) => (
+                                            <div key={i} style={{
+                                                aspectRatio: '1', borderRadius: 8, overflow: 'hidden',
+                                                cursor: 'pointer', position: 'relative', background: '#f1f3f4',
+                                            }} onClick={() => window.open(item.url, '_blank')}>
+                                                <img src={item.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                                    onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                                            </div>
+                                        ))}
                                     </div>
-                                    {mediaItems.length === 0 ? (
-                                        <Text type="secondary" style={{ fontSize: 12 }}>Chưa có ảnh/video</Text>
-                                    ) : (
-                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                                            {showMedia.map((item, i) => (
-                                                <div
-                                                    key={i}
-                                                    style={{
-                                                        width: 72, height: 72, borderRadius: 8,
-                                                        overflow: 'hidden', cursor: 'pointer',
-                                                        background: '#f3f4f6', flexShrink: 0,
-                                                    }}
-                                                    onClick={() => window.open(item.url, '_blank')}
-                                                >
-                                                    <img
-                                                        src={item.url}
-                                                        alt=""
-                                                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                                        onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                                                    />
-                                                </div>
-                                            ))}
-                                        </div>
+                                    {mediaItems.length > 9 && !showAllMedia && (
+                                        <button onClick={() => setShowAllMedia(true)} style={{
+                                            width: '100%', marginTop: 8, padding: '8px', borderRadius: 20,
+                                            border: '1px solid #dadce0', background: '#fff', color: '#1a73e8',
+                                            fontSize: 12, fontWeight: 500, cursor: 'pointer',
+                                        }}>Xem tất cả {mediaItems.length} ảnh</button>
+                                    )}
+                                </>
+                            )}
+                        </Section>
+
+                        {/* ── Files ── */}
+                        <Section title="File" icon={<FileText size={15} />} count={fileItems.length || undefined} defaultOpen={false}>
+                            {fileItems.length === 0 ? (
+                                <div style={{ fontSize: 13, color: '#9aa0a6', textAlign: 'center', padding: '12px 0' }}>Chưa có file</div>
+                            ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                    {(showAllFiles ? fileItems : fileItems.slice(0, 3)).map((f, i) => (
+                                        <a key={i} href={f.url} target="_blank" rel="noreferrer" style={{
+                                            display: 'flex', alignItems: 'center', gap: 10,
+                                            padding: '10px 14px', borderRadius: 12, textDecoration: 'none',
+                                            background: '#fff', border: '1px solid #e8eaed', transition: 'all 0.15s',
+                                        }}
+                                        onMouseEnter={e => (e.currentTarget.style.background = '#f8f9fa')}
+                                        onMouseLeave={e => (e.currentTarget.style.background = '#fff')}
+                                        >
+                                            <div style={{ width: 36, height: 36, borderRadius: 8, background: '#e8f0fe', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                <FileText size={16} color="#1a73e8" />
+                                            </div>
+                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                <div style={{ fontSize: 13, color: '#202124', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</div>
+                                                <div style={{ fontSize: 11, color: '#9aa0a6', marginTop: 1 }}>{f.date}</div>
+                                            </div>
+                                        </a>
+                                    ))}
+                                    {fileItems.length > 3 && !showAllFiles && (
+                                        <button onClick={() => setShowAllFiles(true)} style={{
+                                            width: '100%', padding: '8px', borderRadius: 20,
+                                            border: '1px solid #dadce0', background: '#fff', color: '#1a73e8',
+                                            fontSize: 12, fontWeight: 500, cursor: 'pointer',
+                                        }}>Xem tất cả {fileItems.length} file</button>
                                     )}
                                 </div>
-                            );
-                        })()}
+                            )}
+                        </Section>
 
-                        {/* ── File ── */}
-                        {(() => {
-                            const fileItems = messages
-                                .filter(m => m.attachments?.some(a => a.filename && !a.mimeType?.startsWith('image/') && !a.mimeType?.startsWith('video/')))
-                                .flatMap(m =>
-                                    (m.attachments || []).filter(a => a.filename && !a.mimeType?.startsWith('image/') && !a.mimeType?.startsWith('video/')).map(a => ({
-                                        name: a.filename || 'file',
-                                        url: a.url || a.data || '#',
-                                        size: '',
-                                        date: new Date(m.createdAt).toLocaleDateString('vi-VN'),
-                                    }))
-                                )
-                                .reverse();
-                            const showFiles = expandFiles ? fileItems : fileItems.slice(0, 3);
-                            return (
-                                <div style={styles.section}>
-                                    <div onClick={() => setExpandFiles(!expandFiles)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: 8 }}>
-                                        <Title level={5} style={{ ...styles.sectionTitle, marginBottom: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-                                            <FileText size={14} /> File
-                                            {fileItems.length > 0 && <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 400 }}>({fileItems.length})</span>}
-                                        </Title>
-                                        {fileItems.length > 0 && (
-                                            <span style={{ fontSize: 12, color: '#6366f1', fontWeight: 500 }}>Xem tất cả</span>
-                                        )}
-                                    </div>
-                                    {fileItems.length === 0 ? (
-                                        <Text type="secondary" style={{ fontSize: 12 }}>Chưa có file</Text>
-                                    ) : (
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                            {showFiles.map((f, i) => (
-                                                <a
-                                                    key={i}
-                                                    href={f.url}
-                                                    target="_blank"
-                                                    rel="noreferrer"
-                                                    style={{
-                                                        display: 'flex', alignItems: 'center', gap: 8,
-                                                        padding: '6px 8px', borderRadius: 8,
-                                                        background: '#f9fafb', textDecoration: 'none',
-                                                        border: '1px solid #f0f0f0', transition: 'background 0.15s',
-                                                    }}
-                                                >
-                                                    <div style={{ width: 32, height: 32, borderRadius: 6, background: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                                                        <FileText size={16} color="#3b82f6" />
-                                                    </div>
-                                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                                        <div style={{ fontSize: 12, color: '#333', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</div>
-                                                        <div style={{ fontSize: 10, color: '#94a3b8' }}>{f.date}</div>
-                                                    </div>
-                                                </a>
-                                            ))}
-                                        </div>
+                        {/* ── Links ── */}
+                        <Section title="Link" icon={<LinkIcon size={15} />} count={linkItems.length || undefined} defaultOpen={false}>
+                            {linkItems.length === 0 ? (
+                                <div style={{ fontSize: 13, color: '#9aa0a6', textAlign: 'center', padding: '12px 0' }}>Chưa có link</div>
+                            ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                    {(showAllLinks ? linkItems : linkItems.slice(0, 3)).map((l, i) => (
+                                        <a key={i} href={l.url} target="_blank" rel="noreferrer" style={{
+                                            display: 'flex', alignItems: 'center', gap: 10,
+                                            padding: '10px 14px', borderRadius: 12, textDecoration: 'none',
+                                            background: '#fff', border: '1px solid #e8eaed', transition: 'all 0.15s',
+                                        }}
+                                        onMouseEnter={e => (e.currentTarget.style.background = '#f8f9fa')}
+                                        onMouseLeave={e => (e.currentTarget.style.background = '#fff')}
+                                        >
+                                            <div style={{ width: 36, height: 36, borderRadius: 8, background: '#f3e8fd', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                <Globe size={16} color="#7c4dff" />
+                                            </div>
+                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                <div style={{ fontSize: 12, color: '#1a73e8', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.domain}</div>
+                                                <div style={{ fontSize: 11, color: '#9aa0a6', marginTop: 1 }}>{l.sender} · {l.date}</div>
+                                            </div>
+                                        </a>
+                                    ))}
+                                    {linkItems.length > 3 && !showAllLinks && (
+                                        <button onClick={() => setShowAllLinks(true)} style={{
+                                            width: '100%', padding: '8px', borderRadius: 20,
+                                            border: '1px solid #dadce0', background: '#fff', color: '#1a73e8',
+                                            fontSize: 12, fontWeight: 500, cursor: 'pointer',
+                                        }}>Xem tất cả {linkItems.length} link</button>
                                     )}
                                 </div>
-                            );
-                        })()}
+                            )}
+                        </Section>
 
-                        {/* ── Link ── */}
-                        {(() => {
-                            const URL_RE = /https?:\/\/[^\s<>"']+/gi;
-                            const IMG_EXT = /\.(jpg|jpeg|png|gif|webp|bmp|svg)(\?.*)?$/i;
-                            const linkItems = messages
-                                .filter(m => m.content && URL_RE.test(m.content))
-                                .flatMap(m => {
-                                    URL_RE.lastIndex = 0;
-                                    const urls = m.content.match(URL_RE) || [];
-                                    return urls
-                                        .filter(u => !IMG_EXT.test(u))
-                                        .map(u => ({
-                                            url: u,
-                                            domain: (() => { try { return new URL(u).hostname; } catch { return u; } })(),
-                                            date: new Date(m.createdAt).toLocaleDateString('vi-VN'),
-                                            sender: m.sender.name || (m.sender.type === 'agent' ? 'Bạn' : 'Khách'),
-                                        }));
-                                })
-                                .reverse();
-                            // Deduplicate by URL
-                            const seen = new Set<string>();
-                            const uniqueLinks = linkItems.filter(l => {
-                                if (seen.has(l.url)) return false;
-                                seen.add(l.url);
-                                return true;
-                            });
-                            const showLinks = expandLinks ? uniqueLinks : uniqueLinks.slice(0, 3);
-                            return (
-                                <div style={styles.section}>
-                                    <div onClick={() => setExpandLinks(!expandLinks)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: 8 }}>
-                                        <Title level={5} style={{ ...styles.sectionTitle, marginBottom: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-                                            <LinkIcon size={14} /> Link
-                                            {uniqueLinks.length > 0 && <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 400 }}>({uniqueLinks.length})</span>}
-                                        </Title>
-                                        {uniqueLinks.length > 0 && (
-                                            <span style={{ fontSize: 12, color: '#6366f1', fontWeight: 500 }}>Xem tất cả</span>
-                                        )}
-                                    </div>
-                                    {uniqueLinks.length === 0 ? (
-                                        <Text type="secondary" style={{ fontSize: 12 }}>Chưa có link</Text>
-                                    ) : (
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                            {showLinks.map((l, i) => (
-                                                <a
-                                                    key={i}
-                                                    href={l.url}
-                                                    target="_blank"
-                                                    rel="noreferrer"
-                                                    style={{
-                                                        display: 'flex', alignItems: 'center', gap: 8,
-                                                        padding: '6px 8px', borderRadius: 8,
-                                                        background: '#f9fafb', textDecoration: 'none',
-                                                        border: '1px solid #f0f0f0', transition: 'background 0.15s',
-                                                    }}
-                                                >
-                                                    <div style={{ width: 32, height: 32, borderRadius: 6, background: '#f0f7ff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                                                        <LinkIcon size={16} color="#6366f1" />
-                                                    </div>
-                                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                                        <div style={{ fontSize: 12, color: '#333', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.url}</div>
-                                                        <div style={{ fontSize: 10, color: '#6366f1' }}>{l.domain} · {l.sender}</div>
-                                                    </div>
-                                                </a>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })()}
-
-                        {/* ── Internal Note ── */}
-                        <div style={styles.section}>
-                            <Title level={5} style={styles.sectionTitle}>
-                                <StickyNote size={14} style={{ marginRight: 6, verticalAlign: 'middle' }} />
-                                Ghi chú nội bộ
-                            </Title>
+                        {/* ── Internal Notes ── */}
+                        <Section title="Ghi chú nội bộ" icon={<StickyNote size={15} />}>
                             <div style={{
-                                background: '#fefce8', border: '1px solid #fde68a', borderRadius: 10,
-                                padding: 12,
+                                background: '#fff', border: '1px solid #e8eaed',
+                                borderRadius: 12, padding: 12,
                             }}>
                                 <Mentions
                                     rows={2}
-                                    placeholder="Viết ghi chú nội bộ (thêm @ để tag đồng nghiệp)..."
+                                    placeholder="Viết ghi chú (@ để tag)..."
                                     value={noteText}
                                     onChange={setNoteText}
-                                    style={{ borderColor: '#fde68a', background: 'rgba(255,255,255,0.6)', marginBottom: 8, width: '100%', borderRadius: 8 }}
+                                    style={{ border: 'none', background: '#fff', boxShadow: 'none', fontSize: 13, width: '100%' }}
                                     onPressEnter={e => {
                                         if (!e.shiftKey) {
                                             e.preventDefault();
                                             if (noteText.trim()) {
-                                                const mentionedIds = workspaceMembers
-                                                    .filter(m => noteText.includes(`@${m.name.replace(/\s+/g, '')}`))
-                                                    .map(m => m._id);
-                                                onAddNote?.(noteText.trim(), mentionedIds);
+                                                const ids = workspaceMembers.filter(m => noteText.includes(`@${m.name.replace(/\s+/g, '')}`)).map(m => m._id);
+                                                onAddNote?.(noteText.trim(), ids);
                                                 setNoteText('');
                                             }
                                         }
                                     }}
-                                    options={workspaceMembers.map(m => ({
-                                        value: m.name.replace(/\s+/g, ''), // Mentions defaults to no-space values
-                                        label: m.name,
-                                        key: m._id,
-                                        'data-id': m._id
-                                    }))}
+                                    options={workspaceMembers.map(m => ({ value: m.name.replace(/\s+/g, ''), label: m.name, key: m._id }))}
                                 />
-                                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                                    <Button
-                                        size="small"
-                                        type="primary"
-                                        style={{ background: '#d97706', borderColor: '#d97706', borderRadius: 8, fontWeight: 500 }}
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8, borderTop: '1px solid #f1f3f4', paddingTop: 8 }}>
+                                    <button
                                         disabled={!noteText.trim()}
                                         onClick={() => {
                                             if (noteText.trim()) {
-                                                const mentionedIds = workspaceMembers
-                                                    .filter(m => noteText.includes(`@${m.name.replace(/\s+/g, '')}`))
-                                                    .map(m => m._id);
-                                                onAddNote?.(noteText.trim(), mentionedIds);
+                                                const ids = workspaceMembers.filter(m => noteText.includes(`@${m.name.replace(/\s+/g, '')}`)).map(m => m._id);
+                                                onAddNote?.(noteText.trim(), ids);
                                                 setNoteText('');
                                             }
                                         }}
-                                    >
-                                        📝 Gửi ghi chú
-                                    </Button>
+                                        style={{
+                                            height: 32, padding: '0 20px', borderRadius: 16,
+                                            border: 'none',
+                                            background: noteText.trim() ? '#1a73e8' : '#e8eaed',
+                                            color: noteText.trim() ? '#fff' : '#9aa0a6',
+                                            fontSize: 12, fontWeight: 500, cursor: noteText.trim() ? 'pointer' : 'default',
+                                            fontFamily: "'Google Sans', sans-serif",
+                                            transition: 'all 0.15s',
+                                        }}
+                                    >Gửi ghi chú</button>
                                 </div>
                             </div>
-                        </div>
+                        </Section>
 
-                        {/* Context / Meta Attributes */}
-                        <div style={styles.section}>
-                            <Title level={5} style={styles.sectionTitle}>Bối cảnh (Context)</Title>
-
-                            <div style={styles.infoList}>
-                                {lastPageUrl && (
-                                    <div style={{ ...styles.infoRow, alignItems: 'flex-start' }}>
-                                        <MonitorSmartphone size={14} style={{ ...styles.infoIcon, marginTop: 4 }} />
-                                        <div style={{ flex: 1, overflow: 'hidden' }}>
-                                            <Text style={{ fontSize: 12, display: 'block', color: '#888' }}>Trang hiện tại</Text>
-                                            <a href={lastPageUrl} target="_blank" rel="noreferrer" style={styles.truncateLink}>
-                                                {lastPageUrl} <ExternalLink size={12} style={{ display: 'inline', verticalAlign: 'middle', marginLeft: 2 }} />
-                                            </a>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {locationInfo && (
-                                    <div style={{ ...styles.infoRow, alignItems: 'flex-start' }}>
-                                        <MapPin size={14} style={{ ...styles.infoIcon, marginTop: 4 }} />
-                                        <div style={{ flex: 1 }}>
-                                            <Text style={{ fontSize: 12, display: 'block', color: '#888' }}>Vị trí</Text>
-                                            <Text style={{ fontSize: 13 }}>{locationInfo.city}, {locationInfo.country}</Text>
-                                        </div>
-                                    </div>
-                                )}
-
-                                <div style={{ ...styles.infoRow, alignItems: 'flex-start' }}>
-                                    <TagIcon size={14} style={{ ...styles.infoIcon, marginTop: 4 }} />
-                                    <div style={{ flex: 1 }}>
-                                        <Text style={{ fontSize: 12, display: 'block', color: '#888' }}>Tổng lần trò chuyện</Text>
-                                        <Text style={{ fontSize: 13, fontWeight: 500 }}>{visitor.totalConversations}</Text>
-                                    </div>
-                                </div>
+                        {/* ── System Info ── */}
+                        <Section title="Thông tin hệ thống" icon={<MonitorSmartphone size={15} />} defaultOpen={false}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                {lastPageUrl && <InfoRow icon={<Globe size={16} color="#34a853" />} iconBg="#e6f4ea" label="Trang hiện tại" value={lastPageUrl} isLink />}
+                                {locationInfo && <InfoRow icon={<MapPin size={16} color="#ea4335" />} iconBg="#fce8e6" label="Vị trí" value={`${locationInfo.city || ''}, ${locationInfo.country || ''}`} />}
+                                <InfoRow icon={<MessageCircle size={16} color="#7c4dff" />} iconBg="#f3e8fd" label="Tổng hội thoại" value={String(visitor.totalConversations || 0)} />
+                                <InfoRow icon={<Hash size={16} color="#5f6368" />} iconBg="#f1f3f4" label="Visitor ID" value={visitor.visitorId.slice(0, 16) + '...'} copyable />
+                                <InfoRow icon={<Clock size={16} color="#e37400" />} iconBg="#fef7e0" label="Lần đầu truy cập" value={new Date(visitor.firstSeenAt).toLocaleDateString('vi-VN')} />
                             </div>
-
-                            {/* Tags */}
-                            {tags && tags.length > 0 && (
-                                <div style={{ marginTop: 12 }}>
-                                    {tags.map((t: string) => (
-                                        <Tag key={t} color="blue" style={{ marginBottom: 4 }}>{t}</Tag>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Technical Information */}
-                        <div style={styles.section}>
-                            <Title level={5} style={styles.sectionTitle}>Thông tin hệ thống</Title>
-                            <div style={styles.infoList}>
-                                <div style={styles.infoRow}>
-                                    <Text type="secondary" style={styles.metaLabel}>ID Khách</Text>
-                                    <Text type="secondary" style={styles.metaValue} copyable={{ text: visitor.visitorId }}>
-                                        {visitor.visitorId.slice(0, 10)}...
-                                    </Text>
-                                </div>
-                                <div style={styles.infoRow}>
-                                    <Text type="secondary" style={styles.metaLabel}>Tham gia lúc</Text>
-                                    <Text type="secondary" style={styles.metaValue}>{new Date(visitor.firstSeenAt).toLocaleDateString('vi-VN')}</Text>
-                                </div>
-                            </div>
-                        </div>
-
-                    </div>
+                        </Section>
+                    </>
                 )}
             </div>
         </div>
     );
-};
-
-const styles: Record<string, React.CSSProperties> = {
-    container: {
-        width: '100%',
-        height: '100%',
-        background: '#fff',
-        display: 'flex',
-        flexDirection: 'column',
-        flexShrink: 0,
-        overflowY: 'auto',
-    },
-    emptyContainer: {
-        width: '100%',
-        height: '100%',
-        background: '#fafafa',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexShrink: 0,
-    },
-    loadingContainer: {
-        width: '100%',
-        height: '100%',
-        background: '#fff',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexShrink: 0,
-    },
-    header: {
-        padding: '28px 20px 20px',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        textAlign: 'center',
-        background: 'linear-gradient(180deg, #f0f1ff 0%, #ffffff 100%)',
-    },
-    avatarLarge: {
-        width: 64,
-        height: 64,
-        borderRadius: 32,
-        background: '#6366f1',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        boxShadow: '0 4px 12px rgba(99, 102, 241, 0.2)',
-    },
-    body: {
-        padding: '16px 18px',
-        flex: 1,
-    },
-    section: {
-        marginBottom: 14,
-    },
-    sectionTitle: {
-        fontSize: 13,
-        fontWeight: 600,
-        color: '#374151',
-        marginBottom: 10,
-        letterSpacing: '0.01em',
-    },
-    infoList: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 10,
-    },
-    infoRow: {
-        display: 'flex',
-        alignItems: 'center',
-        fontSize: 13,
-        color: '#333',
-    },
-    infoIcon: {
-        color: '#888',
-        marginRight: 12,
-        flexShrink: 0,
-    },
-    truncateLink: {
-        display: 'block',
-        color: '#6366f1',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
-        width: '100%',
-    },
-    metaLabel: {
-        fontSize: 12,
-        flex: 1,
-    },
-    metaValue: {
-        fontSize: 12,
-        textAlign: 'right',
-        maxWidth: 120,
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-    },
-    noteBox: {
-        background: '#fcfcfc',
-        border: '1px solid #f0f0f0',
-        borderRadius: 8,
-        padding: 12,
-        whiteSpace: 'pre-wrap',
-    }
 };

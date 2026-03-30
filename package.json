@@ -10,11 +10,20 @@
     "start": "node --import tsx src/bootstrap/production.ts",
     "start:server": "node --import tsx src/bootstrap/index.ts",
     "start:prod": "node --import tsx src/bootstrap/production.ts",
-    "lint": "eslint"
+    "lint": "eslint",
+    "migrate:mongo:mysql": "tsx scripts/migrate-mongo-to-mysql.ts",
+    "migrate:mongo:mysql:relational": "tsx scripts/migrate-mongo-to-mysql-relational.ts",
+    "workspace:add": "node scripts/claude-workspace.mjs add",
+    "workspace:list": "node scripts/claude-workspace.mjs list",
+    "workspace:open": "node scripts/claude-workspace.mjs open",
+    "workspace:remove": "node scripts/claude-workspace.mjs remove",
+    "pixel:set": "node scripts/claude-workspace.mjs add pixel",
+    "pixel:on": "node scripts/claude-workspace.mjs open pixel"
   },
   "dependencies": {
     "@ant-design/cssinjs": "^2.1.2",
     "@ant-design/icons": "^6.1.0",
+    "@prisma/client": "^6.4.1",
     "@tanstack/react-query": "^5.90.21",
     "@types/multer": "^2.1.0",
     "antd": "^6.3.2",
@@ -30,10 +39,13 @@
     "joi": "^18.0.2",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.577.0",
-    "mongoose": "^9.2.4",
+    "mongodb": "^6.20.0",
+    "mongoose": "^8.12.0",
     "morgan": "^1.10.1",
     "multer": "^2.1.1",
+    "mysql2": "^3.20.0",
     "next": "16.1.6",
+    "prisma": "^6.4.1",
     "puppeteer": "^24.39.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -41,7 +53,8 @@
     "recharts": "^3.8.0",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
-    "zca-js": "^2.1.2"
+    "zca-js": "^2.1.2",
+    "zeptomatch": "^2.1.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

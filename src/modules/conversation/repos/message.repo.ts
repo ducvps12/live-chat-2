@@ -1,155 +1,165 @@
-import { MessageModel, IMessage } from './message.model';
+import prisma from '../../../infra/prisma';
+import type { Message } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+
+function mapMessage(msg: any): any {
+    if (!msg) return msg;
+    if (!msg._id && msg.id) msg._id = msg.id;
+    if (msg.senderType && !msg.sender) {
+        msg.sender = {
+            type: msg.senderType,
+            id: msg.senderId,
+            name: msg.senderName,
+        };
+    }
+    return msg;
+}
 
 export const messageRepo = {
-    async create(data: Partial<IMessage>): Promise<IMessage> {
-        return MessageModel.create(data);
+    async create(data: any): Promise<any> {
+        const createData = {
+            ...data,
+            senderType: data.sender?.type || data.senderType,
+            senderId: data.sender?.id || data.senderId,
+            senderName: data.sender?.name || data.senderName,
+            attachments: data.attachments || [],
+            sanitizeFlags: data.sanitizeFlags || [],
+        };
+        delete createData.sender;
+
+        const msg = await prisma.message.create({
+            data: createData,
+        });
+        return mapMessage(msg);
     },
 
-    async findById(messageId: string): Promise<IMessage | null> {
-        return MessageModel.findById(messageId).exec();
+    async findById(messageId: string): Promise<any | null> {
+        const msg = await prisma.message.findUnique({ where: { id: messageId } });
+        return mapMessage(msg);
     },
 
-    /**
-     * Find existing message by clientMessageId (idempotency check).
-     * Returns null if no clientMessageId provided or not found.
-     */
-    async findByClientMessageId(
-        conversationId: string,
-        clientMessageId: string
-    ): Promise<IMessage | null> {
+    async findByClientMessageId(conversationId: string, clientMessageId: string): Promise<any | null> {
         if (!clientMessageId) return null;
-        return MessageModel.findOne({ conversationId, clientMessageId }).exec();
+        const msg = await prisma.message.findFirst({ where: { conversationId, clientMessageId } });
+        return mapMessage(msg);
     },
 
     async findByConversation(
         conversationId: string,
         options?: { page?: number; limit?: number; excludeInternal?: boolean }
-    ): Promise<{ items: IMessage[]; total: number }> {
+    ): Promise<{ items: Message[]; total: number }> {
         const page = options?.page || 1;
         const limit = options?.limit || 50;
         const skip = (page - 1) * limit;
 
-        const filter: any = { conversationId };
+        const where: any = { conversationId };
         if (options?.excludeInternal) {
-            filter.$or = [{ isInternal: { $ne: true } }, { isInternal: { $exists: false } }];
+            where.isInternal = false;
         }
 
         const [items, total] = await Promise.all([
-            MessageModel.find(filter)
-                .sort({ createdAt: -1 }) // newest first for pagination
-                .skip(skip)
-                .limit(limit)
-                .exec(),
-            MessageModel.countDocuments(filter).exec(),
+            prisma.message.findMany({
+                where,
+                orderBy: { createdAt: 'desc' },
+                skip,
+                take: limit,
+            }),
+            prisma.message.count({ where }),
         ]);
-        
-        // Reverse so they are in chronological order for the chat UI
-        return { items: items.reverse(), total };
+
+        return { items: items.reverse().map(mapMessage), total };
     },
 
-    async getLatest(conversationId: string, limit: number = 30): Promise<IMessage[]> {
-        const msgs = await MessageModel.find({ conversationId })
-            .sort({ createdAt: -1 })
-            .limit(limit)
-            .exec();
-        return msgs.reverse(); // return in chronological order
+    async getLatest(conversationId: string, limit: number = 30): Promise<any[]> {
+        const msgs = await prisma.message.findMany({
+            where: { conversationId },
+            orderBy: { createdAt: 'desc' },
+            take: limit,
+        });
+        return msgs.reverse().map(mapMessage);
     },
 
-    /**
-     * Get the pagination page number that contains the target message.
-     */
     async getMessagePage(conversationId: string, messageId: string, limit: number = 50): Promise<number | null> {
-        const targetMessage = await MessageModel.findOne({ _id: messageId, conversationId });
+        const targetMessage = await prisma.message.findFirst({
+            where: { id: messageId, conversationId },
+        });
         if (!targetMessage) return null;
 
-        // Count messages that are newer or equal to targetMessage (since pagination sorts by createdAt: -1)
-        const count = await MessageModel.countDocuments({
-            conversationId,
-            createdAt: { $gte: targetMessage.createdAt }
+        const count = await prisma.message.count({
+            where: { conversationId, createdAt: { gte: targetMessage.createdAt } },
         });
 
         if (count === 0) return 1;
         return Math.floor((count - 1) / limit) + 1;
     },
 
-    /**
-     * Get messages created after a timestamp (for reconnect sync).
-     */
-    async findSince(conversationId: string, since: Date, limit: number = 50): Promise<IMessage[]> {
-        return MessageModel.find({ conversationId, createdAt: { $gt: since } })
-            .sort({ createdAt: 1 })
-            .limit(limit)
-            .exec();
+    async findSince(conversationId: string, since: Date, limit: number = 50): Promise<any[]> {
+        const msgs = await prisma.message.findMany({
+            where: { conversationId, createdAt: { gt: since } },
+            orderBy: { createdAt: 'asc' },
+            take: limit,
+        });
+        return msgs.map(mapMessage);
     },
 
-    /**
-     * Mark a batch of messages as delivered
-     */
     async markAsDelivered(messageIds: string[]): Promise<void> {
-        await MessageModel.updateMany(
-            { _id: { $in: messageIds }, status: 'sent' },
-            { $set: { status: 'delivered' } }
-        ).exec();
+        await prisma.message.updateMany({
+            where: { id: { in: messageIds }, status: 'sent' },
+            data: { status: 'delivered' },
+        });
     },
 
-    /**
-     * Mark messages up to a specific message ID as read for a given sender type.
-     * Note: `senderTypeToMatch` is the type of the sender whose messages are being read
-     * (e.g. if Visitor is reading, we mark Agent's messages as read).
-     */
     async markAsReadUpTo(
-        conversationId: string, 
-        messageId: string, 
+        conversationId: string,
+        messageId: string,
         senderTypeToMatch: 'visitor' | 'agent' | 'system'
     ): Promise<void> {
-        const targetMessage = await MessageModel.findOne({ _id: messageId, conversationId });
+        const targetMessage = await prisma.message.findFirst({
+            where: { id: messageId, conversationId },
+        });
         if (!targetMessage) return;
 
-        await MessageModel.updateMany(
-            {
+        await prisma.message.updateMany({
+            where: {
                 conversationId,
-                'sender.type': senderTypeToMatch,
-                createdAt: { $lte: targetMessage.createdAt },
-                status: { $ne: 'read' }
+                senderType: senderTypeToMatch,
+                createdAt: { lte: targetMessage.createdAt },
+                status: { not: 'read' },
             },
-            { $set: { status: 'read' } }
-        ).exec();
+            data: { status: 'read' },
+        });
     },
 
-    async findLatest(conversationId: string): Promise<IMessage | null> {
-        return MessageModel.findOne({ conversationId }).sort({ createdAt: -1 }).exec();
+    async findLatest(conversationId: string): Promise<any | null> {
+        const msg = await prisma.message.findFirst({
+            where: { conversationId },
+            orderBy: { createdAt: 'desc' },
+        });
+        return mapMessage(msg);
     },
 
-    /**
-     * Count unread messages for a specific participant since their last read cursor.
-     * @param conversationId The ID of the conversation
-     * @param participantType The type of the participant checking for unread ('visitor' or 'agent')
-     * @param lastReadMessageId The message ID of the last read message, or null if none ever read
-     */
     async countUnreadSince(
         conversationId: string,
         participantType: 'visitor' | 'agent' | 'system',
         lastReadMessageId: string | null
     ): Promise<number> {
-        const query: any = {
+        const where: any = {
             conversationId,
-            'sender.type': { $ne: participantType }, // Count messages sent by others
+            senderType: { not: participantType },
         };
 
         if (lastReadMessageId) {
-            const lastReadMessage = await MessageModel.findOne({ _id: lastReadMessageId, conversationId });
+            const lastReadMessage = await prisma.message.findFirst({
+                where: { id: lastReadMessageId, conversationId },
+            });
             if (lastReadMessage) {
-                query.createdAt = { $gt: lastReadMessage.createdAt };
+                where.createdAt = { gt: lastReadMessage.createdAt };
             }
         }
 
-        return MessageModel.countDocuments(query).exec();
+        return prisma.message.count({ where });
     },
 
-    /**
-     * Search messages by content text, return distinct conversation IDs with matched snippet.
-     * Uses $regex for Vietnamese diacritics support (MongoDB $text doesn't handle Vietnamese well).
-     */
     async searchByContent(
         conversationIds: string[],
         query: string,
@@ -157,46 +167,35 @@ export const messageRepo = {
     ): Promise<Array<{ conversationId: string; matchedSnippet: string; messageId: string }>> {
         if (!query || query.trim().length === 0 || conversationIds.length === 0) return [];
 
-        const mongoose = await import('mongoose');
-        const objectIds = conversationIds.map(id => new mongoose.Types.ObjectId(id));
+        const escapedQuery = `%${query}%`;
 
-        // Escape regex special characters
-        const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-        const results = await MessageModel.aggregate([
-            {
-                $match: {
-                    conversationId: { $in: objectIds },
-                    content: { $regex: escaped, $options: 'i' },
-                    isDeleted: { $ne: true },
-                    isInternal: { $ne: true },
-                }
-            },
-            { $sort: { createdAt: -1 } },
-            {
-                $group: {
-                    _id: '$conversationId',
-                    matchedSnippet: { $first: '$content' },
-                    messageId: { $first: { $toString: '$_id' } },
-                }
-            },
-            { $limit: limit },
-            {
-                $project: {
-                    _id: 0,
-                    conversationId: { $toString: '$_id' },
-                    matchedSnippet: {
-                        $cond: {
-                            if: { $gt: [{ $strLenCP: '$matchedSnippet' }, 100] },
-                            then: { $concat: [{ $substrCP: ['$matchedSnippet', 0, 100] }, '…'] },
-                            else: '$matchedSnippet'
-                        }
-                    },
-                    messageId: 1,
-                }
-            }
-        ]).exec();
+        const results = await prisma.$queryRaw<any[]>`
+            SELECT
+                conversationId,
+                LEFT(content, 100) as matchedSnippet,
+                id as messageId
+            FROM Message
+            WHERE conversationId IN (${Prisma.join(conversationIds)})
+            AND content LIKE ${escapedQuery}
+            AND (isDeleted = false OR isDeleted IS NULL)
+            AND (isInternal = false OR isInternal IS NULL)
+            ORDER BY createdAt DESC
+            LIMIT ${limit}
+        `;
 
         return results;
+    },
+
+    async countBySender(
+        conversationId: string,
+        senderType: 'visitor' | 'agent' | 'system'
+    ): Promise<number> {
+        return prisma.message.count({
+            where: {
+                conversationId,
+                senderType,
+                isDeleted: false,
+            },
+        });
     },
 };

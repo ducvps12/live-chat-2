@@ -111,4 +111,4 @@ const popupSchema = new Schema<IPopup>(
 popupSchema.index({ workspaceId: 1, status: 1 });
 popupSchema.index({ workspaceId: 1, createdAt: -1 });
 
-export const PopupModel = mongoose.model<IPopup>('Popup', popupSchema);
+export const PopupModel = (mongoose.models.Popup || mongoose.model<IPopup>('Popup', popupSchema)) as mongoose.Model<IPopup>;

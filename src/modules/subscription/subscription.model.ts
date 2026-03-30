@@ -113,7 +113,7 @@ const SubscriptionSchema = new Schema<ISubscription>(
 SubscriptionSchema.index({ workspaceId: 1 }, { unique: true });
 SubscriptionSchema.index({ status: 1, currentPeriodEnd: 1 });
 
-export const SubscriptionModel = mongoose.model<ISubscription>('Subscription', SubscriptionSchema);
+export const SubscriptionModel = (mongoose.models.Subscription || mongoose.model<ISubscription>('Subscription', SubscriptionSchema)) as mongoose.Model<ISubscription>;
 
 // ── Invoice model ──
 export interface IInvoice extends Document {
@@ -152,4 +152,4 @@ const InvoiceSchema = new Schema<IInvoice>(
 InvoiceSchema.index({ workspaceId: 1, createdAt: -1 });
 InvoiceSchema.index({ invoiceNumber: 1 }, { unique: true });
 
-export const InvoiceModel = mongoose.model<IInvoice>('Invoice', InvoiceSchema);
+export const InvoiceModel = (mongoose.models.Invoice || mongoose.model<IInvoice>('Invoice', InvoiceSchema)) as mongoose.Model<IInvoice>;

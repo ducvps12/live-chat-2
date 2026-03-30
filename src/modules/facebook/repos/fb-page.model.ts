@@ -32,4 +32,4 @@ const FBPageSchema: Schema = new Schema(
 // Unique constraint: 1 page can only be connected to 1 workspace
 FBPageSchema.index({ pageId: 1, workspaceId: 1 }, { unique: true });
 
-export const FBPageModel = mongoose.model<IFBPage>('FBPage', FBPageSchema);
+export const FBPageModel = (mongoose.models.FBPage || mongoose.model<IFBPage>('FBPage', FBPageSchema)) as mongoose.Model<IFBPage>;

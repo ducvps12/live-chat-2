@@ -1,35 +1,46 @@
-import { ZaloAccountModel, IZaloAccount } from './zalo-account.model';
+import prisma from '../../../infra/prisma';
+import type { ZaloAccount } from '@prisma/client';
 
 export const zaloAccountRepo = {
-    async create(data: Partial<IZaloAccount>): Promise<IZaloAccount> {
-        return ZaloAccountModel.create(data);
+    async create(data: {
+        workspaceId: string;
+        zaloId: string;
+        name?: string;
+        avatar?: string;
+        phone?: string;
+        imei: string;
+        cookie: any;
+        userAgent: string;
+        status?: string;
+    }): Promise<ZaloAccount> {
+        return prisma.zaloAccount.create({ data: data as any });
     },
 
-    async findById(id: string): Promise<IZaloAccount | null> {
-        return ZaloAccountModel.findById(id).exec();
+    async findById(id: string): Promise<ZaloAccount | null> {
+        return prisma.zaloAccount.findUnique({ where: { id } });
     },
 
-    async findByWorkspaceId(workspaceId: string): Promise<IZaloAccount[]> {
-        return ZaloAccountModel.find({ workspaceId }).exec();
+    async findByWorkspaceId(workspaceId: string): Promise<ZaloAccount[]> {
+        return prisma.zaloAccount.findMany({ where: { workspaceId } });
     },
 
-    async findActive(): Promise<IZaloAccount[]> {
-        return ZaloAccountModel.find({ status: 'active' }).exec();
+    async findActive(): Promise<ZaloAccount[]> {
+        return prisma.zaloAccount.findMany({ where: { status: 'active' } });
     },
 
-    async update(id: string, data: Partial<IZaloAccount>): Promise<IZaloAccount | null> {
-        return ZaloAccountModel.findByIdAndUpdate(id, data, { new: true }).exec();
+    async update(id: string, data: Partial<Omit<ZaloAccount, 'id' | 'createdAt' | 'updatedAt'>>): Promise<ZaloAccount | null> {
+        return prisma.zaloAccount.update({ where: { id }, data: data as any });
     },
 
-    async updateStatus(id: string, status: 'active' | 'disconnected' | 'banned'): Promise<IZaloAccount | null> {
-        return ZaloAccountModel.findByIdAndUpdate(id, { status }, { new: true }).exec();
+    async updateStatus(id: string, status: 'active' | 'disconnected' | 'banned'): Promise<ZaloAccount | null> {
+        return prisma.zaloAccount.update({ where: { id }, data: { status } });
     },
 
     async updateLastActive(id: string): Promise<void> {
-        await ZaloAccountModel.findByIdAndUpdate(id, { lastActiveAt: new Date() }).exec();
+        await prisma.zaloAccount.update({ where: { id }, data: { lastActiveAt: new Date() } });
     },
 
     async delete(id: string): Promise<void> {
-        await ZaloAccountModel.findByIdAndDelete(id).exec();
-    }
+        await prisma.zaloAccount.delete({ where: { id } });
+    },
 };

@@ -34,4 +34,4 @@ const ZaloAccountSchema: Schema = new Schema(
 // Đảm bảo 1 workspace chỉ kết nối 1 account zalo chính (nếu requirement yêu cầu nhiều thì bỏ index này đi)
 // Tuy nhiên ở đây để linh hoạt, ta chỉ index workspaceId. Một workspace có thể có nhiều Zalo account.
 
-export const ZaloAccountModel = mongoose.model<IZaloAccount>('ZaloAccount', ZaloAccountSchema);
+export const ZaloAccountModel = (mongoose.models.ZaloAccount || mongoose.model<IZaloAccount>('ZaloAccount', ZaloAccountSchema)) as mongoose.Model<IZaloAccount>;

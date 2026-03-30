@@ -1,0 +1,16 @@
+node_modules
+.next
+.git
+.gitignore
+.vscode
+data
+public/uploads
+*.log
+*.txt
+*.tsbuildinfo
+next-env.d.ts
+build_output.log
+ts_errors*
+README.md
+.env
+.env.local

@@ -48,7 +48,7 @@ export const facebookController = {
 
             // Auto-sync conversations in background (fire-and-forget)
             for (const saved of connectedPages) {
-                const pageDbId = (saved._id as any).toString();
+                const pageDbId = (saved.id).toString();
                 facebookService.syncPageConversations(workspaceId, pageDbId).catch(err => {
                     console.warn(`[FacebookController] Background sync error for page ${pageDbId}:`, err);
                 });

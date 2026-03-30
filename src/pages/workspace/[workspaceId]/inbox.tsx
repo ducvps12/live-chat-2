@@ -3,7 +3,7 @@ import { useRouter } from 'next/router';
 import { useEffect, useState, useRef, useCallback, useMemo, Fragment } from 'react';
 import { Input, Badge, Spin, Empty, Tag, Button, message, Tooltip, Popover, Select, DatePicker, Form, Modal, Checkbox, Progress, Dropdown, ColorPicker } from 'antd';
 import {
-    Search, Send, Paperclip, ArrowLeft, X as XIcon,
+    Search, Send, Paperclip, ArrowLeft, X as XIcon, Smile,
     MessageSquare, Clock, User, Image as ImageIcon, RotateCw, Filter, Check, CheckCheck, UserCheck, UserX, Users, Zap, Reply, Edit2, Trash2, Globe, Forward, Bookmark, Plus, Settings, ChevronDown, Copy, Megaphone, MoreHorizontal
 } from 'lucide-react';
 import { useGetMe } from '../../../domains/auth/auth.hooks';
@@ -16,6 +16,7 @@ import KnowledgeSuggestPanel from '../../../features/workspace/components/Knowle
 import { useQueryClient } from '@tanstack/react-query';
 import { useTotalUnreadCount, conversationKeys, useAddInternalNote } from '../../../domains/conversation';
 import AppLayout from '../../../components/layout/AppLayout';
+import StickerPicker from '../../../features/inbox/components/StickerPicker';
 
 const { RangePicker } = DatePicker;
 
@@ -248,6 +249,7 @@ export default function InboxPage() {
     const [agentPresence, setAgentPresence] = useState<Record<string, 'online' | 'away' | 'offline'>>({});
     const [visitorOnlineMap, setVisitorOnlineMap] = useState<Record<string, 'online' | 'idle' | 'offline'>>({});
     const [profileModalConv, setProfileModalConv] = useState<Conversation | null>(null);
+    const [showStickerPicker, setShowStickerPicker] = useState(false);
 
     // ── Context menu ──
     const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; convId: string; showLabels: boolean } | null>(null);
@@ -258,7 +260,7 @@ export default function InboxPage() {
     const [showForwardModal, setShowForwardModal] = useState(false);
     const [forwardFriends, setForwardFriends] = useState<Array<{ threadId: string; displayName: string; avatar: string }>>([]);
     const [forwardContacts, setForwardContacts] = useState<Array<{ threadId: string; displayName: string; avatar: string }>>([]);
-    const [forwardTab, setForwardTab] = useState<'friends' | 'contacts'>('friends');
+    const [forwardTab, setForwardTab] = useState<'friends' | 'contacts' | 'conversations'>('friends');
     const [forwardFriendsLoading, setForwardFriendsLoading] = useState(false);
     const [forwardSearch, setForwardSearch] = useState('');
     const [selectedRecipients, setSelectedRecipients] = useState<Set<string>>(new Set());
@@ -2262,7 +2264,7 @@ export default function InboxPage() {
                                             {visitorName(selectedConv)}
                                         </div>
                                         <div style={{ fontSize: 11, color: '#9ca3af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                            {selectedConv.channel === 'zalo' ? 'Zalo' : selectedConv.channel === 'facebook' ? 'Facebook' : selectedConv.metadata?.domain || selectedConv.visitorInfo?.email || ''}
+                                            {(selectedConv as any).channel === 'zalo' ? 'Zalo' : (selectedConv as any).channel === 'facebook' ? 'Facebook' : selectedConv.metadata?.domain || selectedConv.visitorInfo?.email || ''}
                                             {getAssignedName(selectedConv) && <> · <span style={{ color: '#6366f1' }}>{getAssignedName(selectedConv)}</span></>}
                                         </div>
                                     </div>
@@ -2948,7 +2950,49 @@ export default function InboxPage() {
                                         background: '#fff',
                                         borderTop: '1px solid #f3f4f6',
                                         flexShrink: 0,
+                                        position: 'relative',
                                     }}>
+                                        {/* Knowledge Base Smart Suggest — above input */}
+                                        <KnowledgeSuggestPanel
+                                            workspaceId={workspaceId as string}
+                                            lastCustomerMessage={(() => {
+                                                const visitorMsgs = messages.filter(m => m.sender?.type === 'visitor' && !m.isDeleted);
+                                                return visitorMsgs.length > 0 ? visitorMsgs[visitorMsgs.length - 1].content : undefined;
+                                            })()}
+                                            onInsertReply={(text) => setInputText(text)}
+                                        />
+                                        {/* ═══ Sticker Picker Popup ═══ */}
+                                        {showStickerPicker && (
+                                            <StickerPicker
+                                                onSend={(emoji) => {
+                                                    setShowStickerPicker(false);
+                                                    // Send sticker as text message directly
+                                                    if (!selectedConvId || !workspaceId || sending) return;
+                                                    setSending(true);
+                                                    const tempMsg: Message = {
+                                                        _id: 'tmp_' + Date.now(),
+                                                        conversationId: selectedConvId,
+                                                        sender: { type: 'agent', id: me?.user?.id || '', name: me?.user?.name || 'Agent' },
+                                                        content: emoji,
+                                                        type: 'text',
+                                                        createdAt: new Date().toISOString(),
+                                                    };
+                                                    setMessages(prev => [...prev, tempMsg]);
+                                                    httpClient.post(
+                                                        `/conversations/workspace/${workspaceId}/${selectedConvId}/messages`,
+                                                        { content: emoji, type: 'text', clientMessageId: crypto.randomUUID() }
+                                                    ).then(res => {
+                                                        if (res.data?.success) {
+                                                            setMessages(prev => prev.map(m => m._id === tempMsg._id ? res.data.data : m));
+                                                        }
+                                                    }).catch(() => {
+                                                        message.error('Gửi sticker thất bại');
+                                                        setMessages(prev => prev.map(m => m._id === tempMsg._id ? { ...m, status: 'error' } : m));
+                                                    }).finally(() => setSending(false));
+                                                }}
+                                                onClose={() => setShowStickerPicker(false)}
+                                            />
+                                        )}
                                         <input
                                             type="file"
                                             ref={fileInputRef}
@@ -3090,6 +3134,19 @@ export default function InboxPage() {
                                                     <Zap size={16} color="#6b7280" />
                                                 </button>
                                             </Popover>
+                                            {/* Sticker picker button */}
+                                            <button
+                                                onClick={() => setShowStickerPicker(prev => !prev)}
+                                                style={{
+                                                    background: 'none', border: 'none', cursor: 'pointer',
+                                                    padding: '6px 2px', display: 'flex', alignItems: 'center',
+                                                    opacity: showStickerPicker ? 1 : 0.5, transition: 'opacity 0.15s', flexShrink: 0,
+                                                }}
+                                                onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                                                onMouseLeave={e => { if (!showStickerPicker) e.currentTarget.style.opacity = '0.5'; }}
+                                            >
+                                                <Smile size={18} color={showStickerPicker ? '#6366f1' : '#6b7280'} />
+                                            </button>
                                             {/* Textarea — main input */}
                                             <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
                                                 {/* Macro shortcut suggestions dropdown */}
@@ -3288,15 +3345,6 @@ export default function InboxPage() {
                         display: 'flex',
                         flexDirection: 'column',
                     }}>
-                        {/* Knowledge Base Smart Suggest */}
-                        <KnowledgeSuggestPanel
-                            workspaceId={workspaceId as string}
-                            lastCustomerMessage={(() => {
-                                const visitorMsgs = messages.filter(m => m.sender?.type === 'visitor' && !m.isDeleted);
-                                return visitorMsgs.length > 0 ? visitorMsgs[visitorMsgs.length - 1].content : undefined;
-                            })()}
-                            onInsertReply={(text) => setInputText(text)}
-                        />
                         <VisitorProfileSidebar
                             workspaceId={workspaceId}
                             visitorId={selectedConv?.visitorId || null}
@@ -3311,6 +3359,28 @@ export default function InboxPage() {
                                 addInternalNote.mutateAsync({ workspaceId: workspaceId as string, conversationId: selectedConv._id, content, mentionedUserIds })
                                     .then(() => message.success('Ghi chú nội bộ đã thêm'))
                                     .catch(() => message.error('Lỗi khi thêm ghi chú'));
+                            }}
+                            conversationMetadata={selectedConv?.metadata}
+                            conversationChannel={selectedConv?.channel}
+                            onUpdateMetadata={async (data) => {
+                                if (!selectedConv) return;
+                                try {
+                                    await httpClient.patch(`/conversations/workspace/${workspaceId}/${selectedConv._id}/metadata`, data);
+                                    // Update local state optimistically
+                                    setConversations(prev => prev.map(c =>
+                                        c._id === selectedConv._id
+                                            ? { ...c, metadata: { ...c.metadata, ...data } }
+                                            : c
+                                    ));
+                                    if (data.leadStage !== undefined) {
+                                        message.success(data.leadStage ? `Đã cập nhật giai đoạn: ${data.leadStage}` : 'Đã xóa giai đoạn');
+                                    }
+                                    if (data.isStarred !== undefined) {
+                                        message.success(data.isStarred ? '⭐ Đã đánh dấu quan trọng' : 'Đã bỏ đánh dấu quan trọng');
+                                    }
+                                } catch {
+                                    message.error('Lỗi khi cập nhật metadata');
+                                }
                             }}
                             messages={messages}
                         />
@@ -3389,7 +3459,7 @@ export default function InboxPage() {
 
                     {/* Tabs: Friends vs Contacts */}
                     <div style={{ display: 'flex', gap: 0, marginBottom: 12, borderRadius: 10, overflow: 'hidden', border: '1px solid #e5e7eb' }}>
-                        {(['friends', 'contacts'] as const).map(tab => (
+                        {(['friends', 'contacts', 'conversations'] as const).map(tab => (
                             <div
                                 key={tab}
                                 onClick={() => { setForwardTab(tab); setSelectedRecipients(new Set()); setForwardSearch(''); }}
@@ -3400,7 +3470,7 @@ export default function InboxPage() {
                                     color: forwardTab === tab ? '#fff' : '#6b7280',
                                 }}
                             >
-                                {tab === 'friends' ? `👤 Bạn bè (${forwardFriends.length})` : `💬 Đã nhắn tin (${forwardContacts.length})`}
+                                {tab === 'friends' ? `👤 Bạn bè (${forwardFriends.length})` : tab === 'contacts' ? `💬 Đã nhắn tin (${forwardContacts.length})` : `📋 Hội thoại (${conversations.filter(c => c._id !== selectedConvId).length})`}
                             </div>
                         ))}
                     </div>
@@ -3408,7 +3478,7 @@ export default function InboxPage() {
                     {/* Search */}
                     <Input
                         prefix={<Search size={14} color="#9ca3af" />}
-                        placeholder={forwardTab === 'friends' ? 'Tìm bạn bè Zalo...' : 'Tìm người đã nhắn tin...'}
+                        placeholder={forwardTab === 'friends' ? 'Tìm bạn bè Zalo...' : forwardTab === 'contacts' ? 'Tìm người đã nhắn tin...' : 'Tìm hội thoại...'}
                         value={forwardSearch}
                         onChange={e => setForwardSearch(e.target.value)}
                         allowClear
@@ -3417,6 +3487,29 @@ export default function InboxPage() {
 
                     {/* Select all / count */}
                     {!forwardFriendsLoading && (() => {
+                        if (forwardTab === 'conversations') {
+                            const convList = conversations.filter(c => c._id !== selectedConvId);
+                            const visibleConvs = convList.filter(c => !forwardSearch || visitorName(c).toLowerCase().includes(forwardSearch.toLowerCase()));
+                            if (visibleConvs.length === 0) return null;
+                            return (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                    <Checkbox
+                                        checked={visibleConvs.length > 0 && visibleConvs.every(c => selectedRecipients.has(`conv_${c._id}`))}
+                                        indeterminate={visibleConvs.some(c => selectedRecipients.has(`conv_${c._id}`)) && !visibleConvs.every(c => selectedRecipients.has(`conv_${c._id}`))}
+                                        onChange={(e) => {
+                                            if (e.target.checked) {
+                                                setSelectedRecipients(prev => { const next = new Set(prev); visibleConvs.forEach(c => next.add(`conv_${c._id}`)); return next; });
+                                            } else {
+                                                setSelectedRecipients(prev => { const next = new Set(prev); visibleConvs.forEach(c => next.delete(`conv_${c._id}`)); return next; });
+                                            }
+                                        }}
+                                    >
+                                        <span style={{ fontSize: 12.5, color: '#6b7280' }}>Chọn tất cả ({visibleConvs.length})</span>
+                                    </Checkbox>
+                                    <span style={{ fontSize: 12, color: '#6366f1', fontWeight: 600 }}>{selectedRecipients.size} đã chọn</span>
+                                </div>
+                            );
+                        }
                         const sourceList = forwardTab === 'friends' ? forwardFriends : forwardContacts;
                         const visibleList = sourceList.filter(f => !forwardSearch || f.displayName.toLowerCase().includes(forwardSearch.toLowerCase()));
                         if (visibleList.length === 0) return null;
@@ -3454,11 +3547,71 @@ export default function InboxPage() {
                     })()}
                 </div>
 
-                {/* Recipients list */}
+                {/* Recipients / Conversations list */}
                 <div style={{ maxHeight: 300, overflow: 'auto', padding: '0 24px' }}>
                     {forwardFriendsLoading ? (
                         <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
-                    ) : (() => {
+                    ) : forwardTab === 'conversations' ? (() => {
+                        const convList = conversations.filter(c => c._id !== selectedConvId);
+                        const filtered = convList.filter(c => !forwardSearch || visitorName(c).toLowerCase().includes(forwardSearch.toLowerCase()));
+                        if (filtered.length === 0) return <Empty description="Kh\u00f4ng t\u00ecm th\u1ea5y h\u1ed9i tho\u1ea1i n\u00e0o" style={{ padding: 30 }} />;
+                        return filtered.map(conv => {
+                            const channelIcon = (conv as any).channel === 'zalo' ? '\ud83d\udc99' : (conv as any).channel === 'facebook' ? '\ud83d\udcd8' : '\ud83c\udf10';
+                            const name = visitorName(conv);
+                            const avatar = conv.visitorInfo?.avatar;
+                            return (
+                                <div
+                                    key={conv._id}
+                                    style={{
+                                        display: 'flex', alignItems: 'center', gap: 10,
+                                        padding: '8px 0', borderBottom: '1px solid #f3f4f6',
+                                        cursor: 'pointer',
+                                    }}
+                                    onClick={() => {
+                                        setSelectedRecipients(prev => {
+                                            const next = new Set(prev);
+                                            const key = `conv_${conv._id}`;
+                                            if (next.has(key)) next.delete(key);
+                                            else next.add(key);
+                                            return next;
+                                        });
+                                    }}
+                                >
+                                    <Checkbox checked={selectedRecipients.has(`conv_${conv._id}`)} />
+                                    {avatar ? (
+                                        <img src={avatar} alt="" style={{ width: 36, height: 36, borderRadius: 10, objectFit: 'cover' }} />
+                                    ) : (
+                                        <div style={{
+                                            width: 36, height: 36, borderRadius: 10,
+                                            background: `hsl(${(name.charCodeAt(0) * 37) % 360}, 50%, 55%)`,
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                            color: '#fff', fontWeight: 600, fontSize: 14,
+                                        }}>
+                                            {name[0]?.toUpperCase()}
+                                        </div>
+                                    )}
+                                    <div style={{ flex: 1 }}>
+                                        <div style={{ fontSize: 13.5, fontWeight: 500, color: '#1f2937' }}>
+                                            {channelIcon} {name}
+                                        </div>
+                                        {conv.lastMessagePreview && (
+                                            <div style={{ fontSize: 11.5, color: '#9ca3af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 280 }}>
+                                                {conv.lastMessagePreview}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <span style={{
+                                        fontSize: 10, padding: '2px 6px', borderRadius: 6,
+                                        background: conv.status === 'open' ? '#ecfdf5' : conv.status === 'pending' ? '#fffbeb' : '#f3f4f6',
+                                        color: conv.status === 'open' ? '#059669' : conv.status === 'pending' ? '#d97706' : '#9ca3af',
+                                        fontWeight: 500,
+                                    }}>
+                                        {conv.status === 'open' ? 'Mở' : conv.status === 'pending' ? 'Chờ' : 'Đóng'}
+                                    </span>
+                                </div>
+                            );
+                        });
+                    })() : (() => {
                         const sourceList = forwardTab === 'friends' ? forwardFriends : forwardContacts;
                         const filtered = sourceList.filter(f => !forwardSearch || f.displayName.toLowerCase().includes(forwardSearch.toLowerCase()));
                         if (filtered.length === 0) return <Empty description={forwardTab === 'friends' ? 'Không tìm thấy bạn bè' : 'Không có liên hệ nào'} style={{ padding: 30 }} />;
@@ -3590,15 +3743,62 @@ export default function InboxPage() {
                                 broadcastPausedRef.current = false;
                                 broadcastCancelledRef.current = false;
 
-                                const recipientList = Array.from(selectedRecipients);
+                                const allRecipients = Array.from(selectedRecipients);
                                 const msgContents = messages
                                     .filter(m => selectedMsgIds.has(m._id))
                                     .map(m => m.content || '')
                                     .filter(Boolean);
 
+                                // Separate conversation recipients from Zalo recipients
+                                const convRecipients = allRecipients.filter(r => r.startsWith('conv_')).map(r => r.replace('conv_', ''));
+                                const recipientList = allRecipients.filter(r => !r.startsWith('conv_'));
+
                                 let successCount = 0;
                                 let failedCount = 0;
-                                setBroadcastProgress({ current: 0, total: recipientList.length, successCount: 0, failedCount: 0, status: 'sending' });
+                                const totalAll = convRecipients.length + recipientList.length;
+                                setBroadcastProgress({ current: 0, total: totalAll, successCount: 0, failedCount: 0, status: 'sending' });
+
+                                // 1. Forward to internal conversations first
+                                if (convRecipients.length > 0) {
+                                    try {
+                                        const messageIds = Array.from(selectedMsgIds);
+                                        const res = await httpClient.post(`/conversations/workspace/${workspaceId}/forward`, {
+                                            messageIds,
+                                            targetConversationIds: convRecipients,
+                                        });
+                                        const data = res.data?.data;
+                                        successCount += data?.totalSent || 0;
+                                        failedCount += data?.totalFailed || 0;
+                                    } catch (err: any) {
+                                        failedCount += convRecipients.length;
+                                        console.error('[Forward] Internal forward failed:', err);
+                                    }
+                                    setBroadcastProgress({
+                                        current: convRecipients.length,
+                                        total: totalAll,
+                                        successCount,
+                                        failedCount,
+                                        status: broadcastCancelledRef.current ? 'stopped' : 'sending',
+                                    });
+                                }
+
+                                // 2. Broadcast to Zalo recipients
+                                if (recipientList.length === 0 && convRecipients.length > 0) {
+                                    // Only conversations were selected, skip Zalo broadcast
+                                    const finalStatus = broadcastCancelledRef.current ? 'stopped' : 'completed';
+                                    setBroadcastProgress(p => p ? { ...p, status: finalStatus } : p);
+                                    if (finalStatus === 'completed') {
+                                        message.success(`Chuyển tiếp thành công ${successCount} cuộc hội thoại!`);
+                                    }
+                                    setBroadcasting(false);
+                                    setTimeout(() => {
+                                        setShowForwardModal(false);
+                                        setForwardMode(false);
+                                        setSelectedMsgIds(new Set());
+                                        setBroadcastProgress(null);
+                                    }, 2000);
+                                    return;
+                                }
 
                                 const DELAY_MS = 3000;
                                 const BATCH_SIZE = 50;

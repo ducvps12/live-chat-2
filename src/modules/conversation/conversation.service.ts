@@ -32,7 +32,7 @@ export const conversationService = {
         if (!conversation) {
             conversation = await conversationRepo.create({
                 workspaceId: widget.workspaceId,
-                widgetId: widget._id as any,
+                widgetId: widget.id,
                 visitorId,
                 visitorInfo,
                 status: 'open',
@@ -43,11 +43,11 @@ export const conversationService = {
             await visitorRepo.incrementConversations(visitorId, widgetId);
         } else if (conversation.status === 'closed' || conversation.status === 'resolved') {
             // Reopen existing closed conversation instead of creating a duplicate
-            await conversationRepo.updateStatus((conversation._id as any).toString(), 'open');
+            await conversationRepo.updateStatus((conversation.id).toString(), 'open');
             conversation.status = 'open';
         }
 
-        const msgResult = await messageRepo.findByConversation(conversation._id.toString(), { limit: 30, excludeInternal: true });
+        const msgResult = await messageRepo.findByConversation(conversation.id.toString(), { limit: 30, excludeInternal: true });
         const messages = msgResult.items;
 
         // Generate visitor token for socket auth
@@ -111,7 +111,7 @@ export const conversationService = {
         } else {
             targetWidget = widgetList[0];
         }
-        const widgetId = (targetWidget._id as any).toString();
+        const widgetId = (targetWidget.id).toString();
         const visitorId = `zalo_${zaloUserId}`;
 
         // Upsert visitor profile
@@ -131,7 +131,7 @@ export const conversationService = {
             // No conversation exists at all — create new
             conversation = await conversationRepo.create({
                 workspaceId: workspaceId as any,
-                widgetId: targetWidget._id as any,
+                widgetId: targetWidget.id,
                 visitorId,
                 visitorInfo: { name: zaloUserName, avatar: zaloAvatar },
                 channel: 'zalo',
@@ -153,12 +153,12 @@ export const conversationService = {
             } catch { /* socket may not be initialized yet */ }
         } else if (conversation.status === 'closed' || conversation.status === 'resolved') {
             // Reopen the existing conversation instead of creating a duplicate
-            await conversationRepo.updateStatus((conversation._id as any).toString(), 'open');
+            await conversationRepo.updateStatus((conversation.id).toString(), 'open');
             conversation.status = 'open';
             
             try {
                 emitToWorkspace(workspaceId, 'conversation:reopened', {
-                    conversationId: (conversation._id as any).toString(),
+                    conversationId: (conversation.id).toString(),
                 });
             } catch { /* socket may not be initialized */ }
         }
@@ -179,7 +179,7 @@ export const conversationService = {
                 }
                 try {
                     const ConvModel = (await import('./repos/conversation.model')).ConversationModel;
-                    await ConvModel.updateOne({ _id: conversation._id }, { $set: updateFields });
+                    await ConvModel.updateOne({ _id: conversation.id }, { $set: updateFields });
                     // Also update in-memory object
                     if (!conversation.visitorInfo) (conversation as any).visitorInfo = {};
                     if (zaloAvatar) (conversation.visitorInfo as any).avatar = zaloAvatar;
@@ -192,7 +192,7 @@ export const conversationService = {
         // For group messages: use individual sender name instead of group name
         const messageSenderName = groupSenderName || zaloUserName;
         return this.addMessage(
-            (conversation._id as any).toString(),
+            (conversation.id).toString(),
             { type: 'visitor', id: visitorId, name: messageSenderName },
             content,
             msgType as any,
@@ -221,7 +221,7 @@ export const conversationService = {
         const widgetList = await widgetRepo.findByWorkspace(workspaceId);
         if (!widgetList || widgetList.length === 0) return; // no widget = no conversation possible
 
-        const widgetId = (widgetList[0]._id as any).toString();
+        const widgetId = (widgetList[0].id).toString();
         const conversation = await conversationRepo.findLatestByVisitor(visitorId, widgetId);
         if (!conversation) {
             console.log(`[ConvService] No existing conversation for self-msg thread ${zaloThreadId}, skipping`);
@@ -230,13 +230,13 @@ export const conversationService = {
 
         // Reopen if closed so the message can be added
         if (conversation.status === 'closed') {
-            await conversationRepo.updateStatus((conversation._id as any).toString(), 'open');
+            await conversationRepo.updateStatus((conversation.id).toString(), 'open');
             conversation.status = 'open';
         }
 
         // Add message as 'agent' type (it was sent by us from the Zalo app)
         return this.addMessage(
-            (conversation._id as any).toString(),
+            (conversation.id).toString(),
             { type: 'agent', id: 'zalo_self', name: '📱 Zalo App' },
             content,
             msgType as any,
@@ -284,7 +284,7 @@ export const conversationService = {
             } as any);
         }
 
-        const widgetId = (targetWidget._id as any).toString();
+        const widgetId = (targetWidget.id).toString();
         const visitorId = `fb_${fbUserId}`;
 
         // Upsert visitor
@@ -310,7 +310,7 @@ export const conversationService = {
         if (!conversation) {
             conversation = await conversationRepo.create({
                 workspaceId: workspaceId as any,
-                widgetId: targetWidget._id as any,
+                widgetId: targetWidget.id,
                 visitorId,
                 visitorInfo: { name: fbUserName, avatar: fbAvatar },
                 channel: 'facebook',
@@ -327,12 +327,12 @@ export const conversationService = {
                 });
             } catch { /* socket may not be initialized yet */ }
         } else if (conversation.status === 'closed' || conversation.status === 'resolved') {
-            await conversationRepo.updateStatus((conversation._id as any).toString(), 'open');
+            await conversationRepo.updateStatus((conversation.id).toString(), 'open');
             conversation.status = 'open';
 
             try {
                 emitToWorkspace(workspaceId, 'conversation:reopened', {
-                    conversationId: (conversation._id as any).toString(),
+                    conversationId: (conversation.id).toString(),
                 });
             } catch { /* socket may not be initialized */ }
         }
@@ -343,7 +343,7 @@ export const conversationService = {
             const hasNewName = fbUserName && conversation.visitorInfo?.name !== fbUserName && fbUserName !== `FB User ${fbUserId.slice(-4)}`;
             if (hasNewAvatar || hasNewName) {
                 try {
-                    await conversationRepo.updateVisitorInfo((conversation._id as any).toString(), {
+                    await conversationRepo.updateVisitorInfo((conversation.id).toString(), {
                         ...(hasNewAvatar ? { avatar: fbAvatar } : {}),
                         ...(hasNewName ? { name: fbUserName } : {}),
                     });
@@ -352,7 +352,7 @@ export const conversationService = {
         }
 
         return this.addMessage(
-            (conversation._id as any).toString(),
+            (conversation.id).toString(),
             { type: 'visitor', id: visitorId, name: fbUserName },
             content,
             msgType as any,
@@ -384,7 +384,7 @@ export const conversationService = {
         if (!widgetList || widgetList.length === 0) return;
 
         const targetWidget = widgetList.find(w => (w as any).name === 'Facebook') || widgetList[0];
-        const widgetId = (targetWidget._id as any).toString();
+        const widgetId = (targetWidget.id).toString();
 
         // Upsert visitor (without creating a message)
         await visitorRepo.findOrCreate(
@@ -397,7 +397,7 @@ export const conversationService = {
         if (!conversation) {
             conversation = await conversationRepo.create({
                 workspaceId: workspaceId as any,
-                widgetId: targetWidget._id as any,
+                widgetId: targetWidget.id,
                 visitorId,
                 visitorInfo: { name: fbUserName, avatar: fbAvatar },
                 channel: 'facebook',
@@ -409,12 +409,12 @@ export const conversationService = {
         }
 
         if (conversation.status === 'closed') {
-            await conversationRepo.updateStatus((conversation._id as any).toString(), 'open');
+            await conversationRepo.updateStatus((conversation.id).toString(), 'open');
             conversation.status = 'open';
         }
 
         return this.addMessage(
-            (conversation._id as any).toString(),
+            (conversation.id).toString(),
             { type: 'agent', id: 'fb_page', name: pageName || 'Facebook Page' },
             content,
             msgType as any,
@@ -431,7 +431,7 @@ export const conversationService = {
         if (!conversation) throw new AppError('Cuộc hội thoại không tồn tại', 404, 'NOT_FOUND');
         if (conversation.visitorId !== visitorId) throw new AppError('Không có quyền', 403, 'FORBIDDEN');
 
-        const msgResult = await messageRepo.findByConversation(conversation._id.toString(), { limit: 30, excludeInternal: true });
+        const msgResult = await messageRepo.findByConversation(conversation.id.toString(), { limit: 30, excludeInternal: true });
         return { conversation, messages: msgResult.items, totalMessages: msgResult.total };
     },
 
@@ -500,7 +500,7 @@ export const conversationService = {
         }));
 
         const message = await messageRepo.create({
-            conversationId: conversation._id as any,
+            conversationId: conversation.id,
             clientMessageId: clientMessageId || undefined,
             sender,
             content: sanitizedContent,
@@ -586,10 +586,13 @@ export const conversationService = {
                             } else if (channel === 'zalo') {
                                 try {
                                     const { zaloService } = await import('../zalo/zalo.service');
-                                    const zaloUserId = (conversation as any).visitorId;
-                                    if (zaloUserId) {
-                                        await zaloService.sendMessage(wsId, zaloUserId, botResult.response);
-                                        console.log(`[Chatbot] ✅ Bot reply sent to Zalo user ${zaloUserId}`);
+                                    const metadataZaloId = (conversation as any).metadata?.zaloUserId;
+                                    const visitorId = String((conversation as any).visitorId || '');
+                                    const fallbackThreadId = visitorId.startsWith('zalo_') ? visitorId.replace(/^zalo_/, '') : visitorId;
+                                    const zaloThreadId = metadataZaloId || fallbackThreadId;
+                                    if (zaloThreadId) {
+                                        await zaloService.sendMessage(wsId, zaloThreadId, botResult.response);
+                                        console.log(`[Chatbot] ✅ Bot reply sent to Zalo thread ${zaloThreadId}`);
                                     }
                                 } catch (zaloErr) {
                                     console.error('[Chatbot] Failed to send bot reply to Zalo:', zaloErr);
@@ -603,6 +606,34 @@ export const conversationService = {
             } catch (err) {
                 console.error('[Chatbot] Hook error:', err);
             }
+        }
+
+        // ── AI Lead Auto-Extract Hook ──
+        // Quick-extract phone/email from visitor messages (non-blocking)
+        if (sender.type === 'visitor' && content && content.length > 5) {
+            setTimeout(async () => {
+                try {
+                    const { leadAIService } = await import('../lead/lead-ai.service');
+                    const wsId = (conversation.workspaceId as any).toString();
+
+                    // Count visitor messages — trigger full AI analysis every 8 messages
+                    const visitorMsgCount = await messageRepo.countBySender(conversationId, 'visitor');
+                    
+                    if (visitorMsgCount > 0 && visitorMsgCount % 8 === 0) {
+                        // Full AI analysis (async, background)
+                        console.log(`[LeadAI] Auto-triggering full analysis for conv ${conversationId} (${visitorMsgCount} visitor msgs)`);
+                        leadAIService.analyzeConversation(wsId, conversationId, { autoCreateLead: true }).catch(err => {
+                            console.error('[LeadAI] Auto-analysis failed:', err.message);
+                        });
+                    } else {
+                        // Quick regex extraction (instant, no API call)
+                        const recentMsgs = await messageRepo.getLatest(conversationId, 5);
+                        await leadAIService.quickExtract(wsId, conversationId, recentMsgs);
+                    }
+                } catch (err) {
+                    console.error('[LeadAI] Hook error:', err);
+                }
+            }, 2000); // Delay to not block main message flow
         }
 
         return message;
@@ -677,7 +708,7 @@ export const conversationService = {
             return;
         }
 
-        const latestMsgId = (latestMsg._id as any).toString();
+        const latestMsgId = (latestMsg.id).toString();
 
         await conversationRepo.updateReadCursor(
             conversationId,
@@ -730,7 +761,7 @@ export const conversationService = {
         const recentMessages = await messageRepo.getLatest(conversationId, limit);
         const statuses: Record<string, string> = {};
         for (const msg of recentMessages) {
-            statuses[(msg._id as any).toString()] = msg.status || 'sent';
+            statuses[(msg.id).toString()] = msg.status || 'sent';
         }
 
         return {
@@ -928,7 +959,7 @@ export const conversationService = {
         for (const conv of approaching) {
             try {
                 emitToWorkspace((conv.workspaceId as any).toString(), 'sla:warning', {
-                    conversationId: conv._id,
+                    conversationId: conv.id,
                     slaDeadline: conv.slaDeadline,
                     priority: conv.priority,
                     type: 'approaching',
@@ -938,7 +969,7 @@ export const conversationService = {
         for (const conv of breached) {
             try {
                 emitToWorkspace((conv.workspaceId as any).toString(), 'sla:warning', {
-                    conversationId: conv._id,
+                    conversationId: conv.id,
                     slaDeadline: conv.slaDeadline,
                     priority: conv.priority,
                     type: 'breached',
@@ -1005,7 +1036,7 @@ export const conversationService = {
                         (ctx: any) => ctx.participantId === requester.userId && ctx.participantType === requester.type
                     );
                     const unreadCount = await messageRepo.countUnreadSince(
-                        (conv._id as any).toString(),
+                        (conv.id).toString(),
                         requester.type,
                         readCtx ? readCtx.lastReadMessageId : null
                     );
@@ -1038,7 +1069,7 @@ export const conversationService = {
                 (ctx: any) => ctx.participantId === requester.userId && ctx.participantType === requester.type
             );
             const unreadCount = await messageRepo.countUnreadSince(
-                (conv._id as any).toString(),
+                (conv.id).toString(),
                 requester.type,
                 readCtx ? readCtx.lastReadMessageId : null
             );
@@ -1060,7 +1091,7 @@ export const conversationService = {
                     (ctx: any) => ctx.participantId === requester.userId && ctx.participantType === requester.type
                 );
                 const count = await messageRepo.countUnreadSince(
-                    conv._id.toString(),
+                    conv.id.toString(),
                     requester.type,
                     readCtx ? readCtx.lastReadMessageId : null
                 );
@@ -1177,7 +1208,7 @@ export const conversationService = {
         if (!conversation) throw new AppError('Cuộc hội thoại không tồn tại', 404, 'NOT_FOUND');
 
         const note = await messageRepo.create({
-            conversationId: conversation._id as any,
+            conversationId: conversation.id,
             sender: { type: 'agent', id: sender.id, name: sender.name },
             content,
             type: 'text',
@@ -1198,7 +1229,7 @@ export const conversationService = {
                         emitToUser(userId, 'notification:mention', {
                             conversationId,
                             message: `${sender.name || 'Một đồng nghiệp'} đã nhắc đến bạn trong một ghi chú.`,
-                            noteId: note._id,
+                            noteId: note.id,
                             createdAt: new Date().toISOString()
                         });
                     }
@@ -1258,5 +1289,109 @@ export const conversationService = {
         options?: { status?: string; limit?: number }
     ) {
         return conversationRepo.searchByMessageContent(workspaceId, query, options);
+    },
+
+    /**
+     * Forward messages to other internal conversations.
+     * For each target conversation, creates forwarded messages with [Chuyển tiếp] prefix.
+     * Also pushes to Zalo/Facebook for cross-channel conversations.
+     */
+    async forwardMessages(
+        workspaceId: string,
+        senderInfo: { id: string; name: string },
+        messageIds: string[],
+        targetConversationIds: string[]
+    ) {
+        // Fetch original messages
+        const originalMessages = await Promise.all(
+            messageIds.map(id => messageRepo.findById(id))
+        );
+        const validMessages = originalMessages.filter(Boolean) as any[];
+
+        if (validMessages.length === 0) {
+            throw new AppError('Không tìm thấy tin nhắn nào để chuyển tiếp', 404, 'NOT_FOUND');
+        }
+
+        let totalSent = 0;
+        let totalFailed = 0;
+        const results: Array<{ conversationId: string; success: boolean; error?: string }> = [];
+
+        for (const targetConvId of targetConversationIds) {
+            try {
+                const targetConv = await conversationRepo.findById(targetConvId);
+                if (!targetConv) {
+                    results.push({ conversationId: targetConvId, success: false, error: 'Không tìm thấy cuộc hội thoại' });
+                    totalFailed++;
+                    continue;
+                }
+
+                // Reopen if closed
+                if (targetConv.status === 'closed') {
+                    await conversationRepo.updateStatus(targetConvId, 'open');
+                }
+
+                // Send each message to target conversation
+                for (const origMsg of validMessages) {
+                    const forwardedContent = `[Chuyển tiếp từ ${origMsg.sender?.name || 'Khách'}]\n${origMsg.content || ''}`;
+
+                    const newMsg = await this.addMessage(
+                        targetConvId,
+                        { type: 'agent', id: senderInfo.id, name: senderInfo.name },
+                        forwardedContent,
+                        origMsg.type || 'text',
+                        origMsg.attachments || undefined
+                    );
+
+                    //  Push to external channel if applicable
+                    const channel = (targetConv as any).channel;
+                    if (channel === 'zalo') {
+                        const zaloUserId = (targetConv as any).metadata?.zaloUserId;
+                        if (zaloUserId) {
+                            try {
+                                const { zaloService } = require('../zalo/zalo.service');
+                                await zaloService.sendMessage(
+                                    workspaceId,
+                                    zaloUserId,
+                                    forwardedContent,
+                                    origMsg.type || 'text',
+                                    origMsg.attachments?.[0]?.data || undefined
+                                );
+                            } catch (e: any) {
+                                console.error('[Forward] Failed to push to Zalo:', e.message);
+                            }
+                        }
+                    } else if (channel === 'facebook') {
+                        const fbUserId = (targetConv as any).metadata?.fbUserId;
+                        const pageId = (targetConv as any).metadata?.pageId;
+                        if (fbUserId) {
+                            try {
+                                const { facebookService } = require('../facebook/facebook.service');
+                                await facebookService.sendMessage(
+                                    workspaceId,
+                                    fbUserId,
+                                    forwardedContent,
+                                    pageId
+                                );
+                            } catch (e: any) {
+                                console.error('[Forward] Failed to push to Facebook:', e.message);
+                            }
+                        }
+                    }
+                }
+
+                totalSent++;
+                results.push({ conversationId: targetConvId, success: true });
+            } catch (err: any) {
+                totalFailed++;
+                results.push({ conversationId: targetConvId, success: false, error: err.message });
+            }
+        }
+
+        return {
+            results,
+            totalSent,
+            totalFailed,
+            messagesForwarded: validMessages.length,
+        };
     },
 };

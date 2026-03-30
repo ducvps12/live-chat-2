@@ -1,0 +1,23 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Deploy to Server
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+          sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no "$SERVER_USER@$SERVER_HOST" "cd /www/live_chat_nemark && sed -i 's/\r$//' deploy.sh && bash deploy.sh"

@@ -27,6 +27,7 @@ export default function KnowledgeSuggestPanel({ workspaceId, lastCustomerMessage
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [manualSearch, setManualSearch] = useState('');
     const [showSearch, setShowSearch] = useState(false);
+    const [panelOpen, setPanelOpen] = useState(false);
 
     // Auto-suggest based on last customer message
     useEffect(() => {
@@ -83,8 +84,38 @@ export default function KnowledgeSuggestPanel({ workspaceId, lastCustomerMessage
         'Antigravity': '#3b82f6',
     };
 
+    // Nothing to show at all
     if (suggestions.length === 0 && !loading && !showSearch) {
-        return null; // Don't render if no suggestions
+        return null;
+    }
+
+    // Collapsed state — show a minimal teaser bar
+    if (!panelOpen) {
+        return (
+            <div
+                onClick={() => setPanelOpen(true)}
+                style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '6px 12px',
+                    marginBottom: 8,
+                    background: 'rgba(99, 102, 241, 0.08)',
+                    border: '1px solid rgba(99, 102, 241, 0.15)',
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(99, 102, 241, 0.14)'; e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.3)'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(99, 102, 241, 0.08)'; e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.15)'; }}
+            >
+                <Zap size={13} color="#6366f1" />
+                <span style={{ fontSize: 12, color: '#6366f1', fontWeight: 600, flex: 1 }}>
+                    {loading ? 'Đang tìm gợi ý...' : `${suggestions.length} gợi ý trả lời`}
+                </span>
+                <span style={{ fontSize: 11, color: '#818cf8' }}>Nhấn để xem ▸</span>
+            </div>
+        );
     }
 
     return (
@@ -119,6 +150,17 @@ export default function KnowledgeSuggestPanel({ workspaceId, lastCustomerMessage
                     }}
                 >
                     <Search size={14} />
+                </button>
+                <button
+                    onClick={e => { e.stopPropagation(); setPanelOpen(false); }}
+                    style={{
+                        background: 'transparent', border: 'none',
+                        color: 'rgba(255,255,255,.4)', cursor: 'pointer', padding: 2,
+                        marginLeft: 2,
+                    }}
+                    title="Thu nhỏ"
+                >
+                    <ChevronDown size={14} />
                 </button>
             </div>
 

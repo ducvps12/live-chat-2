@@ -81,4 +81,4 @@ conversationSchema.index({ widgetId: 1, createdAt: -1 });                // widg
 conversationSchema.index({ createdAt: -1 });
 conversationSchema.index({ slaDeadline: 1, status: 1 });                  // SLA monitoring
 
-export const ConversationModel = mongoose.model<IConversation>('Conversation', conversationSchema);
+export const ConversationModel = (mongoose.models.Conversation || mongoose.model<IConversation>('Conversation', conversationSchema)) as mongoose.Model<IConversation>;

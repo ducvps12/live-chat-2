@@ -33,7 +33,8 @@ export const requireAuth = (req: AuthRequest, res: Response, next: NextFunction)
 
 export const requireRole = (...roles: string[]) => {
     return (req: AuthRequest, res: Response, next: NextFunction) => {
-        if (!req.user || !roles.includes(req.user.role)) {
+        const userRole = req.user?.role?.toLowerCase();
+        if (!req.user || !userRole || !roles.some(r => r.toLowerCase() === userRole)) {
             return next(new AppError('Not authorized for this action', 403, 'FORBIDDEN'));
         }
         next();

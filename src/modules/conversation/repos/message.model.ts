@@ -81,7 +81,7 @@ messageSchema.index(
     { unique: true, partialFilterExpression: { clientMessageId: { $type: 'string' } } }
 );
 
-export const MessageModel = mongoose.model<IMessage>('Message', messageSchema);
+export const MessageModel = (mongoose.models.Message || mongoose.model<IMessage>('Message', messageSchema)) as mongoose.Model<IMessage>;
 
 // Auto-drop the old broken sparse index if it exists (one-time migration)
 // The old index used { sparse: true } which doesn't work on compound indexes

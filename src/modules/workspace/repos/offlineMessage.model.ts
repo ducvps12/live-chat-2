@@ -34,4 +34,4 @@ offlineMessageSchema.index({ email: 1, workspaceId: 1 });                 // fin
 offlineMessageSchema.index({ createdAt: -1 });                            // chronological listing
 offlineMessageSchema.index({ visitorId: 1, createdAt: -1 });              // visitor history
 
-export const OfflineMessageModel = mongoose.model<IOfflineMessage>('OfflineMessage', offlineMessageSchema);
+export const OfflineMessageModel = (mongoose.models.OfflineMessage || mongoose.model<IOfflineMessage>('OfflineMessage', offlineMessageSchema)) as mongoose.Model<IOfflineMessage>;

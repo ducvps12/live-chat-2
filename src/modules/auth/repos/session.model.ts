@@ -29,4 +29,4 @@ const sessionSchema = new Schema<ISession>(
 sessionSchema.index({ userId: 1, revokedAt: 1 });    // active sessions per user
 sessionSchema.index({ createdAt: -1 });               // chronological listing
 
-export const SessionModel = mongoose.model<ISession>('Session', sessionSchema);
+export const SessionModel = (mongoose.models.Session || mongoose.model<ISession>('Session', sessionSchema)) as mongoose.Model<ISession>;

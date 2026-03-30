@@ -59,4 +59,4 @@ const emailAccountSchema = new Schema<IEmailAccount>(
 
 emailAccountSchema.index({ workspaceId: 1, email: 1 }, { unique: true });
 
-export const EmailAccountModel = mongoose.model<IEmailAccount>('EmailAccount', emailAccountSchema);
+export const EmailAccountModel = (mongoose.models.EmailAccount || mongoose.model<IEmailAccount>('EmailAccount', emailAccountSchema)) as mongoose.Model<IEmailAccount>;

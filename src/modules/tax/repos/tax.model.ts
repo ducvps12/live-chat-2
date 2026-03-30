@@ -25,4 +25,4 @@ const taxSchema = new Schema<ITax>(
 
 taxSchema.index({ workspaceId: 1, isActive: 1 });
 
-export const TaxModel = mongoose.model<ITax>('Tax', taxSchema);
+export const TaxModel = (mongoose.models.Tax || mongoose.model<ITax>('Tax', taxSchema)) as mongoose.Model<ITax>;

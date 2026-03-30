@@ -79,4 +79,4 @@ orderSchema.index({ workspaceId: 1, status: 1, createdAt: -1 });
 orderSchema.index({ workspaceId: 1, orderNumber: 1 }, { unique: true });
 orderSchema.index({ workspaceId: 1, customerId: 1 });
 
-export const OrderModel = mongoose.model<IOrder>('Order', orderSchema);
+export const OrderModel = (mongoose.models.Order || mongoose.model<IOrder>('Order', orderSchema)) as mongoose.Model<IOrder>;

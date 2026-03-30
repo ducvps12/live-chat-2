@@ -1,0 +1,33 @@
+﻿.next/dev/types/validator.ts(7,6): error TS2300: Duplicate identifier 'PagesPageConfig'.
+.next/types/validator.ts(7,6): error TS2300: Duplicate identifier 'PagesPageConfig'.
+src/modules/conversation/conversation.controller.ts(9,70): error TS2345: Argument of type 'string | string[]' is not assignable to parameter of type 'string'.
+  Type 'string[]' is not assignable to type 'string'.
+src/modules/zalo/zalo.controller.ts(2,30): error TS2307: Cannot find module '../../middlewares/asyncHandler' or its corresponding type declarations.
+src/modules/zalo/zalo.controller.ts(12,57): error TS2345: Argument of type 'string | string[]' is not assignable to parameter of type 'string'.
+  Type 'string[]' is not assignable to type 'string'.
+src/modules/zalo/zalo.controller.ts(25,52): error TS2345: Argument of type 'string | string[]' is not assignable to parameter of type 'string'.
+  Type 'string[]' is not assignable to type 'string'.
+src/modules/zalo/zalo.controller.ts(38,38): error TS2345: Argument of type 'string | string[]' is not assignable to parameter of type 'string'.
+  Type 'string[]' is not assignable to type 'string'.
+src/modules/zalo/zalo.controller.ts(53,54): error TS2345: Argument of type 'string | string[]' is not assignable to parameter of type 'string'.
+  Type 'string[]' is not assignable to type 'string'.
+src/modules/zalo/zalo.routes.ts(3,29): error TS2307: Cannot find module '../../middlewares/requireAuth' or its corresponding type declarations.
+src/modules/zalo/zalo.routes.ts(4,30): error TS2307: Cannot find module '../../middlewares/requireScope' or its corresponding type declarations.
+src/modules/zalo/zalo.service.ts(3,26): error TS2307: Cannot find module '../../infra/error' or its corresponding type declarations.
+src/modules/zalo/zalo.service.ts(4,24): error TS2307: Cannot find module '../../infra/logger' or its corresponding type declarations.
+src/modules/zalo/zalo.service.ts(48,40): error TS2339: Property 'name' does not exist on type 'FetchAccountInfoResponse'.
+src/modules/zalo/zalo.service.ts(49,42): error TS2339: Property 'avatar' does not exist on type 'FetchAccountInfoResponse'.
+src/modules/zalo/zalo.service.ts(56,50): error TS2352: Conversion of type 'ObjectId' to type 'string' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/modules/zalo/zalo.service.ts(62,65): error TS2339: Property 'userId' does not exist on type 'never'.
+src/modules/zalo/zalo.service.ts(62,82): error TS2339: Property 'uid' does not exist on type 'never'.
+src/modules/zalo/zalo.service.ts(78,30): error TS2339: Property 'called' does not exist on type '(value: string | PromiseLike<string>) => void'.
+src/modules/zalo/zalo.service.ts(111,42): error TS2352: Conversion of type 'ObjectId' to type 'string' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/modules/zalo/zalo.service.ts(136,53): error TS2352: Conversion of type 'ObjectId' to type 'string' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/modules/zalo/zalo.service.ts(155,17): error TS2322: Type 'null' is not assignable to type 'SendMessageQuote | undefined'.
+src/modules/zalo/zalo.service.ts(159,37): error TS2353: Object literal may only specify known properties, and 'stickerId' does not exist in type 'SendStickerPayload'.
+src/pages/workspace/index.tsx(65,40): error TS2345: Argument of type 'Record<string, string>' is not assignable to parameter of type '{ name: string; slug: string; }'.
+  Type 'Record<string, string>' is missing the following properties from type '{ name: string; slug: string; }': name, slug
+src/pages/workspace/index.tsx(190,41): error TS2345: Argument of type '(ws: Record<string, unknown>, idx: number) => JSX.Element' is not assignable to parameter of type '(value: IWorkspaceResponse, index: number, array: IWorkspaceResponse[]) => Element'.
+  Types of parameters 'ws' and 'value' are incompatible.
+    Type 'IWorkspaceResponse' is not assignable to type 'Record<string, unknown>'.
+      Index signature for type 'string' is missing in type 'IWorkspaceResponse'.

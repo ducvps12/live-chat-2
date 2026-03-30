@@ -1,43 +1,54 @@
-import { BusinessHoursModel, IBusinessHours, IDaySchedule, IHoliday } from './repos/businessHours.model';
-import mongoose from 'mongoose';
+import prisma from '../../infra/prisma';
+import type { BusinessHours } from '@prisma/client';
+
+interface IDaySchedule {
+    day: number;
+    startTime: string;
+    endTime: string;
+    isActive: boolean;
+}
+
+interface IHoliday {
+    date: string;
+    name: string;
+}
 
 class BusinessHoursService {
-    async getByWorkspace(workspaceId: string): Promise<IBusinessHours | null> {
-        return BusinessHoursModel.findOne({ workspaceId: new mongoose.Types.ObjectId(workspaceId) }).lean();
+    async getByWorkspace(workspaceId: string): Promise<BusinessHours | null> {
+        return prisma.businessHours.findUnique({ where: { workspaceId } });
     }
 
     async upsert(workspaceId: string, data: {
         timezone?: string;
         schedule?: IDaySchedule[];
         holidays?: IHoliday[];
-        offlineAction?: IBusinessHours['offlineAction'];
+        offlineAction?: string;
         offlineMessage?: string;
         isActive?: boolean;
-    }): Promise<IBusinessHours> {
-        const existing = await BusinessHoursModel.findOne({ workspaceId: new mongoose.Types.ObjectId(workspaceId) });
-        if (existing) {
-            Object.assign(existing, data);
-            return existing.save() as any;
-        }
-        return BusinessHoursModel.create({
-            workspaceId: new mongoose.Types.ObjectId(workspaceId),
-            timezone: data.timezone || 'Asia/Ho_Chi_Minh',
-            schedule: data.schedule || this.getDefaultSchedule(),
-            holidays: data.holidays || [],
-            offlineAction: data.offlineAction || 'custom_message',
-            offlineMessage: data.offlineMessage || 'Chúng tôi hiện ngoài giờ làm việc. Vui lòng để lại tin nhắn!',
-            isActive: data.isActive !== false,
+    }): Promise<BusinessHours> {
+        return prisma.businessHours.upsert({
+            where: { workspaceId },
+            create: {
+                workspaceId,
+                timezone: data.timezone || 'Asia/Ho_Chi_Minh',
+                schedule: (data.schedule || this.getDefaultSchedule()) as any,
+                holidays: (data.holidays || []) as any,
+                offlineAction: data.offlineAction || 'custom_message',
+                offlineMessage: data.offlineMessage || 'Chúng tôi hiện ngoài giờ làm việc. Vui lòng để lại tin nhắn!',
+                isActive: data.isActive !== false,
+            },
+            update: data as any,
         });
     }
 
     async isWithinWorkingHours(workspaceId: string): Promise<boolean> {
         const config = await this.getByWorkspace(workspaceId);
-        if (!config || !config.isActive) return true; // No config = always open
+        if (!config || !config.isActive) return true;
 
         const now = new Date();
-        // Check holidays
         const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const isHoliday = config.holidays.some(h => {
+        const holidays = (config.holidays as IHoliday[]) || [];
+        const isHoliday = holidays.some(h => {
             const hDate = new Date(h.date);
             return hDate.getFullYear() === today.getFullYear() &&
                 hDate.getMonth() === today.getMonth() &&
@@ -45,9 +56,9 @@ class BusinessHoursService {
         });
         if (isHoliday) return false;
 
-        // Check day schedule
         const dayOfWeek = now.getDay();
-        const daySchedule = config.schedule.find(s => s.day === dayOfWeek);
+        const schedule = (config.schedule as IDaySchedule[]) || [];
+        const daySchedule = schedule.find(s => s.day === dayOfWeek);
         if (!daySchedule || !daySchedule.isActive) return false;
 
         const currentMinutes = now.getHours() * 60 + now.getMinutes();
@@ -59,14 +70,9 @@ class BusinessHoursService {
         return currentMinutes >= startMinutes && currentMinutes < endMinutes;
     }
 
-    async getOfflineConfig(workspaceId: string): Promise<{
-        isOffline: boolean;
-        action: string;
-        message: string;
-    }> {
+    async getOfflineConfig(workspaceId: string): Promise<{ isOffline: boolean; action: string; message: string }> {
         const isWorking = await this.isWithinWorkingHours(workspaceId);
         if (isWorking) return { isOffline: false, action: '', message: '' };
-
         const config = await this.getByWorkspace(workspaceId);
         return {
             isOffline: true,
@@ -80,7 +86,7 @@ class BusinessHoursService {
             day,
             startTime: '08:00',
             endTime: '17:30',
-            isActive: day >= 1 && day <= 5, // Mon-Fri
+            isActive: day >= 1 && day <= 5,
         }));
     }
 }

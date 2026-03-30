@@ -15,7 +15,7 @@ export const authService = {
 
         // Generate Access Token (Short-lived, e.g. 15m or 1h)
         const accessToken = security.generateToken({
-            id: user._id,
+            id: user.id,
             email: user.email,
             name: user.name,
             role: user.role,
@@ -27,7 +27,7 @@ export const authService = {
         expiresAt.setDate(expiresAt.getDate() + 7); // 7 days
 
         await sessionRepo.createSession({
-            userId: user._id as any,
+            userId: user.id as any,
             refreshToken,
             ipAddress,
             userAgent,
@@ -38,7 +38,7 @@ export const authService = {
             accessToken,
             refreshToken,
             user: {
-                id: user._id,
+                id: user.id,
                 email: user.email,
                 name: user.name,
                 role: user.role,
@@ -61,7 +61,7 @@ export const authService = {
 
         // Generate new tokens
         const newAccessToken = security.generateToken({
-            id: user._id,
+            id: user.id,
             email: user.email,
             name: user.name,
             role: user.role,
@@ -72,7 +72,7 @@ export const authService = {
         expiresAt.setDate(expiresAt.getDate() + 7);
 
         await sessionRepo.createSession({
-            userId: user._id as any,
+            userId: user.id as any,
             refreshToken: newRefreshToken,
             ipAddress,
             userAgent,
@@ -113,7 +113,7 @@ export const authService = {
         const resetPasswordExpires = new Date();
         resetPasswordExpires.setMinutes(resetPasswordExpires.getMinutes() + 15); // 15 mins
 
-        await userRepo.updateUser(user._id.toString(), {
+        await userRepo.updateUser(user.id.toString(), {
             resetPasswordToken: tokenHash,
             resetPasswordExpires
         });
@@ -156,7 +156,7 @@ export const authService = {
             email, passwordHash, name, role: 'admin',
         });
         
-        return { id: admin._id, email: admin.email, name: admin.name, role: admin.role };
+        return { id: admin.id, email: admin.email, name: admin.name, role: admin.role };
     },
 
     async updateProfile(userId: string, data: { name: string; avatarUrl?: string }) {
@@ -172,7 +172,7 @@ export const authService = {
 
         const updatedUser = await userRepo.updateUser(userId, updateData);
         return {
-            id: updatedUser?._id,
+            id: updatedUser?.id,
             email: updatedUser?.email,
             name: updatedUser?.name,
             avatarUrl: updatedUser?.avatarUrl,

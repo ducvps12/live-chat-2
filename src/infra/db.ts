@@ -1,12 +1,17 @@
-import mongoose from 'mongoose';
-import { env } from '../config/env';
+import { prisma } from './prisma';
 
 export const connectDB = async () => {
     try {
-        const conn = await mongoose.connect(env.MONGO_URI);
-        console.log(`[DB] MongoDB Connected: ${conn.connection.host}`);
+        // Test the connection
+        await prisma.$connect();
+        console.log(`[DB] MySQL Connected via Prisma`);
     } catch (error) {
-        console.error(`[DB] MongoDB Connection Error: ${(error as Error).message}`);
+        console.error(`[DB] MySQL Connection Error: ${(error as Error).message}`);
         process.exit(1);
     }
+};
+
+export const disconnectDB = async () => {
+    await prisma.$disconnect();
+    console.log('[DB] MySQL Disconnected');
 };

@@ -111,6 +111,14 @@ router.get(
     conversationController.searchByMessage
 );
 
+// ────────── Forward messages to other conversations ──────────
+router.post(
+    '/workspace/:workspaceId/forward',
+    requireAuth,
+    scopeCheck,
+    conversationController.forwardMessages
+);
+
 // ────────── SLA (must be before generic /:conversationId) ──────────
 router.get(
     '/workspace/:workspaceId/sla/check',

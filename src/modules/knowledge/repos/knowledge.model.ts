@@ -36,4 +36,4 @@ knowledgeEntrySchema.index(
 knowledgeEntrySchema.index({ workspaceId: 1, product: 1 });
 knowledgeEntrySchema.index({ workspaceId: 1, source: 1 });
 
-export const KnowledgeEntryModel = mongoose.model<IKnowledgeEntry>('KnowledgeEntry', knowledgeEntrySchema);
+export const KnowledgeEntryModel = (mongoose.models.KnowledgeEntry || mongoose.model<IKnowledgeEntry>('KnowledgeEntry', knowledgeEntrySchema)) as mongoose.Model<IKnowledgeEntry>;

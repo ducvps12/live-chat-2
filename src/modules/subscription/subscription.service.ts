@@ -1,165 +1,130 @@
-import mongoose from 'mongoose';
-import { SubscriptionModel, InvoiceModel, ISubscription, IInvoice, PLAN_TIERS, PlanTier } from './subscription.model';
+import prisma from '../../infra/prisma';
+import type { Subscription, Invoice } from '@prisma/client';
 import { paymentService } from './payment.service';
 
-export class SubscriptionService {
+export interface PlanTier {
+    id: string;
+    name: string;
+    nameVi: string;
+    price: number;
+    priceYearly: number;
+    features: string[];
+}
 
-    /**
-     * Lấy tất cả plan tiers
-     */
+export const PLAN_TIERS: PlanTier[] = [
+    { id: 'trial', name: 'Trial', nameVi: 'Dùng thử', price: 0, priceYearly: 0, features: ['30 ngày dùng thử', '1 agent', '100 conversations/tháng'] },
+    { id: 'starter', name: 'Starter', nameVi: 'Khởi đầu', price: 299000, priceYearly: 2990000, features: ['3 agents', '500 conversations/tháng', 'Widget tùy chỉnh'] },
+    { id: 'pro', name: 'Professional', nameVi: 'Chuyên nghiệp', price: 799000, priceYearly: 7990000, features: ['10 agents', 'Unlimited conversations', 'Chatbot AI', 'Analytics'] },
+    { id: 'enterprise', name: 'Enterprise', nameVi: 'Doanh nghiệp', price: -1, priceYearly: -1, features: ['Unlimited agents', 'Custom integrations', 'SLA support', 'On-premise option'] },
+];
+
+export class SubscriptionService {
     getPlans(): PlanTier[] {
         return PLAN_TIERS;
     }
 
-    /**
-     * Lấy subscription hiện tại của workspace (auto-create trial nếu chưa có)
-     */
-    async getSubscription(workspaceId: string): Promise<ISubscription> {
-        let sub = await SubscriptionModel.findOne({
-            workspaceId: new mongoose.Types.ObjectId(workspaceId),
-        }).lean().exec();
+    async getSubscription(workspaceId: string): Promise<Subscription> {
+        let sub = await prisma.subscription.findUnique({ where: { workspaceId } });
 
         if (!sub) {
-            // Auto-create trial subscription (30 ngày)
             const now = new Date();
             const trialEnd = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-            sub = await SubscriptionModel.create({
-                workspaceId: new mongoose.Types.ObjectId(workspaceId),
-                planId: 'trial',
-                status: 'active',
-                currentPeriodStart: now,
-                currentPeriodEnd: trialEnd,
-                trialEndsAt: trialEnd,
-                billingCycle: 'monthly',
+            sub = await prisma.subscription.create({
+                data: {
+                    workspaceId,
+                    planId: 'trial',
+                    status: 'active',
+                    currentPeriodStart: now,
+                    currentPeriodEnd: trialEnd,
+                    trialEndsAt: trialEnd,
+                    billingCycle: 'monthly',
+                },
             });
-            sub = sub.toObject();
         }
 
-        // Auto-expire if past period end
-        if (sub && sub.status === 'active' && new Date(sub.currentPeriodEnd) < new Date()) {
-            await SubscriptionModel.updateOne(
-                { _id: sub._id },
-                { $set: { status: 'expired' } }
-            );
+        if (sub.status === 'active' && new Date(sub.currentPeriodEnd) < new Date()) {
+            await prisma.subscription.update({ where: { id: sub.id }, data: { status: 'expired' } });
             sub.status = 'expired';
         }
 
-        return sub as ISubscription;
+        return sub;
     }
 
-    /**
-     * Nâng cấp/thay đổi plan — tạo invoice pending, chờ thanh toán
-     */
-    async changePlan(workspaceId: string, planId: string, billingCycle: 'monthly' | 'yearly' = 'monthly'): Promise<{ subscription: ISubscription; invoice?: IInvoice }> {
+    async changePlan(workspaceId: string, planId: string, billingCycle: 'monthly' | 'yearly' = 'monthly'): Promise<{ subscription: Subscription; invoice?: Invoice }> {
         const plan = PLAN_TIERS.find(p => p.id === planId);
         if (!plan) throw new Error('Plan không tồn tại');
         if (plan.price < 0) throw new Error('Vui lòng liên hệ sales cho gói Enterprise');
 
-        // For free plan, activate immediately
         if (plan.price === 0) {
             const now = new Date();
             const periodEnd = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-            const sub = await SubscriptionModel.findOneAndUpdate(
-                { workspaceId: new mongoose.Types.ObjectId(workspaceId) },
-                {
-                    $set: {
-                        planId,
-                        status: 'active',
-                        currentPeriodStart: now,
-                        currentPeriodEnd: periodEnd,
-                        billingCycle,
-                        cancelledAt: null,
-                    },
+            const sub = await prisma.subscription.upsert({
+                where: { workspaceId },
+                create: {
+                    workspaceId, planId, status: 'active',
+                    currentPeriodStart: now, currentPeriodEnd: periodEnd, billingCycle,
                 },
-                { upsert: true, new: true, lean: true }
-            ).exec();
-            return { subscription: sub as ISubscription };
+                update: {
+                    planId, status: 'active',
+                    currentPeriodStart: now, currentPeriodEnd: periodEnd, billingCycle, cancelledAt: null,
+                },
+            });
+            return { subscription: sub };
         }
 
-        // For paid plans: create invoice but DON'T activate yet — wait for payment
         const amount = billingCycle === 'yearly' ? plan.priceYearly : plan.price;
         const invoice = await this.createInvoice(workspaceId, planId, amount, billingCycle);
-
-        // Return current subscription (not yet upgraded)
         const currentSub = await this.getSubscription(workspaceId);
-        return { subscription: currentSub, invoice: invoice };
+        return { subscription: currentSub, invoice };
     }
 
-    /**
-     * Huỷ subscription
-     */
-    async cancelSubscription(workspaceId: string): Promise<ISubscription> {
-        const sub = await SubscriptionModel.findOneAndUpdate(
-            { workspaceId: new mongoose.Types.ObjectId(workspaceId) },
-            { $set: { status: 'cancelled', cancelledAt: new Date() } },
-            { new: true, lean: true }
-        ).exec();
-
+    async cancelSubscription(workspaceId: string): Promise<Subscription> {
+        const sub = await prisma.subscription.update({
+            where: { workspaceId },
+            data: { status: 'cancelled', cancelledAt: new Date() },
+        });
         if (!sub) throw new Error('Subscription không tồn tại');
-        return sub as ISubscription;
+        return sub;
     }
 
-    /**
-     * Tạo hoá đơn
-     */
     async createInvoice(
-        workspaceId: string,
-        planId: string,
-        amount: number,
-        billingCycle: 'monthly' | 'yearly'
-    ): Promise<IInvoice> {
+        workspaceId: string, planId: string, amount: number, billingCycle: 'monthly' | 'yearly'
+    ): Promise<Invoice> {
         const plan = PLAN_TIERS.find(p => p.id === planId);
         const invoiceNumber = `INV-${Date.now()}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
-        return InvoiceModel.create({
-            workspaceId: new mongoose.Types.ObjectId(workspaceId),
-            invoiceNumber,
-            planId,
-            amount,
-            currency: 'VND',
-            status: 'pending',
-            billingCycle,
-            description: `Gói ${plan?.nameVi || planId} — ${billingCycle === 'yearly' ? 'Năm' : 'Tháng'}`,
+        return prisma.invoice.create({
+            data: {
+                workspaceId, invoiceNumber, planId, amount,
+                currency: 'VND', status: 'pending', billingCycle,
+                description: `Gói ${plan?.nameVi || planId} — ${billingCycle === 'yearly' ? 'Năm' : 'Tháng'}`,
+            },
         });
     }
 
-    /**
-     * Lấy danh sách hoá đơn
-     */
-    async getInvoices(workspaceId: string, page = 1, limit = 20): Promise<{ items: IInvoice[]; total: number }> {
-        const wsId = new mongoose.Types.ObjectId(workspaceId);
+    async getInvoices(workspaceId: string, page = 1, limit = 20): Promise<{ items: Invoice[]; total: number }> {
         const [items, total] = await Promise.all([
-            InvoiceModel.find({ workspaceId: wsId })
-                .sort({ createdAt: -1 })
-                .skip((page - 1) * limit)
-                .limit(limit)
-                .lean()
-                .exec(),
-            InvoiceModel.countDocuments({ workspaceId: wsId }).exec(),
+            prisma.invoice.findMany({
+                where: { workspaceId },
+                orderBy: { createdAt: 'desc' },
+                skip: (page - 1) * limit,
+                take: limit,
+            }),
+            prisma.invoice.count({ where: { workspaceId } }),
         ]);
-
-        return { items: items as IInvoice[], total };
+        return { items, total };
     }
 
-    /**
-     * Verify bank transfer payment for an invoice via ACB API
-     */
-    async verifyPayment(invoiceId: string): Promise<IInvoice> {
+    async verifyPayment(invoiceId: string): Promise<Invoice> {
         const result = await paymentService.checkPayment(invoiceId);
         if (!result.invoice) throw new Error('Invoice không tồn tại');
         return result.invoice;
     }
 
-    /**
-     * Get bank transfer payment info for an invoice
-     */
     async getPaymentInfo(invoiceId: string) {
         return paymentService.getPaymentInfo(invoiceId);
     }
 
-    /**
-     * Check payment status (called by frontend polling)
-     */
     async checkPaymentStatus(invoiceId: string) {
         return paymentService.checkPayment(invoiceId);
     }

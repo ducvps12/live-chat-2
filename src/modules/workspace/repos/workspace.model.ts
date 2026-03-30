@@ -83,4 +83,4 @@ workspaceSchema.index({ 'members.userId': 1 });                 // member lookup
 workspaceSchema.index({ 'members.userId': 1, isActive: 1 });    // getMyWorkspaces
 workspaceSchema.index({ isActive: 1, createdAt: -1 });          // active workspaces listing
 
-export const WorkspaceModel = mongoose.model<IWorkspace>('Workspace', workspaceSchema);
+export const WorkspaceModel = (mongoose.models.Workspace || mongoose.model<IWorkspace>('Workspace', workspaceSchema)) as mongoose.Model<IWorkspace>;

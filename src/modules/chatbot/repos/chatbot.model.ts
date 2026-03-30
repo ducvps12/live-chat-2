@@ -155,4 +155,4 @@ const aiBotSchema = new Schema<IAIBot>(
 aiBotSchema.index({ workspaceId: 1, isActive: 1 });
 aiBotSchema.index({ workspaceId: 1, isDraft: 1 });
 
-export const AIBotModel = mongoose.model<IAIBot>('AIBot', aiBotSchema);
+export const AIBotModel = (mongoose.models.AIBot || mongoose.model<IAIBot>('AIBot', aiBotSchema)) as mongoose.Model<IAIBot>;

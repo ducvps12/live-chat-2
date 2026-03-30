@@ -1,28 +1,24 @@
-import { ZaloContactModel, IZaloContact } from './zalo-contact.model';
-import mongoose from 'mongoose';
+import prisma from '../../../infra/prisma';
+import type { ZaloContact } from '@prisma/client';
 
 export interface ZaloContactQuery {
     workspaceId: string;
-    search?: string;           // tìm theo tên hoặc SĐT
+    search?: string;
     source?: 'friend' | 'stranger' | 'group';
-    page?: number;             // offset-based ok cho contacts (ít data hơn messages)
+    page?: number;
     limit?: number;
     sortBy?: 'lastMessageAt' | 'displayName' | 'totalMessages';
     sortOrder?: 'asc' | 'desc';
 }
 
 export interface ZaloContactPage {
-    items: IZaloContact[];
+    items: ZaloContact[];
     total: number;
     page: number;
     totalPages: number;
 }
 
 export const zaloContactRepo = {
-    /**
-     * Tạo hoặc cập nhật contact (upsert theo zaloUserId)
-     * Tự động update lastMessageAt, totalMessages, lastMessagePreview
-     */
     async upsert(data: {
         workspaceId: string;
         zaloUserId: string;
@@ -32,130 +28,115 @@ export const zaloContactRepo = {
         source?: 'friend' | 'stranger' | 'group';
         lastMessagePreview?: string;
         metadata?: Record<string, any>;
-    }): Promise<IZaloContact> {
-        const update: any = {
-            $set: {
+    }): Promise<ZaloContact> {
+        const existing = await prisma.zaloContact.findUnique({
+            where: { workspaceId_zaloUserId: { workspaceId: data.workspaceId, zaloUserId: data.zaloUserId } },
+        });
+
+        if (existing) {
+            const updateData: any = {
                 lastMessageAt: new Date(),
-            },
-            $inc: { totalMessages: 1 },
-            $setOnInsert: {
-                workspaceId: new mongoose.Types.ObjectId(data.workspaceId),
+                totalMessages: { increment: 1 },
+            };
+            if (data.displayName) updateData.displayName = data.displayName;
+            if (data.avatar) updateData.avatar = data.avatar;
+            if (data.phoneNumber) updateData.phoneNumber = data.phoneNumber;
+            if (data.source) updateData.source = data.source;
+            if (data.lastMessagePreview) updateData.lastMessagePreview = data.lastMessagePreview.substring(0, 500);
+            if (data.metadata) updateData.metadata = data.metadata;
+
+            return prisma.zaloContact.update({
+                where: { id: existing.id },
+                data: updateData,
+            });
+        }
+
+        return prisma.zaloContact.create({
+            data: {
+                workspaceId: data.workspaceId,
                 zaloUserId: data.zaloUserId,
+                displayName: data.displayName || '',
+                avatar: data.avatar || '',
+                phoneNumber: data.phoneNumber || '',
+                source: data.source || 'stranger',
+                lastMessagePreview: data.lastMessagePreview?.substring(0, 500) || '',
+                metadata: data.metadata || {},
+                lastMessageAt: new Date(),
                 firstContactAt: new Date(),
+                totalMessages: 1,
             },
-        };
-
-        // Chỉ update field khi có giá trị (không ghi đè bằng rỗng)
-        if (data.displayName) update.$set.displayName = data.displayName;
-        if (data.avatar) update.$set.avatar = data.avatar;
-        if (data.phoneNumber) update.$set.phoneNumber = data.phoneNumber;
-        if (data.source) update.$set.source = data.source;
-        if (data.lastMessagePreview) update.$set.lastMessagePreview = data.lastMessagePreview.substring(0, 100);
-        if (data.metadata) update.$set.metadata = data.metadata;
-
-        return ZaloContactModel.findOneAndUpdate(
-            {
-                workspaceId: new mongoose.Types.ObjectId(data.workspaceId),
-                zaloUserId: data.zaloUserId,
-            },
-            update,
-            { upsert: true, new: true, lean: true }
-        ).exec() as Promise<IZaloContact>;
+        });
     },
 
-    /**
-     * Tìm 1 contact theo zaloUserId
-     */
-    async findByZaloUserId(workspaceId: string, zaloUserId: string): Promise<IZaloContact | null> {
-        return ZaloContactModel.findOne({
-            workspaceId: new mongoose.Types.ObjectId(workspaceId),
-            zaloUserId,
-        }).lean().exec() as Promise<IZaloContact | null>;
+    async findByZaloUserId(workspaceId: string, zaloUserId: string): Promise<ZaloContact | null> {
+        return prisma.zaloContact.findUnique({
+            where: { workspaceId_zaloUserId: { workspaceId, zaloUserId } },
+        });
     },
 
-    /**
-     * Danh sách contacts (hỗ trợ search, pagination, sorting)
-     */
     async findByWorkspace(query: ZaloContactQuery): Promise<ZaloContactPage> {
         const page = Math.max(query.page || 1, 1);
         const limit = Math.min(query.limit || 20, 100);
         const skip = (page - 1) * limit;
         const sortField = query.sortBy || 'lastMessageAt';
-        const sortOrder = query.sortOrder === 'asc' ? 1 : -1;
+        const sortOrder = query.sortOrder || 'desc';
 
-        const filter: any = {
-            workspaceId: new mongoose.Types.ObjectId(query.workspaceId),
-        };
+        const where: any = { workspaceId: query.workspaceId };
+        if (query.source) where.source = query.source;
 
-        if (query.source) filter.source = query.source;
-
-        // Search by name or phone
         if (query.search && query.search.trim()) {
             const keyword = query.search.trim();
-            // Thử phone match trước (exact prefix), nếu không thì text search
             if (/^\d+$/.test(keyword)) {
-                filter.phoneNumber = { $regex: `^${keyword}`, $options: 'i' };
+                where.phoneNumber = { startsWith: keyword };
             } else {
-                filter.$text = { $search: keyword };
+                where.displayName = { contains: keyword };
             }
         }
 
         const [items, total] = await Promise.all([
-            ZaloContactModel.find(filter)
-                .sort({ [sortField]: sortOrder })
-                .skip(skip)
-                .limit(limit)
-                .lean()
-                .exec(),
-            ZaloContactModel.countDocuments(filter).exec(),
+            prisma.zaloContact.findMany({
+                where,
+                orderBy: { [sortField]: sortOrder },
+                skip,
+                take: limit,
+            }),
+            prisma.zaloContact.count({ where }),
         ]);
 
-        return {
-            items: items as IZaloContact[],
-            total,
-            page,
-            totalPages: Math.ceil(total / limit),
-        };
+        return { items, total, page, totalPages: Math.ceil(total / limit) };
     },
 
-    /**
-     * Cập nhật thông tin contact (không tăng totalMessages)
-     */
     async updateInfo(
         workspaceId: string,
         zaloUserId: string,
-        data: Partial<Pick<IZaloContact, 'displayName' | 'avatar' | 'phoneNumber' | 'metadata'>>
-    ): Promise<IZaloContact | null> {
+        data: Partial<Pick<ZaloContact, 'displayName' | 'avatar' | 'phoneNumber' | 'metadata'>>
+    ): Promise<ZaloContact | null> {
         const update: any = {};
         if (data.displayName) update.displayName = data.displayName;
         if (data.avatar) update.avatar = data.avatar;
         if (data.phoneNumber) update.phoneNumber = data.phoneNumber;
         if (data.metadata) update.metadata = data.metadata;
 
-        return ZaloContactModel.findOneAndUpdate(
-            { workspaceId: new mongoose.Types.ObjectId(workspaceId), zaloUserId },
-            { $set: update },
-            { new: true, lean: true }
-        ).exec() as Promise<IZaloContact | null>;
+        if (Object.keys(update).length === 0) return null;
+
+        return prisma.zaloContact.update({
+            where: { workspaceId_zaloUserId: { workspaceId, zaloUserId } },
+            data: update,
+        });
     },
 
-    /**
-     * Thống kê tổng contacts
-     */
     async countByWorkspace(workspaceId: string): Promise<number> {
-        return ZaloContactModel.countDocuments({
-            workspaceId: new mongoose.Types.ObjectId(workspaceId),
-        }).exec();
+        return prisma.zaloContact.count({ where: { workspaceId } });
     },
 
-    /**
-     * Xoá contact
-     */
     async delete(workspaceId: string, zaloUserId: string): Promise<boolean> {
-        const result = await ZaloContactModel.deleteOne({
-            workspaceId: new mongoose.Types.ObjectId(workspaceId),
-            zaloUserId,
-        }).exec();
-        return result.deletedCount > 0;
+        try {
+            await prisma.zaloContact.delete({
+                where: { workspaceId_zaloUserId: { workspaceId, zaloUserId } },
+            });
+            return true;
+        } catch {
+            return false;
+        }
     },
 };

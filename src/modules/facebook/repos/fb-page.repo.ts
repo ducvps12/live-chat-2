@@ -1,44 +1,55 @@
-import { FBPageModel, IFBPage } from './fb-page.model';
+import prisma from '../../../infra/prisma';
+import type { FBPage } from '@prisma/client';
 
 export const fbPageRepo = {
-    async create(data: Partial<IFBPage>): Promise<IFBPage> {
-        return FBPageModel.create(data);
+    async create(data: {
+        workspaceId: string;
+        pageId: string;
+        pageName?: string;
+        pageAvatar?: string;
+        accessToken: string;
+        userAccessToken?: string;
+        status?: string;
+        subscribedFields?: string[];
+    }): Promise<FBPage> {
+        return prisma.fBPage.create({ data: data as any });
     },
 
-    async findById(id: string): Promise<IFBPage | null> {
-        return FBPageModel.findById(id).exec();
+    async findById(id: string): Promise<FBPage | null> {
+        return prisma.fBPage.findUnique({ where: { id } });
     },
 
-    async findByWorkspaceId(workspaceId: string): Promise<IFBPage[]> {
-        return FBPageModel.find({ workspaceId }).exec();
+    async findByWorkspaceId(workspaceId: string): Promise<FBPage[]> {
+        return prisma.fBPage.findMany({ where: { workspaceId } });
     },
 
-    async findByPageId(pageId: string): Promise<IFBPage | null> {
-        return FBPageModel.findOne({ pageId }).exec();
+    async findByPageId(pageId: string): Promise<FBPage | null> {
+        return prisma.fBPage.findFirst({ where: { pageId } });
     },
 
-    async findActive(): Promise<IFBPage[]> {
-        return FBPageModel.find({ status: 'active' }).exec();
+    async findActive(): Promise<FBPage[]> {
+        return prisma.fBPage.findMany({ where: { status: 'active' } });
     },
 
-    async update(id: string, data: Partial<IFBPage>): Promise<IFBPage | null> {
-        return FBPageModel.findByIdAndUpdate(id, data, { new: true }).exec();
+    async update(id: string, data: Partial<Omit<FBPage, 'id' | 'createdAt' | 'updatedAt'>>): Promise<FBPage | null> {
+        return prisma.fBPage.update({ where: { id }, data: data as any });
     },
 
-    async updateByPageId(pageId: string, data: Partial<IFBPage>): Promise<IFBPage | null> {
-        return FBPageModel.findOneAndUpdate({ pageId }, data, { new: true }).exec();
+    async updateByPageId(pageId: string, data: Partial<Omit<FBPage, 'id' | 'createdAt' | 'updatedAt'>>): Promise<FBPage | null> {
+        const page = await prisma.fBPage.findFirst({ where: { pageId } });
+        if (!page) return null;
+        return prisma.fBPage.update({ where: { id: page.id }, data: data as any });
     },
 
     async delete(id: string): Promise<void> {
-        await FBPageModel.findByIdAndDelete(id).exec();
+        await prisma.fBPage.delete({ where: { id } });
     },
 
-    async upsertPage(workspaceId: string, pageId: string, data: Partial<IFBPage>): Promise<IFBPage> {
-        const result = await FBPageModel.findOneAndUpdate(
-            { workspaceId, pageId },
-            { $set: { ...data, workspaceId, pageId } },
-            { upsert: true, new: true }
-        ).exec();
-        return result!;
+    async upsertPage(workspaceId: string, pageId: string, data: Partial<Omit<FBPage, 'id' | 'createdAt' | 'updatedAt'>>): Promise<FBPage> {
+        return prisma.fBPage.upsert({
+            where: { pageId_workspaceId: { pageId, workspaceId } },
+            create: { ...data, workspaceId, pageId, accessToken: (data as any).accessToken || '' } as any,
+            update: data as any,
+        });
     },
 };

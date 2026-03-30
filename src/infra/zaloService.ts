@@ -1693,6 +1693,74 @@ export async function undoZaloMessage(
         return result;
     } catch (err: any) {
         console.error(`[ZaloService] undo error:`, err.message || err);
+        // Surface friendlier error messages
+        if (err.message?.includes('status') || err.message?.includes('timeout')) {
+            throw new Error('Không thể thu hồi — tin nhắn đã quá thời gian cho phép (thường 2 tiếng)');
+        }
+        throw err;
+    }
+}
+
+/**
+ * Delete a message (for self only, or for everyone)
+ */
+export async function deleteZaloMessage(
+    sessionId: string,
+    msgId: string,
+    cliMsgId: string,
+    uidFrom: string,
+    threadId: string,
+    threadType: 'user' | 'group' = 'user',
+    onlyMe: boolean = true
+): Promise<{ status: number }> {
+    const session = sessions.get(sessionId);
+    if (!session?.api || session.status !== 'connected') {
+        throw new Error('Zalo session not connected');
+    }
+    const type = threadType === 'group' ? ThreadType.Group : ThreadType.User;
+
+    // Try to find the real cliMsgId if not provided
+    let realCliMsgId = cliMsgId;
+    if (!realCliMsgId || realCliMsgId === msgId) {
+        if (sentMsgCliIds.has(msgId)) {
+            realCliMsgId = sentMsgCliIds.get(msgId)!;
+        } else if (sentMsgCliIds.has(String(msgId))) {
+            realCliMsgId = sentMsgCliIds.get(String(msgId))!;
+        } else {
+            const cacheKey = `${sessionId}:${threadId}`;
+            if (messageCache.has(cacheKey)) {
+                const cached = messageCache.get(cacheKey)!;
+                const found = cached.find((m: any) => m.msgId === msgId || m.msgId === String(msgId));
+                if (found?.cliMsgId && found.cliMsgId !== msgId) {
+                    realCliMsgId = found.cliMsgId;
+                }
+            }
+        }
+    }
+
+    console.log(`[ZaloService] deleteMessage: msgId=${msgId}, cliMsgId=${realCliMsgId}, threadId=${threadId}, onlyMe=${onlyMe}`);
+    try {
+        const result = await session.api.deleteMessage({
+            data: {
+                cliMsgId: String(realCliMsgId),
+                msgId: String(msgId),
+                uidFrom: String(uidFrom),
+            },
+            threadId,
+            type,
+        }, onlyMe);
+        console.log(`[ZaloService] deleteMessage result:`, JSON.stringify(result));
+
+        // Remove from message cache
+        const cacheKey = `${sessionId}:${threadId}`;
+        if (messageCache.has(cacheKey)) {
+            const cached = messageCache.get(cacheKey)!;
+            messageCache.set(cacheKey, cached.filter((m: any) => m.msgId !== String(msgId)));
+        }
+
+        return result;
+    } catch (err: any) {
+        console.error(`[ZaloService] deleteMessage error:`, err.message || err);
         throw err;
     }
 }

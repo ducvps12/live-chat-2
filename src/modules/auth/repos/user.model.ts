@@ -36,4 +36,4 @@ userSchema.index({ email: 1, isActive: 1 });          // login lookup
 userSchema.index({ resetPasswordToken: 1 }, { sparse: true }); // password reset
 userSchema.index({ createdAt: -1 });                  // sort by newest
 
-export const UserModel = mongoose.model<IUser>('User', userSchema);
+export const UserModel = (mongoose.models.User || mongoose.model<IUser>('User', userSchema)) as mongoose.Model<IUser>;

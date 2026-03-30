@@ -1,67 +1,78 @@
-import { MacroModel, IMacro } from './macro.model';
+import prisma from '../../../infra/prisma';
+import type { Macro } from '@prisma/client';
 
 export const macroRepo = {
-    async create(data: Partial<IMacro>): Promise<IMacro> {
-        return MacroModel.create(data);
+    async create(data: {
+        workspaceId: string;
+        userId?: string;
+        scope?: string;
+        title: string;
+        content: string;
+        shortcut?: string;
+        category?: string;
+        channel?: string;
+        mediaAttachments?: any[];
+        variables?: string[];
+    }): Promise<Macro> {
+        return prisma.macro.create({ data: data as any });
     },
 
-    async findById(id: string): Promise<IMacro | null> {
-        return MacroModel.findById(id).exec();
+    async findById(id: string): Promise<Macro | null> {
+        return prisma.macro.findUnique({ where: { id } });
     },
 
-    /**
-     * Get personal macros for an agent in a workspace
-     */
-    async findPersonal(workspaceId: string, userId: string): Promise<IMacro[]> {
-        return MacroModel.find({ workspaceId, userId, scope: 'personal' })
-            .sort({ category: 1, title: 1 })
-            .exec();
+    async findPersonal(workspaceId: string, userId: string): Promise<Macro[]> {
+        return prisma.macro.findMany({
+            where: { workspaceId, userId, scope: 'personal' },
+            orderBy: [{ category: 'asc' }, { title: 'asc' }],
+        });
     },
 
-    /**
-     * Get team macros for a workspace
-     */
-    async findTeam(workspaceId: string): Promise<IMacro[]> {
-        return MacroModel.find({ workspaceId, scope: 'team' })
-            .sort({ category: 1, title: 1 })
-            .exec();
+    async findTeam(workspaceId: string): Promise<Macro[]> {
+        return prisma.macro.findMany({
+            where: { workspaceId, scope: 'team' },
+            orderBy: [{ category: 'asc' }, { title: 'asc' }],
+        });
     },
 
-    /**
-     * Get all macros available to an agent (personal + team)
-     */
-    async findAllForAgent(workspaceId: string, userId: string): Promise<IMacro[]> {
-        return MacroModel.find({
-            workspaceId,
-            $or: [
-                { scope: 'team' },
-                { scope: 'personal', userId },
-            ],
-        })
-            .sort({ scope: 1, category: 1, title: 1 })
-            .exec();
+    async findAllForAgent(workspaceId: string, userId: string): Promise<Macro[]> {
+        return prisma.macro.findMany({
+            where: {
+                workspaceId,
+                OR: [
+                    { scope: 'team' },
+                    { scope: 'personal', userId },
+                ],
+            },
+            orderBy: [{ scope: 'asc' }, { category: 'asc' }, { title: 'asc' }],
+        });
     },
 
-    async update(id: string, data: Partial<IMacro>): Promise<IMacro | null> {
-        return MacroModel.findByIdAndUpdate(id, data, { new: true }).exec();
+    async update(id: string, data: Partial<Omit<Macro, 'id' | 'createdAt' | 'updatedAt'>>): Promise<Macro | null> {
+        return prisma.macro.update({ where: { id }, data: data as any });
     },
 
-    async remove(id: string): Promise<IMacro | null> {
-        return MacroModel.findByIdAndDelete(id).exec();
+    async remove(id: string): Promise<Macro | null> {
+        return prisma.macro.delete({ where: { id } });
     },
 
-    async findByShortcut(workspaceId: string, userId: string, shortcut: string): Promise<IMacro | null> {
-        return MacroModel.findOne({
-            workspaceId,
-            shortcut,
-            $or: [
-                { scope: 'team' },
-                { scope: 'personal', userId },
-            ],
-        }).exec();
+    async findByShortcut(workspaceId: string, userId: string, shortcut: string): Promise<Macro | null> {
+        return prisma.macro.findFirst({
+            where: {
+                workspaceId,
+                shortcut,
+                OR: [
+                    { scope: 'team' },
+                    { scope: 'personal', userId },
+                ],
+            },
+        });
     },
 
     async incrementUsage(id: string): Promise<void> {
-        await MacroModel.findByIdAndUpdate(id, { $inc: { usageCount: 1 } }).exec();
+        await prisma.macro.update({
+            where: { id },
+            data: { usageCount: { increment: 1 } },
+        });
     },
 };

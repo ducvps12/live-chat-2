@@ -1,4 +1,4 @@
-﻿import Head from 'next/head';
+import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
 import { Modal, Form, Input, message, Spin } from 'antd';
@@ -15,9 +15,11 @@ import {
     LayoutDashboard,
     Zap,
     ChevronRight,
+    Trash2,
+    AlertTriangle,
 } from 'lucide-react';
 import { useGetMe } from '../../domains/auth/auth.hooks';
-import { useMyWorkspaces, useCreateWorkspace } from '../../domains/workspace/workspace.hooks';
+import { useMyWorkspaces, useCreateWorkspace, useDeleteWorkspace } from '../../domains/workspace/workspace.hooks';
 import AppLayout from '../../components/layout/AppLayout';
 
 /* ─── Google/Apple-Inspired Minimal Color System ─── */
@@ -40,6 +42,8 @@ export default function WorkspacePage() {
     const router = useRouter();
     const [ready, setReady] = useState(false);
     const [showCreate, setShowCreate] = useState(false);
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
+    const [deleteConfirmName, setDeleteConfirmName] = useState('');
     const [form] = Form.useForm();
     const [hoveredCard, setHoveredCard] = useState<string | null>(null);
 
@@ -52,6 +56,7 @@ export default function WorkspacePage() {
     const { data: meData, isLoading: meLoading, isError: meError } = useGetMe(ready);
     const { data: wsData, isLoading: wsLoading } = useMyWorkspaces();
     const { mutateAsync: createWs, isPending: creating } = useCreateWorkspace();
+    const { mutateAsync: deleteWs, isPending: deleting } = useDeleteWorkspace();
 
     const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const name = e.target.value;
@@ -75,6 +80,19 @@ export default function WorkspacePage() {
         } catch (err: unknown) {
             const error = err as { response?: { data?: { error?: { message?: string } } } };
             message.error(error.response?.data?.error?.message || 'Có lỗi xảy ra');
+        }
+    };
+
+    const handleDelete = async () => {
+        if (!showDeleteConfirm) return;
+        try {
+            await deleteWs(showDeleteConfirm.id);
+            message.success('Workspace đã được xóa thành công');
+            setShowDeleteConfirm(null);
+            setDeleteConfirmName('');
+        } catch (err: unknown) {
+            const error = err as { response?: { data?: { error?: { message?: string } } } };
+            message.error(error.response?.data?.error?.message || 'Không thể xóa workspace');
         }
     };
 
@@ -111,9 +129,9 @@ export default function WorkspacePage() {
         <AppLayout headerTitle="Workspace">
             <Head><title>Workspace | NemarkChat</title></Head>
 
-            <main style={{ maxWidth: 960, margin: '0 auto', padding: '40px 32px 80px' }}>
+            <main className="workspace-page-main" style={{ maxWidth: 960, margin: '0 auto', padding: '40px 32px 80px' }}>
                 {/* ─── Page Header ─── */}
-                <div style={{
+                <div className="workspace-page-header" style={{
                     display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
                     marginBottom: 40, gap: 16,
                 }}>
@@ -133,6 +151,7 @@ export default function WorkspacePage() {
                     </div>
 
                     <button
+                        className="ws-create-btn"
                         onClick={() => setShowCreate(true)}
                         style={{
                             height: 36,
@@ -215,14 +234,15 @@ export default function WorkspacePage() {
                             const plan = PLAN_CONFIG[planKey] || PLAN_CONFIG.free;
                             const members = (ws.members as unknown[]) || [];
                             const settings = (ws.settings as Record<string, string>) || {};
-                            const isHovered = hoveredCard === ws._id;
+                            const isHovered = hoveredCard === ws.id;
 
                             return (
                                 <div
-                                    key={ws._id as string}
-                                    onClick={() => router.push(`/workspace/${ws._id}`)}
-                                    onMouseEnter={() => setHoveredCard(ws._id)}
+                                    key={ws.id as string}
+                                    onClick={() => router.push(`/workspace/${ws.id}`)}
+                                    onMouseEnter={() => setHoveredCard(ws.id)}
                                     onMouseLeave={() => setHoveredCard(null)}
+                                    className="ws-card-row"
                                     style={{
                                         display: 'flex',
                                         alignItems: 'center',
@@ -274,7 +294,7 @@ export default function WorkspacePage() {
                                                 {plan.label}
                                             </span>
                                         </div>
-                                        <div style={{
+                                        <div className="ws-card-meta" style={{
                                             display: 'flex', alignItems: 'center', gap: 16,
                                             fontSize: 13, color: '#5f6368',
                                         }}>
@@ -297,13 +317,13 @@ export default function WorkspacePage() {
                                     </div>
 
                                     {/* Actions */}
-                                    <div style={{
+                                    <div className="ws-card-actions" style={{
                                         display: 'flex', alignItems: 'center', gap: 4,
                                         opacity: isHovered ? 1 : 0,
                                         transition: 'opacity 0.15s ease',
                                     }}>
                                         <button
-                                            onClick={(e) => { e.stopPropagation(); router.push(`/workspace/${ws._id}/teams`); }}
+                                            onClick={(e) => { e.stopPropagation(); router.push(`/workspace/${ws.id}/teams`); }}
                                             title="Nhân sự"
                                             style={{
                                                 width: 36, height: 36, borderRadius: 18,
@@ -318,7 +338,7 @@ export default function WorkspacePage() {
                                             <Users size={18} />
                                         </button>
                                         <button
-                                            onClick={(e) => { e.stopPropagation(); router.push(`/workspace/${ws._id}/settings`); }}
+                                            onClick={(e) => { e.stopPropagation(); router.push(`/workspace/${ws.id}/settings`); }}
                                             title="Cài đặt"
                                             style={{
                                                 width: 36, height: 36, borderRadius: 18,
@@ -331,6 +351,30 @@ export default function WorkspacePage() {
                                             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                                         >
                                             <Settings size={18} />
+                                        </button>
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setShowDeleteConfirm({ id: ws.id as string, name: ws.name as string });
+                                            }}
+                                            title="Xóa workspace"
+                                            style={{
+                                                width: 36, height: 36, borderRadius: 18,
+                                                background: 'transparent', border: 'none',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                cursor: 'pointer', color: '#5f6368',
+                                                transition: 'all 0.15s',
+                                            }}
+                                            onMouseEnter={e => {
+                                                e.currentTarget.style.background = '#fce8e6';
+                                                e.currentTarget.style.color = '#d93025';
+                                            }}
+                                            onMouseLeave={e => {
+                                                e.currentTarget.style.background = 'transparent';
+                                                e.currentTarget.style.color = '#5f6368';
+                                            }}
+                                        >
+                                            <Trash2 size={18} />
                                         </button>
                                         <ChevronRight size={20} color="#9aa0a6" style={{ marginLeft: 4 }} />
                                     </div>
@@ -443,6 +487,111 @@ export default function WorkspacePage() {
                         </button>
                     </div>
                 </Form>
+            </Modal>
+
+            {/* ─── Delete Confirmation Modal ─── */}
+            <Modal
+                title={null}
+                open={!!showDeleteConfirm}
+                onCancel={() => { setShowDeleteConfirm(null); setDeleteConfirmName(''); }}
+                footer={null}
+                destroyOnClose
+                styles={{
+                    body: { padding: '32px 32px 28px' },
+                    header: { display: 'none' },
+                }}
+                width={440}
+            >
+                <div style={{ marginBottom: 24 }}>
+                    <div style={{
+                        width: 48, height: 48, borderRadius: 14,
+                        background: '#fce8e6',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        marginBottom: 16,
+                    }}>
+                        <AlertTriangle size={22} color="#d93025" strokeWidth={2} />
+                    </div>
+                    <h2 style={{
+                        fontSize: 20, fontWeight: 600, margin: '0 0 6px', color: '#202124',
+                        fontFamily: "'Google Sans', 'SF Pro Display', -apple-system, sans-serif",
+                    }}>
+                        Xóa workspace
+                    </h2>
+                    <p style={{ fontSize: 14, color: '#5f6368', margin: '0 0 16px', lineHeight: 1.6 }}>
+                        Hành động này sẽ xóa vĩnh viễn workspace{' '}
+                        <strong style={{ color: '#202124' }}>{showDeleteConfirm?.name}</strong>{' '}
+                        cùng tất cả dữ liệu liên quan (cuộc trò chuyện, widget, thành viên...).
+                        Không thể hoàn tác.
+                    </p>
+                    <div style={{
+                        padding: '12px 16px', background: '#fef7e0', borderRadius: 8,
+                        border: '1px solid #fdd835', fontSize: 13, color: '#5f6368', lineHeight: 1.5,
+                    }}>
+                        Để xác nhận, vui lòng nhập <strong style={{ color: '#202124' }}>{showDeleteConfirm?.name}</strong> vào ô bên dưới.
+                    </div>
+                </div>
+
+                <Input
+                    placeholder={`Nhập "${showDeleteConfirm?.name}" để xác nhận`}
+                    value={deleteConfirmName}
+                    onChange={e => setDeleteConfirmName(e.target.value)}
+                    style={{
+                        height: 44, borderRadius: 8, fontSize: 14,
+                        border: '1px solid #dadce0', marginBottom: 0,
+                    }}
+                />
+
+                <div style={{
+                    display: 'flex', justifyContent: 'flex-end', gap: 12,
+                    marginTop: 28, paddingTop: 20,
+                    borderTop: '1px solid #e0e0e0',
+                }}>
+                    <button
+                        type="button"
+                        onClick={() => { setShowDeleteConfirm(null); setDeleteConfirmName(''); }}
+                        style={{
+                            height: 36, borderRadius: 18, padding: '0 20px',
+                            background: 'transparent', border: '1px solid #dadce0',
+                            color: '#5f6368', fontSize: 14, fontWeight: 500,
+                            cursor: 'pointer', transition: 'background 0.15s',
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = '#f1f3f4'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                    >
+                        Huỷ
+                    </button>
+                    <button
+                        type="button"
+                        disabled={deleteConfirmName !== showDeleteConfirm?.name || deleting}
+                        onClick={handleDelete}
+                        style={{
+                            height: 36, borderRadius: 18, padding: '0 24px',
+                            background: deleteConfirmName === showDeleteConfirm?.name ? '#d93025' : '#f1f3f4',
+                            border: 'none',
+                            color: deleteConfirmName === showDeleteConfirm?.name ? '#fff' : '#9aa0a6',
+                            fontSize: 14, fontWeight: 500,
+                            cursor: deleteConfirmName === showDeleteConfirm?.name && !deleting ? 'pointer' : 'not-allowed',
+                            display: 'flex', alignItems: 'center', gap: 6,
+                            boxShadow: deleteConfirmName === showDeleteConfirm?.name
+                                ? '0 1px 3px rgba(217,48,37,0.3)'
+                                : 'none',
+                            transition: 'all 0.15s',
+                        }}
+                        onMouseEnter={e => {
+                            if (deleteConfirmName === showDeleteConfirm?.name && !deleting) {
+                                e.currentTarget.style.background = '#c5221f';
+                            }
+                        }}
+                        onMouseLeave={e => {
+                            if (deleteConfirmName === showDeleteConfirm?.name && !deleting) {
+                                e.currentTarget.style.background = '#d93025';
+                            }
+                        }}
+                    >
+                        {deleting && <Spin size="small" />}
+                        Xóa workspace
+                    </button>
+                </div>
             </Modal>
         </AppLayout>
     );

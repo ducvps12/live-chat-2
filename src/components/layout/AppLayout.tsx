@@ -112,87 +112,47 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
         return router.pathname.startsWith(path) && path !== '/workspace';
     };
 
+    // Sidebar Menu Items — grouped by section (MUST be above early return to respect Rules of Hooks)
+    const menuSections = useMemo(() => {
+        if (!workspaceId) {
+            return [{ label: '', items: [{ key: '/workspace', icon: <Box size={20} />, label: <Link href="/workspace">Workspaces</Link> }] }];
+        }
+        return [
+            {
+                label: 'Chính',
+                items: [
+                    { key: `/workspace/${workspaceId}`, icon: <LayoutDashboard size={20} />, label: <Link href={`/workspace/${workspaceId}`}>Tổng quan</Link> },
+                    { key: `/workspace/${workspaceId}/inbox`, icon: <Badge count={unreadCount} size="small" offset={[10, 0]}><MessageSquare size={20} /></Badge>, label: <Link href={`/workspace/${workspaceId}/inbox`}>Hộp thư</Link> },
+                    { key: `/workspace/${workspaceId}/contacts`, icon: <Contact2 size={20} />, label: <Link href={`/workspace/${workspaceId}/contacts`}>Người dùng</Link> },
+                    { key: `/workspace/${workspaceId}/leads`, icon: <Target size={20} />, label: <Link href={`/workspace/${workspaceId}/leads`}>Leads</Link> },
+                ]
+            },
+            {
+                label: 'Công cụ',
+                items: [
+                    { key: `/workspace/${workspaceId}/analytics`, icon: <BarChart3 size={20} />, label: <Link href={`/workspace/${workspaceId}/analytics`}>Thống kê</Link> },
+                    { key: `/workspace/${workspaceId}/widgets`, icon: <Code size={20} />, label: <Link href={`/workspace/${workspaceId}/widgets`}>Widgets</Link> },
+                    { key: `/workspace/${workspaceId}/popups`, icon: <Palette size={20} />, label: <Link href={`/workspace/${workspaceId}/popups`}>Tiện ích Web</Link> },
+                    { key: `/workspace/${workspaceId}/chatbot`, icon: <Bot size={20} />, label: <Link href={`/workspace/${workspaceId}/chatbot`}>Nhân viên AI</Link> },
+                    { key: `/workspace/${workspaceId}/campaigns`, icon: <Megaphone size={20} />, label: <Link href={`/workspace/${workspaceId}/campaigns`}>Campaigns</Link> },
+                ]
+            },
+            {
+                label: 'Quản lý',
+                items: [
+                    { key: `/workspace/${workspaceId}/teams`, icon: <Users size={20} />, label: <Link href={`/workspace/${workspaceId}/teams`}>Thành viên</Link> },
+                    { key: `/workspace/${workspaceId}/settings`, icon: <Settings size={20} />, label: <Link href={`/workspace/${workspaceId}/settings`}>Cài đặt</Link> },
+                    { key: `/workspace/${workspaceId}/billing`, icon: <CreditCard size={20} />, label: <Link href={`/workspace/${workspaceId}/billing`}>Thanh toán</Link> },
+                ]
+            }
+        ];
+    }, [workspaceId, unreadCount]);
+
     if (meLoading || !user) {
         return (
             <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg-soft)' }}>
                 <Spin size="large" />
             </div>
-        );
-    }
-
-    // Sidebar Menu Items
-    const menuItems: any[] = [];
-
-    if (workspaceId) {
-        menuItems.push(
-            {
-                key: `/workspace/${workspaceId}`,
-                icon: <LayoutDashboard size={20} />,
-                label: <Link href={`/workspace/${workspaceId}`}>Tổng quan</Link>,
-            },
-            {
-                key: `/workspace/${workspaceId}/inbox`,
-                icon: <Badge count={unreadCount} size="small" offset={[10, 0]}><MessageSquare size={20} /></Badge>,
-                label: <Link href={`/workspace/${workspaceId}/inbox`}>Hộp thư</Link>,
-            },
-            {
-                key: `/workspace/${workspaceId}/contacts`,
-                icon: <Contact2 size={20} />,
-                label: <Link href={`/workspace/${workspaceId}/contacts`}>Người dùng</Link>,
-            },
-            {
-                key: `/workspace/${workspaceId}/leads`,
-                icon: <Target size={20} />,
-                label: <Link href={`/workspace/${workspaceId}/leads`}>Leads</Link>,
-            },
-            {
-                key: `/workspace/${workspaceId}/analytics`,
-                icon: <BarChart3 size={20} />,
-                label: <Link href={`/workspace/${workspaceId}/analytics`}>Thống kê</Link>,
-            },
-            {
-                key: `/workspace/${workspaceId}/widgets`,
-                icon: <Code size={20} />,
-                label: <Link href={`/workspace/${workspaceId}/widgets`}>Widgets</Link>,
-            },
-            {
-                key: `/workspace/${workspaceId}/popups`,
-                icon: <Palette size={20} />,
-                label: <Link href={`/workspace/${workspaceId}/popups`}>Tiện ích Web</Link>,
-            },
-            {
-                key: `/workspace/${workspaceId}/chatbot`,
-                icon: <Bot size={20} />,
-                label: <Link href={`/workspace/${workspaceId}/chatbot`}>Nhân viên AI</Link>,
-            },
-            {
-                key: `/workspace/${workspaceId}/campaigns`,
-                icon: <Megaphone size={20} />,
-                label: <Link href={`/workspace/${workspaceId}/campaigns`}>Campaigns</Link>,
-            },
-            {
-                key: `/workspace/${workspaceId}/teams`,
-                icon: <Users size={20} />,
-                label: <Link href={`/workspace/${workspaceId}/teams`}>Thành viên</Link>,
-            },
-            {
-                key: `/workspace/${workspaceId}/settings`,
-                icon: <Settings size={20} />,
-                label: <Link href={`/workspace/${workspaceId}/settings`}>Cài đặt</Link>,
-            },
-            {
-                key: `/workspace/${workspaceId}/billing`,
-                icon: <CreditCard size={20} />,
-                label: <Link href={`/workspace/${workspaceId}/billing`}>Thanh toán</Link>,
-            }
-        );
-    } else {
-        menuItems.push(
-            {
-                key: '/workspace',
-                icon: <Box size={20} />,
-                label: <Link href="/workspace">Workspaces</Link>,
-            }
         );
     }
 
@@ -287,17 +247,49 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                     font-size: 10px;
                     font-weight: 500;
                 }
+                @media (max-width: 768px) {
+                    .app-main-content {
+                        padding-top: 56px !important;
+                    }
+                }
             `}</style>
+
+            {/* ─── MOBILE HEADER BAR ─── */}
+            <div className="mobile-header-bar">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <img src="/images/logo.png" alt="NemarkChat" style={{ width: 32, height: 32, borderRadius: 8 }} />
+                    <span style={{ fontWeight: 700, fontSize: 16, color: '#0f172a' }}>
+                        {headerTitle || 'NemarkChat'}
+                    </span>
+                </div>
+                <Dropdown
+                    placement="bottomRight"
+                    menu={{
+                        items: [
+                            { key: 'profile', icon: <User size={16} />, label: 'Hồ sơ', onClick: () => router.push('/profile') },
+                            ...(user.role?.toLowerCase() === 'admin' ? [{ key: 'admin', icon: <Shield size={16} />, label: 'Admin', onClick: () => router.push('/admin') }] : []),
+                            { type: 'divider' as const },
+                            { key: 'logout', icon: <LogOut size={16} />, label: 'Đăng xuất', danger: true, onClick: handleLogout },
+                        ]
+                    }}
+                    trigger={['click']}
+                >
+                    <Avatar src={user.avatarUrl} size={36} style={{ background: 'var(--gradient-primary)', cursor: 'pointer' }}>
+                        {!user.avatarUrl && (user.name?.charAt(0)?.toUpperCase() || 'U')}
+                    </Avatar>
+                </Dropdown>
+            </div>
+
             {/* ─── LEFT SIDEBAR ─── */}
             <Sider 
                 collapsed={collapsed}
                 collapsedWidth={80}
                 width={260}
-                theme="light" 
+                theme="dark" 
                 collapsible={false}
                 className="app-sider-nav"
                 style={{
-                    borderRight: '1px solid var(--color-border)',
+                    borderRight: '1px solid rgba(255, 255, 255, 0.06)',
                     position: 'fixed',
                     height: '100vh',
                     left: 0,
@@ -306,7 +298,7 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                     zIndex: 100,
                     display: 'flex',
                     flexDirection: 'column',
-                    background: 'var(--color-bg)',
+                    background: 'linear-gradient(180deg, #0f172a 0%, #1e293b 100%)',
                 }}
             >
                 {/* Brand / Logo */}
@@ -316,9 +308,9 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                     alignItems: 'center', 
                     justifyContent: collapsed ? 'center' : 'flex-start',
                     padding: collapsed ? '0' : '0 20px',
-                    borderBottom: '1px solid var(--color-border)',
+                    borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
                     gap: 10,
-                    background: 'linear-gradient(180deg, var(--color-primary-50) 0%, var(--color-bg) 100%)',
+                    background: 'linear-gradient(180deg, rgba(99, 102, 241, 0.08) 0%, transparent 100%)',
                 }}>
                     <img src="/images/logo.png" alt="NemarkChat" style={{
                         width: collapsed ? 38 : 32, 
@@ -326,7 +318,7 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                         borderRadius: collapsed ? 10 : 8,
                         flexShrink: 0
                     }} />
-                    {!collapsed && <span style={{ fontWeight: 700, fontSize: 18, color: 'var(--color-text)', whiteSpace: 'nowrap' }}>NemarkChat</span>}
+                    {!collapsed && <span style={{ fontWeight: 700, fontSize: 18, color: '#f1f5f9', whiteSpace: 'nowrap' }}>NemarkChat</span>}
                 </div>
 
                 {/* Workspace Switcher */}
@@ -337,24 +329,24 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                                 width: collapsed ? 44 : '100%', 
                                 height: 44, 
                                 padding: collapsed ? 0 : '0 14px',
-                                background: 'var(--color-bg-soft)', 
+                                background: 'rgba(255, 255, 255, 0.04)', 
                                 borderRadius: collapsed ? 12 : 10, 
                                 display: 'flex', 
                                 alignItems: 'center', 
                                 justifyContent: collapsed ? 'center' : 'space-between',
                                 cursor: 'pointer',
-                                border: '1px solid var(--color-border)',
+                                border: '1px solid rgba(255, 255, 255, 0.06)',
                             }} className="ws-switcher">
                                 {collapsed ? (
-                                    <span style={{ fontWeight: 700, fontSize: 18, color: 'var(--color-primary)' }}>
+                                    <span style={{ fontWeight: 700, fontSize: 18, color: '#818cf8' }}>
                                         {currentWorkspace?.name?.charAt(0)?.toUpperCase() || 'W'}
                                     </span>
                                 ) : (
                                     <>
-                                        <span style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        <span style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#e2e8f0' }}>
                                             {currentWorkspace?.name || 'Loading...'}
                                         </span>
-                                        <ChevronDown size={16} color="var(--color-text-secondary)" />
+                                        <ChevronDown size={16} color="#64748b" />
                                     </>
                                 )}
                             </div>
@@ -362,24 +354,28 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                     </div>
                 )}
 
-                {/* Navigation Menu */}
-                <div style={{ flex: 1, overflowY: 'auto', padding: collapsed ? '12px 0' : '12px 12px' }}>
-                    {!collapsed && (
-                        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: 8, paddingLeft: 12, letterSpacing: '0.08em' }}>
-                            {workspaceId ? 'Workspace Menu' : 'Main Menu'}
+                {/* Navigation Menu — Grouped Sections */}
+                <div style={{ flex: 1, overflowY: 'auto', padding: collapsed ? '4px 0' : '4px 10px' }} className="sidebar-nav-scroll">
+                    {menuSections.map((section, idx) => (
+                        <div key={idx}>
+                            {section.label && (
+                                <div className={`sidebar-section-label${collapsed ? ' collapsed-label' : ''}`}>
+                                    {collapsed ? '•••' : section.label}
+                                </div>
+                            )}
+                            <Menu
+                                mode="inline"
+                                selectedKeys={[selectedKey]}
+                                items={section.items}
+                                style={{ borderRight: 'none', background: 'transparent' }}
+                                className="app-sidebar-menu"
+                            />
                         </div>
-                    )}
-                    <Menu
-                        mode="inline"
-                        selectedKeys={[selectedKey]}
-                        items={menuItems}
-                        style={{ borderRight: 'none', background: 'transparent' }}
-                        className="app-sidebar-menu"
-                    />
+                    ))}
                 </div>
 
                 {/* ── Admin Panel Button (admin only) ── */}
-                {user.role === 'admin' && (
+                {user.role?.toLowerCase() === 'admin' && (
                     <div style={{ padding: collapsed ? '8px 0' : '8px 12px' }}>
                         <div
                             onClick={() => router.push('/admin')}
@@ -417,8 +413,8 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                 {/* Bottom User Area */}
                 <div style={{ 
                     padding: collapsed ? '16px 0' : '16px', 
-                    borderTop: '1px solid var(--color-border)',
-                    background: 'var(--color-bg)',
+                    borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+                    background: 'rgba(0, 0, 0, 0.15)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: collapsed ? 'center' : 'flex-start',
@@ -434,16 +430,16 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                             top: -14,
                             width: 28,
                             height: 28,
-                            background: '#fff',
-                            border: '1px solid var(--color-border)',
+                            background: '#1e293b',
+                            border: '1px solid rgba(255, 255, 255, 0.1)',
                             borderRadius: '50%',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
                             cursor: 'pointer',
                             zIndex: 101,
-                            color: 'var(--color-text-secondary)',
-                            boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+                            color: '#94a3b8',
+                            boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
                         }}
                     >
                         {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
@@ -459,7 +455,7 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                                     label: 'Hồ sơ cá nhân',
                                     onClick: () => router.push('/profile')
                                 },
-                                ...(user.role === 'admin' ? [{
+                                ...(user.role?.toLowerCase() === 'admin' ? [{
                                     key: 'admin',
                                     icon: <Shield size={16} />,
                                     label: 'Super Admin',
@@ -486,20 +482,23 @@ export default function AppLayout({ children, hideHeader = false, headerTitle, h
                             gap: 12,
                             width: collapsed ? 'auto' : '100%',
                         }} className="user-profile-btn">
-                            <Avatar src={user.avatarUrl} size={collapsed ? 42 : 36} style={{ background: 'var(--gradient-primary)', flexShrink: 0 }}>
-                                {!user.avatarUrl && (user.name?.charAt(0)?.toUpperCase() || 'U')}
-                            </Avatar>
+                            <div style={{ position: 'relative', flexShrink: 0 }}>
+                                <Avatar src={user.avatarUrl} size={collapsed ? 42 : 36} style={{ background: 'var(--gradient-primary)' }}>
+                                    {!user.avatarUrl && (user.name?.charAt(0)?.toUpperCase() || 'U')}
+                                </Avatar>
+                                <div className="online-status-dot" />
+                            </div>
                             {!collapsed && (
                                 <>
                                     <div style={{ flex: 1, minWidth: 0 }}>
-                                        <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--color-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                        <div style={{ fontWeight: 600, fontSize: 14, color: '#f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                             {user.name}
                                         </div>
-                                        <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                        <div style={{ fontSize: 12, color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                             {user.email}
                                         </div>
                                     </div>
-                                    <Settings size={16} color="var(--color-text-muted)" style={{ flexShrink: 0 }} />
+                                    <Settings size={16} color="#64748b" style={{ flexShrink: 0 }} />
                                 </>
                             )}
                         </div>

@@ -101,7 +101,7 @@ export const workspaceService = {
         const user = await userRepo.findByEmail(email);
         if (!user) throw new AppError('Người dùng chưa đăng ký tài khoản trong hệ thống', 404, 'USER_NOT_FOUND');
 
-        const userId = user._id.toString();
+        const userId = user.id.toString();
 
         const alreadyMember = ws.members.find((m) => m.userId.toString() === userId);
         if (alreadyMember) throw new AppError('Người dùng đã là thành viên', 409, 'ALREADY_MEMBER');
@@ -177,13 +177,13 @@ export const workspaceService = {
         // Build user info map
         const userMap = new Map<string, { name: string; email: string }>();
         for (const u of users) {
-            userMap.set(u._id.toString(), { name: u.name || 'Unknown', email: u.email || '' });
+            userMap.set(u.id.toString(), { name: u.name || 'Unknown', email: u.email || '' });
         }
 
         // Build message count map (sender.id is stored as string)
         const msgMap = new Map<string, number>();
         for (const m of msgCounts) {
-            msgMap.set(String(m._id), m.messagesSent);
+            msgMap.set(String(m.id), m.messagesSent);
         }
 
         // Build conv stats map
@@ -192,7 +192,7 @@ export const workspaceService = {
             lastActivity: Date | null;
         }>();
         for (const s of convStats) {
-            statsMap.set(String(s._id), s);
+            statsMap.set(String(s.id), s);
         }
 
         // Merge with workspace members
@@ -303,7 +303,7 @@ export const widgetService = {
         const tz = workspace?.settings?.timezone || 'Asia/Ho_Chi_Minh';
 
         return {
-            id: widget._id,
+            id: widget.id,
             name: widget.name,
             config: widget.config,
             domainRules: widget.domainRules,
@@ -323,7 +323,7 @@ export const offlineMessageService = {
         if (!widget || !widget.isActive) throw new AppError('Widget không tồn tại', 404, 'NOT_FOUND');
 
         return offlineMessageRepo.create({
-            widgetId: widget._id as any,
+            widgetId: widget.id,
             workspaceId: widget.workspaceId,
             visitorId: data.visitorId,
             name: data.name,

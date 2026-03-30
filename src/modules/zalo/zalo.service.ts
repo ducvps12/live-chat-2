@@ -2,7 +2,6 @@ import { zaloAccountRepo } from './repos/zalo-account.repo';
 import { zaloMessageRepo, ZaloMessageQuery } from './repos/zalo-message.repo';
 import { zaloContactRepo, ZaloContactQuery } from './repos/zalo-contact.repo';
 import { AppError } from '../../middlewares/errorHandler';
-import mongoose from 'mongoose';
 import crypto from 'crypto';
 import { conversationService } from '../conversation/conversation.service';
 import { leadService } from '../lead/lead.service';
@@ -43,7 +42,7 @@ class ZaloService {
             const activeAccounts = await zaloAccountRepo.findActive();
             for (const account of activeAccounts) {
                 const workspaceId = account.workspaceId.toString();
-                const accountId = account._id.toString();
+                const accountId = account.id.toString();
                 this.accountWorkspaceMap.set(accountId, workspaceId);
                 this.accountNameMap.set(accountId, account.name || 'Zalo App');
                 try {
@@ -142,16 +141,16 @@ class ZaloService {
                         let accountId: string;
                         if (duplicate) {
                             // Update existing account instead of creating duplicate
-                            await zaloAccountRepo.update(duplicate._id as unknown as string, {
+                            await zaloAccountRepo.update(duplicate.id, {
                                 name, avatar, status: 'active'
                             });
-                            accountId = (duplicate._id as unknown as string).toString();
+                            accountId = duplicate.id.toString();
                             this.accountWorkspaceMap.set(accountId, workspaceId);
                             console.log(`[ZaloService] Updated existing Zalo acc ${name} (${accountId})`);
                         } else {
                             // Create new account (multi-Zalo: no deletion of existing)
                             const newAccount = await zaloAccountRepo.create({
-                                workspaceId: new mongoose.Types.ObjectId(workspaceId),
+                                workspaceId,
                                 zaloId: resolvedZaloId,
                                 name,
                                 avatar,
@@ -160,7 +159,7 @@ class ZaloService {
                                 userAgent: 'Mozilla/5.0',
                                 status: 'active'
                             });
-                            accountId = (newAccount._id as unknown as string).toString();
+                            accountId = newAccount.id.toString();
                             this.accountWorkspaceMap.set(accountId, workspaceId);
                             console.log(`[ZaloService] Workspace ${workspaceId} linked NEW Zalo acc ${name} (${accountId})`);
                         }
@@ -209,7 +208,7 @@ class ZaloService {
         }
 
         const accountList = accounts.map(account => {
-            const accountId = (account._id as unknown as string).toString();
+            const accountId = account.id.toString();
             const isConnected = isZaloSessionConnected(accountId);
             return {
                 accountId,
@@ -251,7 +250,7 @@ class ZaloService {
             // Legacy: disconnect all accounts in workspace
             const accounts = await zaloAccountRepo.findByWorkspaceId(workspaceId);
             for (const acc of accounts) {
-                const id = (acc._id as unknown as string).toString();
+                const id = acc.id.toString();
                 await zaloAccountRepo.delete(id);
                 await destroyZaloSession(id);
                 this.accountWorkspaceMap.delete(id);
@@ -322,8 +321,8 @@ class ZaloService {
                 if (!sessionForConvs) {
                     // Fallback: find any connected account for this workspace
                     const accounts = await zaloAccountRepo.findByWorkspaceId(workspaceId);
-                    const connected = accounts.find(a => isZaloSessionConnected((a._id as unknown as string).toString()));
-                    if (connected) sessionForConvs = (connected._id as unknown as string).toString();
+                    const connected = accounts.find(a => isZaloSessionConnected(a.id.toString()));
+                    if (connected) sessionForConvs = connected.id.toString();
                 }
                 const convs = sessionForConvs ? await getZaloConversations(sessionForConvs) : [];
                 const conv = convs.find(c => c.threadId === message.threadId);
@@ -449,9 +448,9 @@ class ZaloService {
         let sessionId = accountId;
         if (!sessionId || !isZaloSessionConnected(sessionId)) {
             const accounts = await zaloAccountRepo.findByWorkspaceId(workspaceId);
-            const connected = accounts.find(a => isZaloSessionConnected((a._id as unknown as string).toString()));
+            const connected = accounts.find(a => isZaloSessionConnected(a.id.toString()));
             if (connected) {
-                sessionId = (connected._id as unknown as string).toString();
+                sessionId = connected.id.toString();
             }
         }
 
@@ -523,9 +522,9 @@ class ZaloService {
         let sessionId = options?.accountId;
         if (!sessionId || !isZaloSessionConnected(sessionId)) {
             const accounts = await zaloAccountRepo.findByWorkspaceId(workspaceId);
-            const connected = accounts.find(a => isZaloSessionConnected((a._id as unknown as string).toString()));
+            const connected = accounts.find(a => isZaloSessionConnected(a.id.toString()));
             if (connected) {
-                sessionId = (connected._id as unknown as string).toString();
+                sessionId = connected.id.toString();
             }
         }
         if (!sessionId || !isZaloSessionConnected(sessionId)) {
@@ -606,14 +605,13 @@ class ZaloService {
     async getFriends(workspaceId: string, options?: { search?: string; page?: number; limit?: number }) {
         // Find active Zalo account for this workspace
         const accounts = await zaloAccountRepo.findByWorkspaceId(workspaceId);
-        const connected = accounts.find(a => isZaloSessionConnected((a._id as unknown as string).toString()));
+        const connected = accounts.find(a => isZaloSessionConnected(a.id.toString()));
         if (!connected) {
             return { items: [], total: 0, connected: false };
         }
 
-        const sessionId = (connected._id as unknown as string).toString();
+        const sessionId = connected.id.toString();
         const convs = await getZaloConversations(sessionId);
-        
         // Filter to friends only (user type, not groups)
         let friends = convs.filter(c => c.threadType === 'user');
 
@@ -792,7 +790,7 @@ class ZaloService {
 
         // ── Find ALL connected accounts for this workspace ──
         const accounts = await zaloAccountRepo.findByWorkspaceId(workspaceId);
-        const connectedAccounts = accounts.filter(a => isZaloSessionConnected((a._id as unknown as string).toString()));
+        const connectedAccounts = accounts.filter(a => isZaloSessionConnected(a.id.toString()));
         if (connectedAccounts.length === 0) {
             job.status = 'error';
             job.errors.push('No connected Zalo account found for this workspace');
@@ -806,7 +804,7 @@ class ZaloService {
 
         // Iterate over ALL connected accounts
         for (const connectedAccount of connectedAccounts) {
-            const accountId = (connectedAccount._id as unknown as string).toString();
+            const accountId = connectedAccount.id.toString();
             const accountName = (connectedAccount as any).name || 'Zalo App';
             console.log(`[ZaloService] Syncing account ${accountId} (${accountName})...`);
 
@@ -1016,11 +1014,11 @@ class ZaloService {
      */
     async getGroups(workspaceId: string) {
         const accounts = await zaloAccountRepo.findByWorkspaceId(workspaceId);
-        const connected = accounts.find(a => isZaloSessionConnected((a._id as unknown as string).toString()));
+        const connected = accounts.find(a => isZaloSessionConnected(a.id.toString()));
         if (!connected) {
             return { items: [], total: 0, connected: false };
         }
-        const sessionId = (connected._id as unknown as string).toString();
+        const sessionId = connected.id.toString();
         const groups = await getZaloGroups(sessionId);
         return { items: groups, total: groups.length, connected: true };
     }
@@ -1030,11 +1028,11 @@ class ZaloService {
      */
     async getGroupMembers(workspaceId: string, groupId: string) {
         const accounts = await zaloAccountRepo.findByWorkspaceId(workspaceId);
-        const connected = accounts.find(a => isZaloSessionConnected((a._id as unknown as string).toString()));
+        const connected = accounts.find(a => isZaloSessionConnected(a.id.toString()));
         if (!connected) {
             throw new AppError('Tài khoản Zalo chưa kết nối', 400, 'ZALO_NOT_CONNECTED');
         }
-        const sessionId = (connected._id as unknown as string).toString();
+        const sessionId = connected.id.toString();
         const members = await getZaloGroupMembers(sessionId, groupId);
         return { items: members, total: members.length, groupId };
     }
@@ -1044,11 +1042,11 @@ class ZaloService {
      */
     async kickGroupMember(workspaceId: string, groupId: string, userId: string) {
         const accounts = await zaloAccountRepo.findByWorkspaceId(workspaceId);
-        const connected = accounts.find(a => isZaloSessionConnected((a._id as unknown as string).toString()));
+        const connected = accounts.find(a => isZaloSessionConnected(a.id.toString()));
         if (!connected) {
             throw new AppError('Tài khoản Zalo chưa kết nối', 400, 'ZALO_NOT_CONNECTED');
         }
-        const sessionId = (connected._id as unknown as string).toString();
+        const sessionId = connected.id.toString();
         const result = await removeZaloGroupMember(sessionId, groupId, userId);
         if (!result.success) {
             throw new AppError(result.error || 'Không thể xóa thành viên', 400, 'KICK_FAILED');
@@ -1062,11 +1060,11 @@ class ZaloService {
      */
     async bulkSyncAllGroupsToLeads(workspaceId: string) {
         const accounts = await zaloAccountRepo.findByWorkspaceId(workspaceId);
-        const connected = accounts.find(a => isZaloSessionConnected((a._id as unknown as string).toString()));
+        const connected = accounts.find(a => isZaloSessionConnected(a.id.toString()));
         if (!connected) {
             throw new AppError('Tài khoản Zalo chưa kết nối', 400, 'ZALO_NOT_CONNECTED');
         }
-        const sessionId = (connected._id as unknown as string).toString();
+        const sessionId = connected.id.toString();
 
         // 1. Get all groups
         const groups = await getZaloGroups(sessionId);
@@ -1223,13 +1221,13 @@ class ZaloService {
     ) {
         const delayMs = options.delayMs || 8000; // 8s between each to avoid spam
         const accounts = await zaloAccountRepo.findByWorkspaceId(workspaceId);
-        const connected = accounts.find(a => isZaloSessionConnected((a._id as unknown as string).toString()));
+        const connected = accounts.find(a => isZaloSessionConnected(a.id.toString()));
         if (!connected) {
             job.status = 'error';
             job.errors.push('No connected Zalo account');
             return;
         }
-        const sessionId = (connected._id as unknown as string).toString();
+        const sessionId = connected.id.toString();
 
         // Get group members
         const members = await getZaloGroupMembers(sessionId, groupId);

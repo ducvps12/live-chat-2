@@ -16,7 +16,7 @@ export const knowledgeController = {
             return;
         }
 
-        const result = await knowledgeService.syncFromGoogleSheets(workspaceId, sheetUrl);
+        const result = await knowledgeService.syncFromGoogleSheets(workspaceId as string, sheetUrl);
         res.json({ success: true, data: result });
     }),
 
@@ -27,7 +27,7 @@ export const knowledgeController = {
     getAll: expressAsyncHandler(async (req: Request, res: Response) => {
         const { workspaceId } = req.params;
         const { product } = req.query;
-        const entries = await knowledgeService.getAll(workspaceId, {
+        const entries = await knowledgeService.getAll(workspaceId as string, {
             product: product as string | undefined,
         });
         res.json({ success: true, data: entries });
@@ -47,7 +47,7 @@ export const knowledgeController = {
         }
 
         const results = await knowledgeService.search(
-            workspaceId,
+            workspaceId as string,
             q as string,
             limit ? parseInt(limit as string) : 5,
         );
@@ -63,7 +63,7 @@ export const knowledgeController = {
         const { message } = req.query;
 
         const suggestions = await knowledgeService.smartSuggest(
-            workspaceId,
+            workspaceId as string,
             (message as string) || '',
         );
         res.json({ success: true, data: suggestions });
@@ -75,7 +75,7 @@ export const knowledgeController = {
      */
     getProducts: expressAsyncHandler(async (req: Request, res: Response) => {
         const { workspaceId } = req.params;
-        const products = await knowledgeService.getProducts(workspaceId);
+        const products = await knowledgeService.getProducts(workspaceId as string);
         res.json({ success: true, data: products });
     }),
 
@@ -85,7 +85,7 @@ export const knowledgeController = {
      */
     getStats: expressAsyncHandler(async (req: Request, res: Response) => {
         const { workspaceId } = req.params;
-        const stats = await knowledgeService.getStats(workspaceId);
+        const stats = await knowledgeService.getStats(workspaceId as string);
         res.json({ success: true, data: stats });
     }),
 
@@ -102,7 +102,7 @@ export const knowledgeController = {
             return;
         }
 
-        const entry = await knowledgeService.create(workspaceId, { product, question, answer, upsaleText });
+        const entry = await knowledgeService.create(workspaceId as string, { product, question, answer, upsaleText });
         res.status(201).json({ success: true, data: entry });
     }),
 
@@ -113,7 +113,7 @@ export const knowledgeController = {
     update: expressAsyncHandler(async (req: Request, res: Response) => {
         const { id } = req.params;
         const { product, question, answer, upsaleText } = req.body;
-        const entry = await knowledgeService.update(id, { product, question, answer, upsaleText });
+        const entry = await knowledgeService.update(id as string, { product, question, answer, upsaleText });
         res.json({ success: true, data: entry });
     }),
 
@@ -123,7 +123,7 @@ export const knowledgeController = {
      */
     remove: expressAsyncHandler(async (req: Request, res: Response) => {
         const { id } = req.params;
-        await knowledgeService.remove(id);
+        await knowledgeService.remove(id as string);
         res.json({ success: true, message: 'Đã xóa' });
     }),
 };

@@ -41,4 +41,18 @@ export const leadService = {
         const res = await httpClient.post(`/workspaces/${workspaceId}/leads/convert-group`, data);
         return res.data;
     },
+
+    // ── AI Analysis ──
+    aiAnalyze: async (workspaceId: string, conversationId: string, forceReanalyze = false) => {
+        const res = await httpClient.post(`/workspaces/${workspaceId}/leads/ai-analyze/${conversationId}`, { forceReanalyze });
+        return res.data;
+    },
+    aiAnalyzeBulk: async (workspaceId: string, limit = 30, forceReanalyze = false) => {
+        const res = await httpClient.post(`/workspaces/${workspaceId}/leads/ai-analyze-bulk`, { limit, forceReanalyze });
+        return res.data;
+    },
+    getAIAnalysis: async (workspaceId: string, conversationId: string) => {
+        const res = await httpClient.get(`/workspaces/${workspaceId}/leads/ai-analysis/${conversationId}`);
+        return res.data;
+    },
 };

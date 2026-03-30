@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:openclaw.ai)",
+      "Bash(npm i:*)",
+      "Bash(openclaw:*)",
+      "Bash(curl:*)",
+      "Bash(python:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(set -a)",
+      "Bash(source .env)",
+      "Bash(export MIGRATION_SQL_ONLY=true)",
+      "Bash(MIGRATION_SQL_ONLY=true npm run migrate:mongo:mysql:relational)",
+      "Bash(git:*)",
+      "Bash(npm:*)",
+      "Bash(claude:*)",
+      "Bash(node:*)",
+      "WebFetch(domain:fr.scribd.com)",
+      "WebFetch(domain:uvn.edu.vn)",
+      "Bash(powershell -NoProfile -Command \"Get-NetTCPConnection -LocalPort 4020 -State Listen | Select-Object -First 5 -Property LocalAddress,LocalPort,OwningProcess | Format-Table -AutoSize\")",
+      "Bash(powershell -NoProfile -Command \"Get-Process -Id 40944 | Select-Object Id,ProcessName,Path | Format-Table -AutoSize\")",
+      "Bash(powershell -NoProfile -Command \"Stop-Process -Id 40944 -Force\")",
+      "Bash(npx eslint:*)"
+    ]
+  }
+}

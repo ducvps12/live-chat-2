@@ -1,0 +1,58 @@
+{
+  "success": true,
+  "data": {
+    "id": "69bbb9a4e3d0977043b43c42",
+    "name": "BEETERWE",
+    "config": {
+      "preChatForm": {
+        "enabled": true,
+        "title": "Vui lòng nhập thông tin để bắt đầu",
+        "fields": [
+          {
+            "key": "name",
+            "label": "Họ và tên",
+            "type": "text",
+            "required": false,
+            "enabled": true,
+            "options": []
+          },
+          {
+            "key": "email",
+            "label": "Email",
+            "type": "email",
+            "required": false,
+            "enabled": true,
+            "options": []
+          },
+          {
+            "key": "phone",
+            "label": "Số điện thoại",
+            "type": "tel",
+            "required": false,
+            "enabled": true,
+            "options": []
+          }
+        ]
+      },
+      "launcherStyle": "bubble",
+      "primaryColor": "#6366f1",
+      "greeting": "Xin chào! Chúng tôi có thể giúp gì cho bạn?",
+      "placeholder": "Nhập tin nhắn...",
+      "position": "bottom-right",
+      "language": "vi",
+      "offlineMessage": "Hiện tại không có agent trực tuyến. Vui lòng để lại lời nhắn.",
+      "autoReply": "",
+      "showBranding": true
+    },
+    "domainRules": {
+      "mode": "allowlist",
+      "domains": []
+    },
+    "businessHours": {
+      "enabled": false,
+      "timezone": "Asia/Ho_Chi_Minh",
+      "schedule": [],
+      "holidays": []
+    }
+  }
+}

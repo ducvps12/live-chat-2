@@ -45,4 +45,4 @@ const businessHoursSchema = new Schema<IBusinessHours>(
     { timestamps: true }
 );
 
-export const BusinessHoursModel = mongoose.model<IBusinessHours>('BusinessHours', businessHoursSchema);
+export const BusinessHoursModel = (mongoose.models.BusinessHours || mongoose.model<IBusinessHours>('BusinessHours', businessHoursSchema)) as mongoose.Model<IBusinessHours>;

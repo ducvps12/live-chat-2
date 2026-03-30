@@ -356,12 +356,12 @@ export const zaloController = {
         const { zaloAccountRepo } = await import('./repos/zalo-account.repo');
         const accounts = await zaloAccountRepo.findByWorkspaceId(workspaceId);
         const { isZaloSessionConnected } = await import('../../infra/zaloService');
-        const connected = accounts.find((a: any) => isZaloSessionConnected((a._id as unknown as string).toString()));
+        const connected = accounts.find((a: any) => isZaloSessionConnected((a.id).toString()));
         if (!connected) {
             res.status(400).json({ success: false, error: { message: 'Không có tài khoản Zalo nào đang kết nối' } });
             return;
         }
-        const accountId = (connected._id as unknown as string).toString();
+        const accountId = (connected.id).toString();
         await zaloService.backfillAvatars(workspaceId, accountId);
         res.status(200).json({ success: true, message: 'Đã cập nhật avatar cho các cuộc hội thoại' });
     }),

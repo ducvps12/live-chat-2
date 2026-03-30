@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:openclaw.ai)",
+      "Bash(npm i:*)",
+      "Bash(openclaw:*)",
+      "Bash(curl:*)",
+      "Bash(python:*)"
+    ]
+  }
+}

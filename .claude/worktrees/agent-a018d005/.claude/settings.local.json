@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:openclaw.ai)",
+      "Bash(npm i:*)",
+      "Bash(openclaw:*)",
+      "Bash(curl:*)",
+      "Bash(python:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(set -a)",
+      "Bash(source .env)",
+      "Bash(export MIGRATION_SQL_ONLY=true)",
+      "Bash(MIGRATION_SQL_ONLY=true npm run migrate:mongo:mysql:relational)",
+      "Bash(git:*)",
+      "Bash(npm:*)",
+      "Bash(claude:*)",
+      "Bash(node:*)",
+      "WebFetch(domain:fr.scribd.com)",
+      "WebFetch(domain:uvn.edu.vn)"
+    ]
+  }
+}

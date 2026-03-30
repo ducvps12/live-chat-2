@@ -1,122 +1,138 @@
-import { WorkspaceModel, IWorkspace } from './workspace.model';
+import prisma from '../../../infra/prisma';
+import type { Workspace, WorkspaceMember } from '@prisma/client';
+
+type WorkspaceWithMembers = Workspace & { members: WorkspaceMember[] };
 
 export const workspaceRepo = {
-    async create(data: Partial<IWorkspace>): Promise<IWorkspace> {
-        return WorkspaceModel.create(data);
+    async create(data: {
+        name: string;
+        slug: string;
+        ownerId: string;
+        plan?: string;
+        logoUrl?: string;
+        members?: Array<{ userId: string; role: string; joinedAt?: Date }>;
+    }): Promise<Workspace> {
+        const { members, ...workspaceData } = data;
+        return prisma.workspace.create({
+            data: {
+                ...workspaceData,
+                ...(members && members.length > 0
+                    ? { members: { create: members } }
+                    : {}),
+            },
+        });
     },
 
-    async findById(id: string): Promise<IWorkspace | null> {
-        return WorkspaceModel.findById(id).exec();
+    async findById(id: string): Promise<WorkspaceWithMembers | null> {
+        return prisma.workspace.findUnique({
+            where: { id },
+            include: { members: true },
+        });
     },
 
-    async findBySlug(slug: string): Promise<IWorkspace | null> {
-        return WorkspaceModel.findOne({ slug }).exec();
+    async findBySlug(slug: string): Promise<Workspace | null> {
+        return prisma.workspace.findUnique({ where: { slug } });
     },
 
-    async findByMemberUserId(userId: string): Promise<IWorkspace[]> {
-        return WorkspaceModel.find({ 'members.userId': userId, isActive: true }).exec();
+    async findByMemberUserId(userId: string): Promise<WorkspaceWithMembers[]> {
+        return prisma.workspace.findMany({
+            where: {
+                isActive: true,
+                members: { some: { userId } },
+            },
+            include: { members: true },
+        });
     },
 
-    async update(id: string, data: Partial<IWorkspace>): Promise<IWorkspace | null> {
-        return WorkspaceModel.findByIdAndUpdate(id, data, { new: true }).exec();
+    async update(id: string, data: Partial<Omit<Workspace, 'id' | 'createdAt' | 'updatedAt'>>): Promise<Workspace | null> {
+        return prisma.workspace.update({ where: { id }, data });
     },
 
-    async addMember(workspaceId: string, member: { userId: string; role: string }): Promise<IWorkspace | null> {
-        return WorkspaceModel.findByIdAndUpdate(
-            workspaceId,
-            { $push: { members: { ...member, joinedAt: new Date() } } },
-            { new: true }
-        ).exec();
+    async addMember(workspaceId: string, member: { userId: string; role: string }): Promise<WorkspaceWithMembers | null> {
+        await prisma.workspaceMember.upsert({
+            where: { workspaceId_userId: { workspaceId, userId: member.userId } },
+            create: { workspaceId, userId: member.userId, role: member.role, joinedAt: new Date() },
+            update: { role: member.role },
+        });
+        return prisma.workspace.findUnique({ where: { id: workspaceId }, include: { members: true } });
     },
 
-    async removeMember(workspaceId: string, userId: string): Promise<IWorkspace | null> {
-        return WorkspaceModel.findByIdAndUpdate(
-            workspaceId,
-            { $pull: { members: { userId } } },
-            { new: true }
-        ).exec();
+    async removeMember(workspaceId: string, userId: string): Promise<WorkspaceWithMembers | null> {
+        await prisma.workspaceMember.deleteMany({ where: { workspaceId, userId } });
+        return prisma.workspace.findUnique({ where: { id: workspaceId }, include: { members: true } });
     },
 
     async delete(id: string): Promise<void> {
-        await WorkspaceModel.findByIdAndUpdate(id, { isActive: false }).exec();
+        await prisma.workspace.update({ where: { id }, data: { isActive: false } });
     },
 
     async getMembers(workspaceId: string) {
-        const ws = await WorkspaceModel.findById(workspaceId)
-            .populate('members.userId', 'name email role avatarUrl')
-            .exec();
-        if (!ws) return [];
-        return ws.members;
+        return prisma.workspaceMember.findMany({
+            where: { workspaceId },
+            include: {
+                user: { select: { id: true, name: true, email: true, role: true, avatarUrl: true } },
+            },
+        });
     },
 
     // ── Tag registry CRUD ──
 
     async getTags(workspaceId: string): Promise<string[]> {
-        const ws = await WorkspaceModel.findById(workspaceId, 'tags').exec();
-        return ws?.tags || [];
+        const ws = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { tags: true } });
+        return (ws?.tags as string[]) || [];
     },
 
     async addTag(workspaceId: string, tag: string): Promise<string[]> {
-        const ws = await WorkspaceModel.findByIdAndUpdate(
-            workspaceId,
-            { $addToSet: { tags: tag } },
-            { new: true }
-        ).exec();
-        return ws?.tags || [];
+        const ws = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { tags: true } });
+        const tags = (ws?.tags as string[]) || [];
+        if (!tags.includes(tag)) tags.push(tag);
+        const updated = await prisma.workspace.update({ where: { id: workspaceId }, data: { tags } });
+        return (updated.tags as string[]) || [];
     },
 
     async removeTag(workspaceId: string, tag: string): Promise<string[]> {
-        const ws = await WorkspaceModel.findByIdAndUpdate(
-            workspaceId,
-            { $pull: { tags: tag } },
-            { new: true }
-        ).exec();
-        return ws?.tags || [];
+        const ws = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { tags: true } });
+        const tags = ((ws?.tags as string[]) || []).filter((t: string) => t !== tag);
+        const updated = await prisma.workspace.update({ where: { id: workspaceId }, data: { tags } });
+        return (updated.tags as string[]) || [];
     },
 
     async updateTag(workspaceId: string, oldTag: string, newTag: string): Promise<string[]> {
-        // Pull old, push new (atomic-like)
-        await WorkspaceModel.findByIdAndUpdate(workspaceId, { $pull: { tags: oldTag } }).exec();
-        const ws = await WorkspaceModel.findByIdAndUpdate(
-            workspaceId,
-            { $addToSet: { tags: newTag } },
-            { new: true }
-        ).exec();
-        return ws?.tags || [];
+        const ws = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { tags: true } });
+        let tags = ((ws?.tags as string[]) || []).filter((t: string) => t !== oldTag);
+        if (!tags.includes(newTag)) tags.push(newTag);
+        const updated = await prisma.workspace.update({ where: { id: workspaceId }, data: { tags } });
+        return (updated.tags as string[]) || [];
     },
 
     // ── Label registry CRUD (colored tags, Zalo-style) ──
 
     async getLabels(workspaceId: string): Promise<Array<{ name: string; color: string }>> {
-        const ws = await WorkspaceModel.findById(workspaceId, 'labels').exec();
-        return ws?.labels || [];
+        const ws = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { labels: true } });
+        return (ws?.labels as Array<{ name: string; color: string }>) || [];
     },
 
     async addLabel(workspaceId: string, label: { name: string; color: string }): Promise<Array<{ name: string; color: string }>> {
-        const ws = await WorkspaceModel.findByIdAndUpdate(
-            workspaceId,
-            { $push: { labels: label } },
-            { new: true }
-        ).exec();
-        return ws?.labels || [];
+        const ws = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { labels: true } });
+        const labels = (ws?.labels as Array<{ name: string; color: string }>) || [];
+        labels.push(label);
+        const updated = await prisma.workspace.update({ where: { id: workspaceId }, data: { labels } });
+        return (updated.labels as Array<{ name: string; color: string }>) || [];
     },
 
     async removeLabel(workspaceId: string, labelName: string): Promise<Array<{ name: string; color: string }>> {
-        const ws = await WorkspaceModel.findByIdAndUpdate(
-            workspaceId,
-            { $pull: { labels: { name: labelName } } },
-            { new: true }
-        ).exec();
-        return ws?.labels || [];
+        const ws = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { labels: true } });
+        const labels = ((ws?.labels as Array<{ name: string; color: string }>) || []).filter(l => l.name !== labelName);
+        const updated = await prisma.workspace.update({ where: { id: workspaceId }, data: { labels } });
+        return (updated.labels as Array<{ name: string; color: string }>) || [];
     },
 
     async updateLabel(workspaceId: string, oldName: string, newLabel: { name: string; color: string }): Promise<Array<{ name: string; color: string }>> {
-        // Use array filter positional update
-        const ws = await WorkspaceModel.findOneAndUpdate(
-            { _id: workspaceId, 'labels.name': oldName },
-            { $set: { 'labels.$.name': newLabel.name, 'labels.$.color': newLabel.color } },
-            { new: true }
-        ).exec();
-        return ws?.labels || [];
+        const ws = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { labels: true } });
+        const labels = ((ws?.labels as Array<{ name: string; color: string }>) || []).map(l =>
+            l.name === oldName ? newLabel : l
+        );
+        const updated = await prisma.workspace.update({ where: { id: workspaceId }, data: { labels } });
+        return (updated.labels as Array<{ name: string; color: string }>) || [];
     },
 };

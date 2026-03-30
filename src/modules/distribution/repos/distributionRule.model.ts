@@ -64,4 +64,4 @@ const distributionRuleSchema = new Schema<IDistributionRule>(
 
 distributionRuleSchema.index({ workspaceId: 1, isActive: 1, priority: -1 });
 
-export const DistributionRuleModel = mongoose.model<IDistributionRule>('DistributionRule', distributionRuleSchema);
+export const DistributionRuleModel = (mongoose.models.DistributionRule || mongoose.model<IDistributionRule>('DistributionRule', distributionRuleSchema)) as mongoose.Model<IDistributionRule>;

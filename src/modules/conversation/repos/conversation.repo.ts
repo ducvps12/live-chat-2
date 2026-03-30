@@ -1,49 +1,80 @@
-import { ConversationModel, IConversation } from './conversation.model';
-import { MessageModel } from './message.model';
+import prisma from '../../../infra/prisma';
+import type { Conversation } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+
+/** Map Prisma `id` to frontend-expected `_id` */
+function mapConv(c: any): any {
+    if (!c) return c;
+    if (!c._id && c.id) c._id = c.id;
+    return c;
+}
+function mapConvs(arr: any[]): any[] {
+    return arr.map(mapConv);
+}
 
 export const conversationRepo = {
-    async create(data: Partial<IConversation>): Promise<IConversation> {
-        return ConversationModel.create(data);
+    async create(data: {
+        workspaceId: string;
+        widgetId: string;
+        visitorId: string;
+        visitorInfo?: any;
+        status?: string;
+        priority?: string;
+        channel?: string;
+        assignedTo?: string;
+        metadata?: any;
+    }): Promise<Conversation> {
+        const c = await prisma.conversation.create({ data: data as any });
+        return mapConv(c);
     },
 
-    async findById(id: string): Promise<IConversation | null> {
-        return ConversationModel.findById(id).populate('assignedTo', 'name email').exec();
+    async findById(id: string): Promise<Conversation | null> {
+        const c = await prisma.conversation.findUnique({ where: { id } });
+        return mapConv(c);
     },
 
-    async findActiveByVisitor(visitorId: string, widgetId: string): Promise<IConversation | null> {
-        return ConversationModel.findOne({ visitorId, widgetId, status: { $in: ['open', 'pending'] } })
-            .sort({ lastMessageAt: -1 })
-            .exec();
+    async findActiveByVisitor(visitorId: string, widgetId: string): Promise<Conversation | null> {
+        const c = await prisma.conversation.findFirst({
+            where: { visitorId, widgetId, status: { in: ['open', 'pending'] } },
+            orderBy: { lastMessageAt: 'desc' },
+        });
+        return mapConv(c);
     },
 
-    /**
-     * Find the most recent conversation for a visitor, regardless of status.
-     * Used by Zalo handler to prevent duplicate conversations — reopens closed ones.
-     */
-    async findLatestByVisitor(visitorId: string, widgetId: string): Promise<IConversation | null> {
-        return ConversationModel.findOne({ visitorId, widgetId })
-            .sort({ lastMessageAt: -1 })
-            .exec();
+    async findLatestByVisitor(visitorId: string, widgetId: string): Promise<Conversation | null> {
+        const c = await prisma.conversation.findFirst({
+            where: { visitorId, widgetId },
+            orderBy: { lastMessageAt: 'desc' },
+        });
+        return mapConv(c);
     },
 
     async findByVisitor(visitorId: string, widgetId: string) {
-        return ConversationModel.find({ visitorId, widgetId })
-            .sort({ updatedAt: -1 })
-            .exec();
+        return mapConvs(await prisma.conversation.findMany({
+            where: { visitorId, widgetId },
+            orderBy: { updatedAt: 'desc' },
+        }));
     },
 
     async getDistinctDomains(workspaceId: string): Promise<string[]> {
-        return ConversationModel.distinct('metadata.domain', { workspaceId, 'metadata.domain': { $exists: true, $ne: null } }).exec() as Promise<string[]>;
+        // metadata is JSON — raw query needed for JSON extraction
+        const results = await prisma.$queryRaw<{ domain: string }[]>`
+            SELECT DISTINCT JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.domain')) as domain
+            FROM Conversation
+            WHERE workspaceId = ${workspaceId}
+            AND JSON_EXTRACT(metadata, '$.domain') IS NOT NULL
+        `;
+        return results.map(r => r.domain).filter(Boolean);
     },
 
-    async findOpenByWorkspace(workspaceId: string): Promise<IConversation[]> {
-        return ConversationModel.find({ workspaceId, status: 'open' }).exec();
+    async findOpenByWorkspace(workspaceId: string): Promise<Conversation[]> {
+        return mapConvs(await prisma.conversation.findMany({ where: { workspaceId, status: 'open' } }));
     },
 
     async findByWorkspace(
         workspaceId: string,
-        options?: { 
-            status?: string; 
+        options?: {
+            status?: string;
             assignee?: string;
             tags?: string | string[];
             channel?: string;
@@ -51,75 +82,66 @@ export const conversationRepo = {
             dateFrom?: string;
             dateTo?: string;
             sortBy?: string;
-            page?: number; 
+            page?: number;
             limit?: number;
             domain?: string | string[];
         }
-    ): Promise<{ items: IConversation[]; total: number }> {
-        const filter: any = { workspaceId };
-        
-        if (options?.status && options.status !== 'all') filter.status = options.status;
-        
+    ): Promise<{ items: Conversation[]; total: number }> {
+        const where: any = { workspaceId };
+
+        if (options?.status && options.status !== 'all') where.status = options.status;
+
         if (options?.assignee) {
-            if (options.assignee === 'unassigned') filter.assignedTo = { $exists: false };
-            else filter.assignedTo = options.assignee;
+            if (options.assignee === 'unassigned') where.assignedTo = null;
+            else where.assignedTo = options.assignee;
         }
-        
-        if (options?.channel && options.channel !== 'all') filter.channel = options.channel;
-        
-        if (options?.pageId && options.pageId !== 'all') filter['metadata.pageId'] = options.pageId;
-        
+
+        if (options?.channel && options.channel !== 'all') where.channel = options.channel;
+
+        // Tags filter: JSON contains check
         if (options?.tags) {
             const tagsArray = Array.isArray(options.tags) ? options.tags : [options.tags];
             if (tagsArray.length > 0) {
-                filter.tags = { $in: tagsArray }; // match any of the provided tags
+                // Use raw where for JSON array contains
+                where.OR = tagsArray.map(tag => ({
+                    tags: { path: '$', array_contains: tag },
+                }));
             }
-        }
-        
-        if (options?.dateFrom || options?.dateTo) {
-            filter.createdAt = {};
-            if (options?.dateFrom) filter.createdAt.$gte = new Date(options.dateFrom);
-            if (options?.dateTo) filter.createdAt.$lte = new Date(options.dateTo);
         }
 
-        if (options?.domain) {
-            const domainArray = Array.isArray(options.domain) ? options.domain : [options.domain];
-            if (domainArray.length > 0) {
-                filter['metadata.domain'] = { $in: domainArray };
-            }
+        if (options?.dateFrom || options?.dateTo) {
+            where.createdAt = {};
+            if (options?.dateFrom) where.createdAt.gte = new Date(options.dateFrom);
+            if (options?.dateTo) where.createdAt.lte = new Date(options.dateTo);
         }
 
         const page = options?.page || 1;
         const limit = options?.limit || 20;
         const skip = (page - 1) * limit;
 
-        let sortCriteria: any = { lastMessageAt: -1 };
+        let orderBy: any = { lastMessageAt: 'desc' };
         if (options?.sortBy === 'oldest') {
-            sortCriteria = { lastMessageAt: 1 };
+            orderBy = { lastMessageAt: 'asc' };
         } else if (options?.sortBy === 'unread') {
-            sortCriteria = { unreadCount: -1, lastMessageAt: -1 };
+            orderBy = [{ unreadCount: 'desc' }, { lastMessageAt: 'desc' }];
         }
 
         const [items, total] = await Promise.all([
-            ConversationModel.find(filter)
-                .populate('assignedTo', 'name email')
-                .sort(sortCriteria)
-                .skip(skip)
-                .limit(limit)
-                .exec(),
-            ConversationModel.countDocuments(filter).exec(),
+            prisma.conversation.findMany({
+                where,
+                orderBy,
+                skip,
+                take: limit,
+            }),
+            prisma.conversation.count({ where }),
         ]);
-        return { items, total };
+        return { items: mapConvs(items), total };
     },
 
-    async updateStatus(id: string, status: string): Promise<IConversation | null> {
-        return ConversationModel.findByIdAndUpdate(id, { status }, { new: true }).exec();
+    async updateStatus(id: string, status: string): Promise<Conversation | null> {
+        return mapConv(await prisma.conversation.update({ where: { id }, data: { status } }));
     },
 
-    /**
-     * Update conversation summary when a new message arrives.
-     * Atomically sets lastMessageAt, snippet, lastSender, and increments unreadCount.
-     */
     async updateLastMessage(
         id: string,
         summary: {
@@ -128,255 +150,212 @@ export const conversationRepo = {
             incrementUnread?: boolean;
         }
     ): Promise<void> {
-        const update: any = {
-            $set: {
+        await prisma.conversation.update({
+            where: { id },
+            data: {
                 lastMessageAt: new Date(),
                 lastMessageSnippet: summary.snippet,
-                lastSender: { type: summary.sender.type, name: summary.sender.name },
+                lastSenderType: summary.sender.type,
+                lastSenderName: summary.sender.name || null,
+                ...(summary.incrementUnread ? { unreadCount: { increment: 1 } } : {}),
             },
-        };
-        // Increment unread only for visitor/system messages (agent's own don't count)
-        if (summary.incrementUnread) {
-            update.$inc = { unreadCount: 1 };
-        }
-        await ConversationModel.findByIdAndUpdate(id, update).exec();
+        });
     },
 
-    /**
-     * Reset unread count (agent opened/read the conversation).
-     */
     async markRead(id: string): Promise<void> {
-        await ConversationModel.findByIdAndUpdate(id, { unreadCount: 0 }).exec();
+        await prisma.conversation.update({ where: { id }, data: { unreadCount: 0 } });
     },
 
-    /**
-     * Update the read cursor for a specific participant in the conversation.
-     */
     async updateReadCursor(
         conversationId: string,
         participantId: string,
         participantType: 'visitor' | 'agent',
         lastReadMessageId: string
     ): Promise<void> {
-        // Remove old entry for this participant if exists
-        await ConversationModel.updateOne(
-            { _id: conversationId },
-            { $pull: { readContext: { participantId } as any } }
-        ).exec();
-        
-        // Push the new read cursor
-        await ConversationModel.updateOne(
-            { _id: conversationId },
-            { 
-                $push: { 
-                    readContext: { participantId, participantType, lastReadMessageId } 
-                } 
-            }
-        ).exec();
+        const conv = await prisma.conversation.findUnique({
+            where: { id: conversationId },
+            select: { readContext: true },
+        });
+        let readContext = (conv?.readContext as any[]) || [];
+        // Remove old entry
+        readContext = readContext.filter((r: any) => r.participantId !== participantId);
+        // Add new entry
+        readContext.push({ participantId, participantType, lastReadMessageId });
+        await prisma.conversation.update({
+            where: { id: conversationId },
+            data: { readContext },
+        });
     },
 
-    async updateMetadata(id: string, metadata: Record<string, any>): Promise<IConversation | null> {
-        return ConversationModel.findByIdAndUpdate(id, { metadata }, { new: true }).exec();
+    async updateMetadata(id: string, metadata: Record<string, any>): Promise<Conversation | null> {
+        return mapConv(await prisma.conversation.update({ where: { id }, data: { metadata } }));
     },
 
-    async updateVisitorInfo(id: string, visitorInfo: { name?: string; avatar?: string }): Promise<IConversation | null> {
-        const update: any = {};
-        if (visitorInfo.name) update['visitorInfo.name'] = visitorInfo.name;
-        if (visitorInfo.avatar) update['visitorInfo.avatar'] = visitorInfo.avatar;
-        return ConversationModel.findByIdAndUpdate(id, { $set: update }, { new: true }).exec();
+    async updateVisitorInfo(id: string, visitorInfo: { name?: string; avatar?: string }): Promise<Conversation | null> {
+        const conv = await prisma.conversation.findUnique({ where: { id }, select: { visitorInfo: true } });
+        const current = (conv?.visitorInfo as any) || {};
+        if (visitorInfo.name) current.name = visitorInfo.name;
+        if (visitorInfo.avatar) current.avatar = visitorInfo.avatar;
+        return mapConv(await prisma.conversation.update({ where: { id }, data: { visitorInfo: current } }));
     },
 
     async countByWorkspace(workspaceId: string, status?: string): Promise<number> {
-        const filter: any = { workspaceId };
-        if (status) filter.status = status;
-        return ConversationModel.countDocuments(filter).exec();
+        const where: any = { workspaceId };
+        if (status) where.status = status;
+        return prisma.conversation.count({ where });
     },
 
-    /**
-     * Assign conversation to an agent.
-     * @param expectUnassigned If true, only assigns if conversation is currently unassigned (atomic CAS).
-     *   Returns null if someone else already took it (collision).
-     */
-    async assignTo(id: string, agentId: string, expectUnassigned = false): Promise<IConversation | null> {
+    async assignTo(id: string, agentId: string, expectUnassigned = false): Promise<Conversation | null> {
         if (expectUnassigned) {
-            // Atomic: only assign if assignedTo is null/undefined (prevents race condition)
-            return ConversationModel.findOneAndUpdate(
-                { _id: id, $or: [{ assignedTo: null }, { assignedTo: { $exists: false } }] },
-                { assignedTo: agentId },
-                { new: true }
-            ).exec();
+            // Atomic-like: only assign if currently unassigned
+            const result = await prisma.conversation.updateMany({
+                where: { id, assignedTo: null },
+                data: { assignedTo: agentId },
+            });
+            if (result.count === 0) return null;
+            return mapConv(await prisma.conversation.findUnique({ where: { id } }));
         }
-        // Admin/transfer override: always assign regardless of current state
-        return ConversationModel.findByIdAndUpdate(id, { assignedTo: agentId }, { new: true }).exec();
+        return mapConv(await prisma.conversation.update({ where: { id }, data: { assignedTo: agentId } }));
     },
 
-    async unassign(id: string): Promise<IConversation | null> {
-        return ConversationModel.findByIdAndUpdate(id, { $unset: { assignedTo: 1 } }, { new: true }).exec();
+    async unassign(id: string): Promise<Conversation | null> {
+        return mapConv(await prisma.conversation.update({ where: { id }, data: { assignedTo: null } }));
     },
 
-    async setPriority(id: string, priority: string, slaDeadline?: Date): Promise<IConversation | null> {
-        const update: any = { priority };
-        if (slaDeadline) update.slaDeadline = slaDeadline;
-        else update.$unset = { slaDeadline: 1 };
-        return ConversationModel.findByIdAndUpdate(id, update, { new: true }).exec();
+    async setPriority(id: string, priority: string, slaDeadline?: Date): Promise<Conversation | null> {
+        return mapConv(await prisma.conversation.update({
+            where: { id },
+            data: { priority, slaDeadline: slaDeadline || null },
+        }));
     },
 
-    /**
-     * Find conversations with SLA deadline approaching (within `withinMs` milliseconds).
-     */
-    async findBreachingSLA(withinMs: number): Promise<IConversation[]> {
+    async findBreachingSLA(withinMs: number): Promise<Conversation[]> {
         const now = new Date();
         const threshold = new Date(now.getTime() + withinMs);
-        return ConversationModel.find({
-            slaDeadline: { $lte: threshold, $gt: now },
-            status: { $in: ['open', 'pending'] },
-        }).populate('assignedTo', 'name email').exec();
+        return prisma.conversation.findMany({
+            where: {
+                slaDeadline: { lte: threshold, gt: now },
+                status: { in: ['open', 'pending'] },
+            },
+        });
     },
 
-    /**
-     * Find conversations already past SLA deadline.
-     */
-    async findBreachedSLA(): Promise<IConversation[]> {
-        return ConversationModel.find({
-            slaDeadline: { $lte: new Date() },
-            status: { $in: ['open', 'pending'] },
-        }).populate('assignedTo', 'name email').exec();
+    async findBreachedSLA(): Promise<Conversation[]> {
+        return prisma.conversation.findMany({
+            where: {
+                slaDeadline: { lte: new Date() },
+                status: { in: ['open', 'pending'] },
+            },
+        });
     },
 
-    /**
-     * Requeue all open/pending conversations assigned to a specific agent.
-     * Used when agent disconnects unexpectedly.
-     */
     async requeueByAgent(agentId: string): Promise<number> {
-        const result = await ConversationModel.updateMany(
-            { assignedTo: agentId, status: { $in: ['open', 'pending'] } },
-            { $unset: { assignedTo: 1 } }
-        ).exec();
-        return result.modifiedCount;
+        const result = await prisma.conversation.updateMany({
+            where: { assignedTo: agentId, status: { in: ['open', 'pending'] } },
+            data: { assignedTo: null },
+        });
+        return result.count;
     },
 
     // ── Tags ──
 
-    async addTag(id: string, tag: string): Promise<IConversation | null> {
-        return ConversationModel.findByIdAndUpdate(
-            id,
-            { $addToSet: { tags: tag } },
-            { new: true }
-        ).exec();
+    async addTag(id: string, tag: string): Promise<Conversation | null> {
+        const conv = await prisma.conversation.findUnique({ where: { id }, select: { tags: true } });
+        const tags = (conv?.tags as string[]) || [];
+        if (!tags.includes(tag)) tags.push(tag);
+        return mapConv(await prisma.conversation.update({ where: { id }, data: { tags } }));
     },
 
-    async removeTag(id: string, tag: string): Promise<IConversation | null> {
-        return ConversationModel.findByIdAndUpdate(
-            id,
-            { $pull: { tags: tag } },
-            { new: true }
-        ).exec();
+    async removeTag(id: string, tag: string): Promise<Conversation | null> {
+        const conv = await prisma.conversation.findUnique({ where: { id }, select: { tags: true } });
+        const tags = ((conv?.tags as string[]) || []).filter(t => t !== tag);
+        return mapConv(await prisma.conversation.update({ where: { id }, data: { tags } }));
     },
 
-    /**
-     * Aggregate per-agent conversation stats for a workspace.
-     * Returns: [{ _id: agentObjectId, total, open, closed, missed }]
-     */
+    // ── Analytics ──
+
     async getAgentConversationStats(workspaceId: string) {
-        const mongoose = await import('mongoose');
-        return ConversationModel.aggregate([
-            { $match: { workspaceId: new mongoose.Types.ObjectId(workspaceId), assignedTo: { $exists: true, $ne: null } } },
-            {
-                $group: {
-                    _id: '$assignedTo',
-                    total: { $sum: 1 },
-                    open: { $sum: { $cond: [{ $eq: ['$status', 'open'] }, 1, 0] } },
-                    closed: { $sum: { $cond: [{ $in: ['$status', ['closed', 'resolved']] }, 1, 0] } },
-                    pending: { $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] } },
-                    lastActivity: { $max: '$lastMessageAt' },
-                },
-            },
-            {
-                $lookup: {
-                    from: 'users',
-                    localField: '_id',
-                    foreignField: '_id',
-                    as: 'user',
-                },
-            },
-            { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
-            {
-                $project: {
-                    _id: 1,
-                    total: 1,
-                    open: 1,
-                    closed: 1,
-                    pending: 1,
-                    lastActivity: 1,
-                    userName: { $ifNull: ['$user.name', 'Unknown'] },
-                    userEmail: { $ifNull: ['$user.email', ''] },
-                },
-            },
-            { $sort: { total: -1 } },
-        ]).exec();
+        const results = await prisma.$queryRaw<any[]>`
+            SELECT
+                c.assignedTo as _id,
+                COUNT(*) as total,
+                SUM(CASE WHEN c.status = 'open' THEN 1 ELSE 0 END) as \`open\`,
+                SUM(CASE WHEN c.status IN ('closed', 'resolved') THEN 1 ELSE 0 END) as closed,
+                SUM(CASE WHEN c.status = 'pending' THEN 1 ELSE 0 END) as pending,
+                MAX(c.lastMessageAt) as lastActivity,
+                COALESCE(u.name, 'Unknown') as userName,
+                COALESCE(u.email, '') as userEmail
+            FROM Conversation c
+            LEFT JOIN User u ON c.assignedTo = u.id
+            WHERE c.workspaceId = ${workspaceId}
+            AND c.assignedTo IS NOT NULL
+            GROUP BY c.assignedTo, u.name, u.email
+            ORDER BY total DESC
+        `;
+        return results.map(r => ({
+            ...r,
+            total: Number(r.total),
+            open: Number(r.open),
+            closed: Number(r.closed),
+            pending: Number(r.pending),
+        }));
     },
 
-    /**
-     * Aggregate per-agent message counts for conversations in a workspace.
-     * Returns: [{ _id: agentIdString, messagesSent: number }]
-     */
     async getAgentMessageCounts(workspaceId: string) {
-        const mongoose = await import('mongoose');
-        // First get all conversation IDs for this workspace
-        const conversationIds = await ConversationModel.find(
-            { workspaceId: new mongoose.Types.ObjectId(workspaceId) },
-            { _id: 1 }
-        ).lean().exec();
-
-        const ids = conversationIds.map((c: { _id: unknown }) => c._id);
-        if (ids.length === 0) return [];
-
-        return MessageModel.aggregate([
-            { $match: { conversationId: { $in: ids }, 'sender.type': 'agent' } },
-            {
-                $group: {
-                    _id: '$sender.id',
-                    messagesSent: { $sum: 1 },
-                },
-            },
-        ]).exec();
+        const results = await prisma.$queryRaw<any[]>`
+            SELECT
+                m.senderId as _id,
+                COUNT(*) as messagesSent
+            FROM Message m
+            INNER JOIN Conversation c ON m.conversationId = c.id
+            WHERE c.workspaceId = ${workspaceId}
+            AND m.senderType = 'agent'
+            GROUP BY m.senderId
+        `;
+        return results.map(r => ({ ...r, messagesSent: Number(r.messagesSent) }));
     },
-    /**
-     * Search conversations by message content.
-     * Returns conversations that have messages matching the query, with matched snippets.
-     */
+
     async searchByMessageContent(
         workspaceId: string,
         query: string,
         options?: { status?: string; limit?: number }
-    ): Promise<{ items: IConversation[]; matchMap: Record<string, { snippet: string; messageId: string }> }> {
-        const mongoose = await import('mongoose');
-        const { messageRepo } = await import('./message.repo');
+    ): Promise<{ items: Conversation[]; matchMap: Record<string, { snippet: string; messageId: string }> }> {
+        if (!query || query.trim().length === 0) return { items: [], matchMap: {} };
 
-        // 1. Get all conversation IDs for this workspace (filtered by status if needed)
-        const filter: any = { workspaceId: new mongoose.Types.ObjectId(workspaceId) };
-        if (options?.status && options.status !== 'all') filter.status = options.status;
+        const statusFilter = options?.status && options.status !== 'all' ? options.status : null;
+        const limit = options?.limit || 50;
+        const escapedQuery = `%${query}%`;
 
-        const convIds = await ConversationModel.find(filter, { _id: 1 }).lean().exec();
-        const idStrings = convIds.map((c: any) => c._id.toString());
+        // Raw query for LIKE search with JOIN
+        const matches = await prisma.$queryRaw<any[]>`
+            SELECT
+                m.conversationId,
+                m.id as messageId,
+                LEFT(m.content, 100) as matchedSnippet
+            FROM Message m
+            INNER JOIN Conversation c ON m.conversationId = c.id
+            WHERE c.workspaceId = ${workspaceId}
+            ${statusFilter ? Prisma.sql`AND c.status = ${statusFilter}` : Prisma.empty}
+            AND m.content LIKE ${escapedQuery}
+            AND (m.isDeleted = false OR m.isDeleted IS NULL)
+            AND (m.isInternal = false OR m.isInternal IS NULL)
+            ORDER BY m.createdAt DESC
+            LIMIT ${limit}
+        `;
 
-        if (idStrings.length === 0) return { items: [], matchMap: {} };
-
-        // 2. Search messages by content
-        const matches = await messageRepo.searchByContent(idStrings, query, options?.limit || 50);
         if (matches.length === 0) return { items: [], matchMap: {} };
 
-        // 3. Fetch full conversation docs for matched IDs
-        const matchedConvIds = matches.map(m => m.conversationId);
-        const items = await ConversationModel.find({ _id: { $in: matchedConvIds } })
-            .populate('assignedTo', 'name email')
-            .sort({ lastMessageAt: -1 })
-            .exec();
+        const convIds = [...new Set(matches.map(m => m.conversationId))];
+        const items = mapConvs(await prisma.conversation.findMany({
+            where: { id: { in: convIds } },
+            orderBy: { lastMessageAt: 'desc' },
+        }));
 
-        // 4. Build match map
         const matchMap: Record<string, { snippet: string; messageId: string }> = {};
         for (const m of matches) {
-            matchMap[m.conversationId] = { snippet: m.matchedSnippet, messageId: m.messageId };
+            if (!matchMap[m.conversationId]) {
+                matchMap[m.conversationId] = { snippet: m.matchedSnippet, messageId: m.messageId };
+            }
         }
 
         return { items, matchMap };

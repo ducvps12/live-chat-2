@@ -58,4 +58,4 @@ productSchema.index({ workspaceId: 1, sku: 1 });
 productSchema.index({ workspaceId: 1, category: 1 });
 productSchema.index({ name: 'text', description: 'text' });
 
-export const ProductModel = mongoose.model<IProduct>('Product', productSchema);
+export const ProductModel = (mongoose.models.Product || mongoose.model<IProduct>('Product', productSchema)) as mongoose.Model<IProduct>;

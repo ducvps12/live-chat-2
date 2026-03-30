@@ -1,81 +1,94 @@
-import { ExternalSessionModel, IExternalSession, SessionStatus } from './externalSession.model';
-import { SessionAuditLogModel, AuditAction } from './sessionAuditLog.model';
+import prisma from '../../../infra/prisma';
+import type { ExternalSession, SessionAuditLog } from '@prisma/client';
+
+export type SessionStatus = 'pending_login' | 'connected' | 'disconnected' | 'expired' | 'revoked';
+export type AuditAction = 'session_created' | 'qr_rendered' | 'login_success' | 'login_failed' | 'disconnected' | 'control_taken' | 'control_released' | 'viewer_joined' | 'viewer_left' | 'revoked';
 
 export const externalSessionRepo = {
-    create: async (data: Partial<IExternalSession>) => {
-        return ExternalSessionModel.create(data);
+    create: async (data: {
+        workspaceId: string;
+        provider?: string;
+        label: string;
+        status?: string;
+        createdById: string;
+        browserProfileId: string;
+    }) => {
+        return prisma.externalSession.create({ data: data as any });
     },
 
     findById: async (id: string) => {
-        return ExternalSessionModel.findById(id);
+        return prisma.externalSession.findUnique({ where: { id } });
     },
 
     findByWorkspace: async (workspaceId: string) => {
-        return ExternalSessionModel.find({ workspaceId })
-            .sort({ createdAt: -1 })
-            .populate('createdBy', 'name email')
-            .populate('controlledBy', 'name email');
+        return prisma.externalSession.findMany({
+            where: { workspaceId },
+            orderBy: { createdAt: 'desc' },
+            include: {
+                createdBy: { select: { id: true, name: true, email: true } },
+                controlledBy: { select: { id: true, name: true, email: true } },
+            },
+        });
     },
 
     findActive: async (sessionId: string) => {
-        return ExternalSessionModel.findOne({
-            _id: sessionId,
-            status: { $nin: ['revoked'] },
+        return prisma.externalSession.findFirst({
+            where: { id: sessionId, status: { not: 'revoked' } },
         });
     },
 
     updateStatus: async (sessionId: string, status: SessionStatus, extra: Record<string, any> = {}) => {
-        return ExternalSessionModel.findByIdAndUpdate(
-            sessionId,
-            { $set: { status, lastActiveAt: new Date(), ...extra } },
-            { new: true }
-        );
+        return prisma.externalSession.update({
+            where: { id: sessionId },
+            data: { status, lastActiveAt: new Date(), ...extra },
+        });
     },
 
     setController: async (sessionId: string, userId: string | null) => {
-        return ExternalSessionModel.findByIdAndUpdate(
-            sessionId,
-            {
-                $set: {
-                    controlledBy: userId,
-                    controlLockedAt: userId ? new Date() : null,
-                    lastActiveAt: new Date(),
-                },
+        return prisma.externalSession.update({
+            where: { id: sessionId },
+            data: {
+                controlledById: userId,
+                controlLockedAt: userId ? new Date() : null,
+                lastActiveAt: new Date(),
             },
-            { new: true }
-        );
+        });
     },
 
     addViewer: async (sessionId: string, userId: string) => {
-        return ExternalSessionModel.findByIdAndUpdate(
-            sessionId,
-            { $addToSet: { viewers: userId }, $set: { lastActiveAt: new Date() } },
-            { new: true }
-        );
+        const session = await prisma.externalSession.findUnique({ where: { id: sessionId }, select: { viewers: true } });
+        const viewers = (session?.viewers as string[]) || [];
+        if (!viewers.includes(userId)) viewers.push(userId);
+        return prisma.externalSession.update({
+            where: { id: sessionId },
+            data: { viewers, lastActiveAt: new Date() },
+        });
     },
 
     removeViewer: async (sessionId: string, userId: string) => {
-        return ExternalSessionModel.findByIdAndUpdate(
-            sessionId,
-            { $pull: { viewers: userId } },
-            { new: true }
-        );
+        const session = await prisma.externalSession.findUnique({ where: { id: sessionId }, select: { viewers: true } });
+        const viewers = ((session?.viewers as string[]) || []).filter(v => v !== userId);
+        return prisma.externalSession.update({
+            where: { id: sessionId },
+            data: { viewers },
+        });
     },
 
     clearViewers: async (sessionId: string) => {
-        return ExternalSessionModel.findByIdAndUpdate(
-            sessionId,
-            { $set: { viewers: [] } },
-            { new: true }
-        );
+        return prisma.externalSession.update({
+            where: { id: sessionId },
+            data: { viewers: [] },
+        });
     },
 
     setMetadata: async (sessionId: string, metadata: { accountName?: string | null; avatarUrl?: string | null }) => {
-        return ExternalSessionModel.findByIdAndUpdate(
-            sessionId,
-            { $set: { metadata } },
-            { new: true }
-        );
+        return prisma.externalSession.update({
+            where: { id: sessionId },
+            data: {
+                metadataAccountName: metadata.accountName,
+                metadataAvatarUrl: metadata.avatarUrl,
+            },
+        });
     },
 
     // ── Audit Log ──
@@ -86,13 +99,25 @@ export const externalSessionRepo = {
         action: AuditAction;
         details?: any;
     }) => {
-        return SessionAuditLogModel.create(data);
+        return prisma.sessionAuditLog.create({
+            data: {
+                sessionId: data.sessionId,
+                workspaceId: data.workspaceId,
+                userId: data.userId,
+                action: data.action,
+                details: data.details || {},
+            },
+        });
     },
 
     getAuditLog: async (sessionId: string, limit = 50) => {
-        return SessionAuditLogModel.find({ sessionId })
-            .sort({ createdAt: -1 })
-            .limit(limit)
-            .populate('userId', 'name email');
+        return prisma.sessionAuditLog.findMany({
+            where: { sessionId },
+            orderBy: { createdAt: 'desc' },
+            take: limit,
+            include: {
+                user: { select: { id: true, name: true, email: true } },
+            },
+        });
     },
 };

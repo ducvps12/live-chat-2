@@ -179,7 +179,7 @@ export const offlineMessageController = {
             req.params.widgetId as string,
             { name, email, message, visitorId }
         );
-        res.status(201).json({ success: true, data: { id: msg._id } });
+        res.status(201).json({ success: true, data: { id: msg.id } });
     }),
 
     // Authenticated: list offline messages for workspace

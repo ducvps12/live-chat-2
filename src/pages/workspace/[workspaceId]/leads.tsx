@@ -6,7 +6,8 @@ import {
     Plus, Search, LayoutGrid, List, ChevronRight, Phone, Mail, User2, X,
     MessageSquare, Trash2, Send, Target, MoreHorizontal, TrendingUp,
     Calendar, Clock, Globe, Zap, ArrowUpRight, Eye, Users, Star,
-    UserPlus, Activity, BarChart3, ExternalLink
+    UserPlus, Activity, BarChart3, ExternalLink, CheckSquare, Square, Radio,
+    Brain, Sparkles, RefreshCw
 } from 'lucide-react';
 import AppLayout from '../../../components/layout/AppLayout';
 import { leadService } from '../../../services/lead.service';
@@ -51,6 +52,8 @@ interface Lead {
     notes: { text: string; createdAt: string; createdBy: any }[];
     lastContactedAt: string | null;
     conversationCount: number;
+    zaloUserId?: string;
+    fbUserId?: string;
     createdAt: string;
     updatedAt: string;
 }
@@ -91,6 +94,137 @@ export default function LeadsPage() {
     const [analysisDrawer, setAnalysisDrawer] = useState<any>(null);
     // Bulk sync all groups state
     const [bulkSyncing, setBulkSyncing] = useState(false);
+
+    // ── AI Analysis State ──
+    const [aiAnalyzing, setAiAnalyzing] = useState(false);
+    const [aiAnalyzingBulk, setAiAnalyzingBulk] = useState(false);
+    const [aiBulkResult, setAiBulkResult] = useState<any>(null);
+
+    // Drag-and-drop state
+    const [draggingLeadId, setDraggingLeadId] = useState<string | null>(null);
+    const [dragOverStage, setDragOverStage] = useState<LeadStage | null>(null);
+
+    // ── Bulk Selection & Broadcast State ──
+    const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
+    const [broadcastOpen, setBroadcastOpen] = useState(false);
+    const [broadcastMsg, setBroadcastMsg] = useState('');
+    const [broadcastSending, setBroadcastSending] = useState(false);
+    const [bulkStageOpen, setBulkStageOpen] = useState(false);
+
+    const toggleLeadSelection = (leadId: string, e?: React.MouseEvent) => {
+        e?.stopPropagation();
+        setSelectedLeadIds(prev => {
+            const next = new Set(prev);
+            if (next.has(leadId)) next.delete(leadId);
+            else next.add(leadId);
+            return next;
+        });
+    };
+
+    const selectAllLeads = () => {
+        if (selectedLeadIds.size === leads.length) {
+            setSelectedLeadIds(new Set());
+        } else {
+            setSelectedLeadIds(new Set(leads.map(l => l._id)));
+        }
+    };
+
+    const selectedLeadsList = useMemo(() => leads.filter(l => selectedLeadIds.has(l._id)), [leads, selectedLeadIds]);
+
+    const handleBroadcast = async () => {
+        if (!broadcastMsg.trim() || selectedLeadsList.length === 0) return;
+        setBroadcastSending(true);
+        try {
+            // Get Zalo-source lead IDs (only Zalo leads can receive Zalo messages)
+            const zaloLeads = selectedLeadsList.filter(l => l.source === 'zalo');
+            const nonZaloLeads = selectedLeadsList.filter(l => l.source !== 'zalo');
+
+            if (zaloLeads.length === 0) {
+                message.warning('Không có lead nào từ Zalo để gửi tin nhắn. Chỉ lead Zalo mới nhận được tin nhắn qua Zalo.');
+                setBroadcastSending(false);
+                return;
+            }
+
+            // Extract Zalo thread IDs from lead metadata
+            const recipientIds = zaloLeads.map(l => (l as any).zaloUserId || (l as any).metadata?.zaloUserId || l._id).filter(Boolean);
+
+            if (recipientIds.length === 0) {
+                message.error('Không tìm thấy Zalo ID cho các lead đã chọn');
+                setBroadcastSending(false);
+                return;
+            }
+
+
+            // Use the broadcast endpoint
+            const result = await (await import('../../../lib/http/client')).httpClient.post(
+                `/workspaces/${workspaceId}/zalo/broadcast`,
+                {
+                    messages: [broadcastMsg.trim()],
+                    recipientIds,
+                    delayMs: 3000,
+                }
+            );
+
+            const data = result?.data?.data;
+            const successCount = data?.successCount || 0;
+            const failedCount = data?.failedCount || 0;
+
+            if (successCount > 0) {
+                message.success(`✅ Đã gửi ${successCount}/${recipientIds.length} tin nhắn thành công!`);
+            }
+            if (failedCount > 0) {
+                message.warning(`⚠️ ${failedCount} tin nhắn gửi thất bại`);
+            }
+            if (nonZaloLeads.length > 0) {
+                message.info(`ℹ️ ${nonZaloLeads.length} lead không phải Zalo đã được bỏ qua`);
+            }
+
+            setBroadcastOpen(false);
+            setBroadcastMsg('');
+            setSelectedLeadIds(new Set());
+        } catch (err: any) {
+            const errMsg = err?.response?.data?.error?.message || err?.message || 'Lỗi gửi tin nhắn';
+            message.error(`Lỗi broadcast: ${errMsg}`);
+        } finally {
+            setBroadcastSending(false);
+        }
+    };
+
+    const handleBulkStageChange = async (newStage: LeadStage) => {
+        try {
+            let successCount = 0;
+            for (const leadId of selectedLeadIds) {
+                try {
+                    await leadService.updateStage(workspaceId as string, leadId, newStage);
+                    successCount++;
+                } catch { /* silent */ }
+            }
+            setLeads(prev => prev.map(l => selectedLeadIds.has(l._id) ? { ...l, stage: newStage } : l));
+            message.success(`Đã chuyển ${successCount} lead sang "${STAGES.find(s => s.key === newStage)?.label}"`); 
+            setBulkStageOpen(false);
+            setSelectedLeadIds(new Set());
+        } catch { message.error('Lỗi chuyển giai đoạn'); }
+    };
+
+    const handleBulkDelete = async () => {
+        Modal.confirm({
+            title: `Xoá ${selectedLeadIds.size} lead?`,
+            content: 'Hành động này không thể hoàn tác.',
+            okText: 'Xoá',
+            okButtonProps: { danger: true },
+            cancelText: 'Hủy',
+            onOk: async () => {
+                let count = 0;
+                for (const id of selectedLeadIds) {
+                    try { await leadService.delete(workspaceId as string, id); count++; } catch { /* silent */ }
+                }
+                setLeads(prev => prev.filter(l => !selectedLeadIds.has(l._id)));
+                setSelectedLeadIds(new Set());
+                fetchStats();
+                message.success(`Đã xoá ${count} lead`);
+            },
+        });
+    };
 
     useEffect(() => {
         const t = localStorage.getItem('nemark_token');
@@ -372,7 +506,15 @@ export default function LeadsPage() {
                                 fetchLeads();
                                 fetchStats();
                             } catch (err: any) {
-                                message.error(err?.response?.data?.error?.message || 'Lỗi đồng bộ nhóm');
+                                const errMsg = err?.response?.data?.error?.message
+                                    || err?.response?.data?.message
+                                    || err?.message
+                                    || 'Lỗi đồng bộ nhóm';
+                                if (errMsg.includes('chưa kết nối') || errMsg.includes('ZALO_NOT_CONNECTED')) {
+                                    message.error('❌ Cần kết nối Zalo trước khi đồng bộ. Vào Cài đặt → Zalo để kết nối.');
+                                } else {
+                                    message.error(`Lỗi đồng bộ: ${errMsg}`);
+                                }
                             } finally {
                                 setBulkSyncing(false);
                             }
@@ -407,6 +549,58 @@ export default function LeadsPage() {
                         ) : (
                             <>
                                 <Zap size={15} /> Đồng bộ tất cả nhóm
+                            </>
+                        )}
+                    </button>
+
+                    {/* AI Bulk Analyze Button */}
+                    <button
+                        disabled={aiAnalyzingBulk}
+                        onClick={async () => {
+                            if (aiAnalyzingBulk) return;
+                            setAiAnalyzingBulk(true);
+                            try {
+                                const res = await leadService.aiAnalyzeBulk(workspaceId as string, 30);
+                                setAiBulkResult(res?.data);
+                                message.success(res?.message || `Đã phân tích ${res?.data?.analyzed || 0} cuộc hội thoại`);
+                                fetchLeads();
+                                fetchStats();
+                            } catch (err: any) {
+                                message.error(`Lỗi AI: ${err?.response?.data?.message || err?.message || 'Không thể phân tích'}`);
+                            } finally {
+                                setAiAnalyzingBulk(false);
+                            }
+                        }}
+                        style={{
+                            height: 42,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            borderRadius: 12,
+                            padding: '0 18px',
+                            fontSize: 13,
+                            fontWeight: 600,
+                            color: 'white',
+                            background: aiAnalyzingBulk
+                                ? 'linear-gradient(135deg, #94a3b8 0%, #64748b 100%)'
+                                : 'linear-gradient(135deg, #f59e0b 0%, #f97316 100%)',
+                            border: 'none',
+                            cursor: aiAnalyzingBulk ? 'not-allowed' : 'pointer',
+                            boxShadow: aiAnalyzingBulk ? 'none' : '0 4px 14px rgba(245,158,11,0.3)',
+                            transition: 'all 0.2s',
+                            opacity: aiAnalyzingBulk ? 0.8 : 1,
+                        }}
+                        onMouseEnter={e => { if (!aiAnalyzingBulk) { (e.currentTarget as any).style.transform = 'translateY(-1px)'; (e.currentTarget as any).style.boxShadow = '0 6px 20px rgba(245,158,11,0.4)'; } }}
+                        onMouseLeave={e => { (e.currentTarget as any).style.transform = 'translateY(0)'; (e.currentTarget as any).style.boxShadow = aiAnalyzingBulk ? 'none' : '0 4px 14px rgba(245,158,11,0.3)'; }}
+                    >
+                        {aiAnalyzingBulk ? (
+                            <>
+                                <Spin size="small" style={{ marginRight: 4 }} />
+                                AI đang phân tích...
+                            </>
+                        ) : (
+                            <>
+                                <Brain size={15} /> 🤖 AI Phân Tích
                             </>
                         )}
                     </button>
@@ -446,16 +640,37 @@ export default function LeadsPage() {
                         {STAGES.map(stage => {
                             const stageLeads = leadsByStage[stage.key] || [];
                             return (
-                                <div key={stage.key} style={{
-                                    flexShrink: 0,
-                                    width: 280,
-                                    borderRadius: 16,
-                                    background: '#fafbfc',
-                                    border: '1px solid #e8ecf0',
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    transition: 'all 0.2s',
-                                }}>
+                                <div
+                                    key={stage.key}
+                                    onDragOver={e => {
+                                        e.preventDefault();
+                                        e.dataTransfer.dropEffect = 'move';
+                                        setDragOverStage(stage.key);
+                                    }}
+                                    onDragLeave={() => setDragOverStage(null)}
+                                    onDrop={e => {
+                                        e.preventDefault();
+                                        setDragOverStage(null);
+                                        const leadId = e.dataTransfer.getData('text/plain');
+                                        if (leadId && draggingLeadId) {
+                                            const lead = leads.find(l => l._id === leadId);
+                                            if (lead && lead.stage !== stage.key) {
+                                                handleStageChange(leadId, stage.key);
+                                            }
+                                        }
+                                        setDraggingLeadId(null);
+                                    }}
+                                    style={{
+                                        flexShrink: 0,
+                                        width: 280,
+                                        borderRadius: 16,
+                                        background: dragOverStage === stage.key ? stage.bgColor : '#fafbfc',
+                                        border: dragOverStage === stage.key ? `2px dashed ${stage.color}` : '1px solid #e8ecf0',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        transition: 'all 0.2s',
+                                    }}
+                                >
                                     {/* Column Header */}
                                     <div style={{
                                         padding: '14px 16px',
@@ -489,21 +704,39 @@ export default function LeadsPage() {
                                         {stageLeads.map((lead, idx) => (
                                             <div
                                                 key={lead._id}
+                                                draggable
+                                                onDragStart={e => {
+                                                    e.dataTransfer.setData('text/plain', lead._id);
+                                                    e.dataTransfer.effectAllowed = 'move';
+                                                    setDraggingLeadId(lead._id);
+                                                    // Make the dragged element semi-transparent
+                                                    setTimeout(() => {
+                                                        (e.target as HTMLElement).style.opacity = '0.4';
+                                                    }, 0);
+                                                }}
+                                                onDragEnd={e => {
+                                                    (e.target as HTMLElement).style.opacity = '1';
+                                                    setDraggingLeadId(null);
+                                                    setDragOverStage(null);
+                                                }}
                                                 onClick={() => openDetail(lead)}
                                                 style={{
-                                                    background: 'white',
+                                                    background: selectedLeadIds.has(lead._id) ? '#eef2ff' : (draggingLeadId === lead._id ? '#f8fafc' : 'white'),
                                                     borderRadius: 12,
-                                                    border: '1px solid #eef0f4',
+                                                    border: selectedLeadIds.has(lead._id) ? '1.5px solid #818cf8' : '1px solid #eef0f4',
                                                     padding: '14px',
                                                     marginBottom: 8,
-                                                    cursor: 'pointer',
+                                                    cursor: 'grab',
                                                     transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
                                                     position: 'relative',
+                                                    userSelect: 'none',
                                                 }}
                                                 onMouseEnter={e => {
-                                                    (e.currentTarget as any).style.boxShadow = '0 4px 16px rgba(0,0,0,0.08)';
-                                                    (e.currentTarget as any).style.transform = 'translateY(-2px)';
-                                                    (e.currentTarget as any).style.borderColor = '#d1d5f0';
+                                                    if (!draggingLeadId) {
+                                                        (e.currentTarget as any).style.boxShadow = '0 4px 16px rgba(0,0,0,0.08)';
+                                                        (e.currentTarget as any).style.transform = 'translateY(-2px)';
+                                                        (e.currentTarget as any).style.borderColor = '#d1d5f0';
+                                                    }
                                                 }}
                                                 onMouseLeave={e => {
                                                     (e.currentTarget as any).style.boxShadow = 'none';
@@ -511,6 +744,27 @@ export default function LeadsPage() {
                                                     (e.currentTarget as any).style.borderColor = '#eef0f4';
                                                 }}
                                             >
+                                                {/* Selection checkbox */}
+                                                <div
+                                                    onClick={e => toggleLeadSelection(lead._id, e)}
+                                                    style={{
+                                                        position: 'absolute', top: 8, right: 8, zIndex: 2,
+                                                        width: 22, height: 22, borderRadius: 6,
+                                                        border: selectedLeadIds.has(lead._id) ? '2px solid #6366f1' : '2px solid #d1d5db',
+                                                        background: selectedLeadIds.has(lead._id) ? '#6366f1' : 'white',
+                                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                        cursor: 'pointer', transition: 'all 0.15s',
+                                                        opacity: selectedLeadIds.has(lead._id) ? 1 : 0.4,
+                                                    }}
+                                                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.opacity = '1'; }}
+                                                    onMouseLeave={e => { if (!selectedLeadIds.has(lead._id)) (e.currentTarget as HTMLElement).style.opacity = '0.4'; }}
+                                                >
+                                                    {selectedLeadIds.has(lead._id) && (
+                                                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                                                            <path d="M2.5 6L5 8.5L9.5 3.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                                        </svg>
+                                                    )}
+                                                </div>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                                                     {lead.avatar ? (
                                                         <img src={lead.avatar} alt="" style={{ width: 36, height: 36, borderRadius: 10, objectFit: 'cover' }} />
@@ -602,16 +856,36 @@ export default function LeadsPage() {
                         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                             <thead>
                                 <tr style={{ borderBottom: '1px solid #f1f5f9', background: '#fafbfd' }}>
-                                    {['Khách hàng', 'Liên hệ', 'Nguồn', 'Giai đoạn', 'Ngày tạo', ''].map((h, i) => (
+                                    {['', 'Khách hàng', 'Liên hệ', 'Nguồn', 'Giai đoạn', 'Ngày tạo', ''].map((h, i) => (
                                         <th key={i} style={{
-                                            textAlign: i === 5 ? 'center' : 'left',
-                                            padding: '12px 16px',
+                                            textAlign: i === 6 ? 'center' : (i === 0 ? 'center' : 'left'),
+                                            padding: i === 0 ? '12px 8px 12px 16px' : '12px 16px',
                                             fontSize: 11.5,
                                             fontWeight: 600,
                                             color: '#64748b',
-                                            textTransform: 'uppercase',
+                                            textTransform: 'uppercase' as const,
                                             letterSpacing: 0.5,
-                                        }}>{h}</th>
+                                            width: i === 0 ? 40 : 'auto',
+                                        }}>
+                                            {i === 0 ? (
+                                                <div
+                                                    onClick={selectAllLeads}
+                                                    style={{
+                                                        width: 20, height: 20, borderRadius: 5,
+                                                        border: selectedLeadIds.size === leads.length && leads.length > 0 ? '2px solid #6366f1' : '2px solid #d1d5db',
+                                                        background: selectedLeadIds.size === leads.length && leads.length > 0 ? '#6366f1' : 'white',
+                                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                        cursor: 'pointer', margin: '0 auto',
+                                                    }}
+                                                >
+                                                    {selectedLeadIds.size === leads.length && leads.length > 0 && (
+                                                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                                                            <path d="M2.5 6L5 8.5L9.5 3.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                                        </svg>
+                                                    )}
+                                                </div>
+                                            ) : h}
+                                        </th>
                                     ))}
                                 </tr>
                             </thead>
@@ -626,10 +900,29 @@ export default function LeadsPage() {
                                                 borderBottom: '1px solid #f8fafc',
                                                 cursor: 'pointer',
                                                 transition: 'all 0.15s',
+                                                background: selectedLeadIds.has(lead._id) ? '#eef2ff' : 'transparent',
                                             }}
-                                            onMouseEnter={e => { (e.currentTarget as any).style.background = '#fafbfe'; }}
-                                            onMouseLeave={e => { (e.currentTarget as any).style.background = 'transparent'; }}
+                                            onMouseEnter={e => { if (!selectedLeadIds.has(lead._id)) (e.currentTarget as any).style.background = '#fafbfe'; }}
+                                            onMouseLeave={e => { if (!selectedLeadIds.has(lead._id)) (e.currentTarget as any).style.background = 'transparent'; }}
                                         >
+                                            <td style={{ padding: '12px 8px 12px 16px', width: 40, textAlign: 'center' }}>
+                                                <div
+                                                    onClick={e => toggleLeadSelection(lead._id, e)}
+                                                    style={{
+                                                        width: 20, height: 20, borderRadius: 5,
+                                                        border: selectedLeadIds.has(lead._id) ? '2px solid #6366f1' : '2px solid #d1d5db',
+                                                        background: selectedLeadIds.has(lead._id) ? '#6366f1' : 'white',
+                                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                        cursor: 'pointer', margin: '0 auto',
+                                                    }}
+                                                >
+                                                    {selectedLeadIds.has(lead._id) && (
+                                                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                                                            <path d="M2.5 6L5 8.5L9.5 3.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                                        </svg>
+                                                    )}
+                                                </div>
+                                            </td>
                                             <td style={{ padding: '12px 16px' }}>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                                                     {lead.avatar ? (
@@ -811,6 +1104,178 @@ export default function LeadsPage() {
                                         </div>
                                     </div>
                                 </div>
+                            </div>
+
+                            {/* ── AI Insights Panel ── */}
+                            <div style={{ padding: '18px 28px', background: 'linear-gradient(135deg, #fffbeb, #fef3c7)', borderBottom: '1px solid #fde68a' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        <Sparkles size={14} color="#f59e0b" />
+                                        <span style={{ fontSize: 11, fontWeight: 600, color: '#92400e', textTransform: 'uppercase', letterSpacing: 0.5 }}>AI Insights</span>
+                                    </div>
+                                    <button
+                                        disabled={aiAnalyzing}
+                                        onClick={async (e) => {
+                                            e.stopPropagation();
+                                            if (aiAnalyzing || !selectedLead) return;
+                                            // Find conversation for this lead
+                                            setAiAnalyzing(true);
+                                            try {
+                                                // Get list of conversations filtered by this visitor
+                                                const { httpClient } = await import('../../../lib/http/client');
+                                                const convRes = await httpClient.get(`/workspaces/${workspaceId}/conversations`, { params: { limit: 1 } });
+                                                const convs = convRes?.data?.data?.items || convRes?.data?.data || [];
+                                                
+                                                // Find conversation matching this lead's Zalo/FB ID
+                                                let targetConvId = '';
+                                                for (const conv of convs) {
+                                                    const visitorName = conv.visitorInfo?.name || '';
+                                                    if (visitorName === selectedLead.name || 
+                                                        (selectedLead.zaloUserId && conv.visitorId === `zalo_${(selectedLead as any).zaloUserId}`)) {
+                                                        targetConvId = conv._id;
+                                                        break;
+                                                    }
+                                                }
+                                                
+                                                if (!targetConvId && convs.length > 0) {
+                                                    // Try to find by searching more conversations
+                                                    const allConvRes = await httpClient.get(`/workspaces/${workspaceId}/conversations`, { params: { limit: 100 } });
+                                                    const allConvs = allConvRes?.data?.data?.items || allConvRes?.data?.data || [];
+                                                    for (const conv of allConvs) {
+                                                        const vName = conv.visitorInfo?.name || '';
+                                                        if (vName === selectedLead.name ||
+                                                            ((selectedLead as any).zaloUserId && conv.visitorId === `zalo_${(selectedLead as any).zaloUserId}`) ||
+                                                            ((selectedLead as any).fbUserId && conv.visitorId === `fb_${(selectedLead as any).fbUserId}`)) {
+                                                            targetConvId = conv._id;
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                                
+                                                if (targetConvId) {
+                                                    const res = await leadService.aiAnalyze(workspaceId as string, targetConvId, true);
+                                                    if (res?.data?.analysis) {
+                                                        message.success(`✅ AI: ${res.data.analysis.summary || 'Đã phân tích'}`);
+                                                        // Refresh lead data
+                                                        if (res.data.lead) {
+                                                            setSelectedLead(res.data.lead);
+                                                            setLeads(prev => prev.map(l => l._id === res.data.lead._id ? res.data.lead : l));
+                                                        }
+                                                    } else {
+                                                        message.info('Không đủ tin nhắn để phân tích');
+                                                    }
+                                                } else {
+                                                    message.warning('Không tìm thấy cuộc hội thoại cho lead này');
+                                                }
+                                            } catch (err: any) {
+                                                message.error(`Lỗi: ${err?.message || 'Không thể phân tích'}`);
+                                            } finally {
+                                                setAiAnalyzing(false);
+                                            }
+                                        }}
+                                        style={{
+                                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                                            fontSize: 11, fontWeight: 600,
+                                            padding: '4px 10px', borderRadius: 6,
+                                            background: aiAnalyzing ? '#fde68a' : '#f59e0b',
+                                            color: 'white', border: 'none',
+                                            cursor: aiAnalyzing ? 'not-allowed' : 'pointer',
+                                            transition: 'all 0.2s',
+                                        }}
+                                    >
+                                        {aiAnalyzing ? <Spin size="small" /> : <RefreshCw size={11} />}
+                                        {aiAnalyzing ? 'Đang phân tích...' : 'Phân tích AI'}
+                                    </button>
+                                </div>
+
+                                {/* Show AI-extracted info from lead tags/notes */}
+                                {(() => {
+                                    const intentTag = selectedLead.tags?.find(t => t.startsWith('intent:'));
+                                    const sentimentTag = selectedLead.tags?.find(t => t.startsWith('sentiment:'));
+                                    const urgencyTag = selectedLead.tags?.find(t => t.startsWith('urgency:'));
+                                    const productTags = selectedLead.tags?.filter(t => t.startsWith('product:')) || [];
+                                    const aiNote = selectedLead.notes?.find(n => n.text?.startsWith('🤖 AI'));
+
+                                    const intentLabels: Record<string, string> = {
+                                        'intent:mua_hàng': '🛒 Muốn mua hàng',
+                                        'intent:hỏi_giá': '💰 Hỏi giá',
+                                        'intent:hỗ_trợ': '🔧 Cần hỗ trợ',
+                                        'intent:khiếu_nại': '⚠️ Khiếu nại',
+                                        'intent:khác': '💬 Khác',
+                                    };
+                                    const sentimentLabels: Record<string, { label: string; color: string }> = {
+                                        'sentiment:tích_cực': { label: '😊 Tích cực', color: '#10b981' },
+                                        'sentiment:trung_lập': { label: '😐 Trung lập', color: '#64748b' },
+                                        'sentiment:tiêu_cực': { label: '😞 Tiêu cực', color: '#ef4444' },
+                                    };
+
+                                    if (!intentTag && !sentimentTag && !aiNote && selectedLead.score === 0) {
+                                        return (
+                                            <div style={{ textAlign: 'center', padding: '8px 0', color: '#92400e', fontSize: 12 }}>
+                                                <Brain size={20} style={{ opacity: 0.5, margin: '0 auto 6px', display: 'block' }} />
+                                                Nhấn "Phân tích AI" để trích xuất thông tin khách hàng tự động
+                                            </div>
+                                        );
+                                    }
+
+                                    return (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                            {/* Intent + Score Row */}
+                                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                                {intentTag && (
+                                                    <span style={{
+                                                        fontSize: 12, fontWeight: 600,
+                                                        padding: '4px 10px', borderRadius: 8,
+                                                        background: 'white', color: '#92400e',
+                                                        border: '1px solid #fde68a',
+                                                    }}>{intentLabels[intentTag] || intentTag.replace('intent:', '')}</span>
+                                                )}
+                                                {sentimentTag && (
+                                                    <span style={{
+                                                        fontSize: 12, fontWeight: 600,
+                                                        padding: '4px 10px', borderRadius: 8,
+                                                        background: 'white',
+                                                        color: sentimentLabels[sentimentTag]?.color || '#64748b',
+                                                        border: '1px solid #e2e8f0',
+                                                    }}>{sentimentLabels[sentimentTag]?.label || sentimentTag.replace('sentiment:', '')}</span>
+                                                )}
+                                                {selectedLead.score > 0 && (
+                                                    <span style={{
+                                                        fontSize: 12, fontWeight: 700,
+                                                        padding: '4px 10px', borderRadius: 8,
+                                                        background: selectedLead.score >= 70 ? '#dcfce7' : selectedLead.score >= 40 ? '#fef3c7' : '#fee2e2',
+                                                        color: selectedLead.score >= 70 ? '#166534' : selectedLead.score >= 40 ? '#92400e' : '#991b1b',
+                                                        border: `1px solid ${selectedLead.score >= 70 ? '#a7f3d0' : selectedLead.score >= 40 ? '#fde68a' : '#fecaca'}`,
+                                                    }}>🎯 Score: {selectedLead.score}/100</span>
+                                                )}
+                                            </div>
+                                            {/* Product Tags */}
+                                            {productTags.length > 0 && (
+                                                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                                    {productTags.map(t => (
+                                                        <span key={t} style={{
+                                                            fontSize: 11, fontWeight: 500,
+                                                            padding: '2px 8px', borderRadius: 6,
+                                                            background: 'white', color: '#6366f1',
+                                                            border: '1px solid #c7d2fe',
+                                                        }}>🏷️ {t.replace('product:', '')}</span>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            {/* AI Summary */}
+                                            {aiNote && (
+                                                <div style={{
+                                                    fontSize: 12, lineHeight: 1.5,
+                                                    padding: '8px 12px', borderRadius: 8,
+                                                    background: 'white', color: '#475569',
+                                                    border: '1px solid #fde68a',
+                                                }}>
+                                                    {aiNote.text}
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })()}
                             </div>
 
                             {/* ── Stage Pipeline ── */}
@@ -1476,6 +1941,270 @@ export default function LeadsPage() {
                     );
                 })()}
             </Drawer>
+
+            {/* ═══════ FLOATING BULK ACTION BAR ═══════ */}
+            {selectedLeadIds.size > 0 && (
+                <div style={{
+                    position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+                    zIndex: 1000,
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    padding: '12px 24px',
+                    background: 'linear-gradient(135deg, #1e293b 0%, #334155 100%)',
+                    borderRadius: 16,
+                    boxShadow: '0 20px 60px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.1)',
+                    backdropFilter: 'blur(20px)',
+                    animation: 'slideUpBar 0.3s ease',
+                }}>
+                    <style>{`
+                        @keyframes slideUpBar {
+                            from { opacity: 0; transform: translateX(-50%) translateY(20px); }
+                            to { opacity: 1; transform: translateX(-50%) translateY(0); }
+                        }
+                    `}</style>
+
+                    {/* Count badge */}
+                    <div style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '6px 14px',
+                        background: 'rgba(99,102,241,0.2)', borderRadius: 10,
+                        border: '1px solid rgba(99,102,241,0.3)',
+                    }}>
+                        <CheckSquare size={16} color="#a5b4fc" />
+                        <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>{selectedLeadIds.size}</span>
+                        <span style={{ fontSize: 12, color: '#94a3b8' }}>đã chọn</span>
+                    </div>
+
+                    {/* Divider */}
+                    <div style={{ width: 1, height: 28, background: 'rgba(255,255,255,0.15)' }} />
+
+                    {/* Broadcast Button */}
+                    <button
+                        onClick={() => setBroadcastOpen(true)}
+                        style={{
+                            height: 40, padding: '0 20px',
+                            borderRadius: 10, border: 'none',
+                            background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                            color: '#fff', fontSize: 13, fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: 8,
+                            transition: 'all 0.15s',
+                            boxShadow: '0 4px 14px rgba(99,102,241,0.4)',
+                        }}
+                        onMouseEnter={e => { (e.currentTarget).style.transform = 'translateY(-1px)'; }}
+                        onMouseLeave={e => { (e.currentTarget).style.transform = 'translateY(0)'; }}
+                    >
+                        <Send size={15} /> Gửi tin nhắn hàng loạt
+                    </button>
+
+                    {/* Change Stage Button */}
+                    <Dropdown
+                        open={bulkStageOpen}
+                        onOpenChange={setBulkStageOpen}
+                        trigger={['click']}
+                        dropdownRender={() => (
+                            <div style={{
+                                background: '#fff', borderRadius: 12, padding: 8,
+                                boxShadow: '0 12px 40px rgba(0,0,0,0.15)',
+                                border: '1px solid #e2e8f0',
+                                minWidth: 180,
+                            }}>
+                                {STAGES.map(s => (
+                                    <div key={s.key}
+                                        onClick={() => handleBulkStageChange(s.key)}
+                                        style={{
+                                            padding: '10px 14px', borderRadius: 8,
+                                            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10,
+                                            fontSize: 13, fontWeight: 500, color: '#1e293b',
+                                            transition: 'background 0.15s',
+                                        }}
+                                        onMouseEnter={e => { (e.currentTarget).style.background = s.bgColor; }}
+                                        onMouseLeave={e => { (e.currentTarget).style.background = 'transparent'; }}
+                                    >
+                                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: s.color }} />
+                                        {s.label}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    >
+                        <button style={{
+                            height: 40, padding: '0 16px',
+                            borderRadius: 10, border: '1px solid rgba(255,255,255,0.15)',
+                            background: 'rgba(255,255,255,0.08)', color: '#e2e8f0',
+                            fontSize: 13, fontWeight: 500, cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: 6,
+                            transition: 'all 0.15s',
+                        }}
+                        onMouseEnter={e => { (e.currentTarget).style.background = 'rgba(255,255,255,0.15)'; }}
+                        onMouseLeave={e => { (e.currentTarget).style.background = 'rgba(255,255,255,0.08)'; }}
+                        >
+                            <Target size={14} /> Chuyển giai đoạn
+                        </button>
+                    </Dropdown>
+
+                    {/* Delete Button */}
+                    <button
+                        onClick={handleBulkDelete}
+                        style={{
+                            height: 40, padding: '0 16px',
+                            borderRadius: 10, border: '1px solid rgba(239,68,68,0.3)',
+                            background: 'rgba(239,68,68,0.15)', color: '#fca5a5',
+                            fontSize: 13, fontWeight: 500, cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: 6,
+                            transition: 'all 0.15s',
+                        }}
+                        onMouseEnter={e => { (e.currentTarget).style.background = 'rgba(239,68,68,0.25)'; }}
+                        onMouseLeave={e => { (e.currentTarget).style.background = 'rgba(239,68,68,0.15)'; }}
+                    >
+                        <Trash2 size={14} /> Xoá
+                    </button>
+
+                    {/* Clear selection */}
+                    <button
+                        onClick={() => setSelectedLeadIds(new Set())}
+                        style={{
+                            width: 36, height: 36, borderRadius: 10,
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            background: 'rgba(255,255,255,0.05)', color: '#94a3b8',
+                            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            transition: 'all 0.15s',
+                        }}
+                        onMouseEnter={e => { (e.currentTarget).style.background = 'rgba(255,255,255,0.1)'; }}
+                        onMouseLeave={e => { (e.currentTarget).style.background = 'rgba(255,255,255,0.05)'; }}
+                    >
+                        <X size={16} />
+                    </button>
+                </div>
+            )}
+
+            {/* ═══════ BROADCAST MESSAGE MODAL ═══════ */}
+            <Modal
+                open={broadcastOpen}
+                onCancel={() => { setBroadcastOpen(false); setBroadcastMsg(''); }}
+                title={null}
+                footer={null}
+                width={520}
+                styles={{ body: { padding: 0 } }}
+                centered
+            >
+                <div style={{ padding: '28px' }}>
+                    {/* Header */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 24 }}>
+                        <div style={{
+                            width: 48, height: 48, borderRadius: 14,
+                            background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            boxShadow: '0 4px 14px rgba(99,102,241,0.3)',
+                        }}>
+                            <Send size={22} color="#fff" />
+                        </div>
+                        <div>
+                            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#0f172a' }}>Gửi tin nhắn hàng loạt</h3>
+                            <p style={{ margin: '4px 0 0', fontSize: 13, color: '#64748b' }}>
+                                Broadcast tới {selectedLeadIds.size} lead đã chọn qua Zalo
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Recipients preview */}
+                    <div style={{
+                        padding: '14px 16px', borderRadius: 12,
+                        background: '#f8fafc', border: '1px solid #e2e8f0',
+                        marginBottom: 16,
+                    }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>Người nhận</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 120, overflowY: 'auto' }}>
+                            {selectedLeadsList.slice(0, 20).map(l => (
+                                <span key={l._id} style={{
+                                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                                    padding: '4px 12px', borderRadius: 20,
+                                    background: l.source === 'zalo' ? '#e0f2fe' : '#f1f5f9',
+                                    fontSize: 12, fontWeight: 500,
+                                    color: l.source === 'zalo' ? '#0369a1' : '#64748b',
+                                    border: `1px solid ${l.source === 'zalo' ? '#bae6fd' : '#e2e8f0'}`,
+                                }}>
+                                    {SOURCE_ICONS[l.source] || '📌'}
+                                    {l.name}
+                                    {l.source !== 'zalo' && <span style={{ fontSize: 10, color: '#94a3b8' }}>(bỏ qua)</span>}
+                                </span>
+                            ))}
+                            {selectedLeadsList.length > 20 && (
+                                <span style={{ fontSize: 12, color: '#94a3b8', padding: '4px 8px' }}>+{selectedLeadsList.length - 20} người khác</span>
+                            )}
+                        </div>
+                        {selectedLeadsList.filter(l => l.source !== 'zalo').length > 0 && (
+                            <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: '#fffbeb', border: '1px solid #fde68a', fontSize: 12, color: '#92400e' }}>
+                                ⚠️ {selectedLeadsList.filter(l => l.source !== 'zalo').length} lead không phải Zalo sẽ bị bỏ qua. Chỉ lead từ Zalo mới nhận được tin nhắn.
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Message input */}
+                    <div style={{ marginBottom: 20 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 8 }}>Nội dung tin nhắn</div>
+                        <Input.TextArea
+                            value={broadcastMsg}
+                            onChange={e => setBroadcastMsg(e.target.value)}
+                            placeholder="Nhập tin nhắn bạn muốn gửi...
+
+Ví dụ: Xin chào! Bên mình đang có chương trình khuyến mãi đặc biệt. Anh/chị có muốn tìm hiểu thêm không ạ?"
+                            rows={5}
+                            maxLength={2000}
+                            style={{
+                                borderRadius: 12, resize: 'none',
+                                fontSize: 14, lineHeight: 1.6,
+                            }}
+                            showCount
+                        />
+                    </div>
+
+                    {/* Info box */}
+                    <div style={{
+                        padding: '12px 16px', borderRadius: 10,
+                        background: '#f0f9ff', border: '1px solid #bae6fd',
+                        fontSize: 12, color: '#0369a1', lineHeight: 1.6,
+                        marginBottom: 24,
+                    }}>
+                        💡 <strong>Lưu ý:</strong> Tin nhắn sẽ được gửi tuần tự với khoảng cách 3 giây giữa mỗi người để tránh bị spam. Cần kết nối Zalo trước khi gửi.
+                    </div>
+
+                    {/* Actions */}
+                    <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                        <button
+                            onClick={() => { setBroadcastOpen(false); setBroadcastMsg(''); }}
+                            style={{
+                                height: 44, padding: '0 24px',
+                                borderRadius: 12, border: '1px solid #e2e8f0',
+                                background: '#fff', color: '#64748b',
+                                fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                            }}
+                        >Hủy</button>
+                        <button
+                            onClick={handleBroadcast}
+                            disabled={!broadcastMsg.trim() || broadcastSending}
+                            style={{
+                                height: 44, padding: '0 28px',
+                                borderRadius: 12, border: 'none',
+                                background: broadcastMsg.trim() && !broadcastSending
+                                    ? 'linear-gradient(135deg, #6366f1, #8b5cf6)'
+                                    : '#e2e8f0',
+                                color: broadcastMsg.trim() && !broadcastSending ? '#fff' : '#94a3b8',
+                                fontSize: 14, fontWeight: 700,
+                                cursor: broadcastMsg.trim() && !broadcastSending ? 'pointer' : 'not-allowed',
+                                display: 'flex', alignItems: 'center', gap: 8,
+                                boxShadow: broadcastMsg.trim() && !broadcastSending ? '0 4px 14px rgba(99,102,241,0.3)' : 'none',
+                                transition: 'all 0.2s',
+                            }}
+                        >
+                            {broadcastSending ? (
+                                <><Spin size="small" /> Đang gửi...</>
+                            ) : (
+                                <><Send size={16} /> Gửi {selectedLeadsList.filter(l => l.source === 'zalo').length} tin nhắn</>
+                            )}
+                        </button>
+                    </div>
+                </div>
+            </Modal>
         </AppLayout>
     );
 }

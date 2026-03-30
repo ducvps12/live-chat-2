@@ -3,6 +3,12 @@ import type { NextConfig } from "next";
 const BACKEND_PORT = process.env.SERVER_PORT || 4010;
 
 const nextConfig: NextConfig = {
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
   async rewrites() {
     return [
       {

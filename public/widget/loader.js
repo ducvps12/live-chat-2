@@ -925,15 +925,15 @@
                 }
 
                 // Auto-evaluate view: if has conversations, show list. Else show chat.
-                fetch(base + '/api/conversations/public/visitor/' + vid + '/widget/' + id)
-                    .then(r => r.json())
-                    .then(res => {
-                        if (res.success && res.data && res.data.length > 0) {
-                            switchView('list');
-                        } else {
-                            switchView('chat');
-                        }
-                    }).catch(() => switchView('chat'));
+                loadConversationList().then(function (hasConversations) {
+                    if (hasConversations) {
+                        switchView('list', { skipLoad: true });
+                    } else {
+                        switchView('chat');
+                    }
+                }).catch(function () {
+                    switchView('chat');
+                });
 
                 if (!hasOpenedOnce) {
                     hasOpenedOnce = true;
@@ -961,12 +961,13 @@
         }
 
         // ── View Switching ──
-        function switchView(view) {
+        function switchView(view, options) {
+            var opts = options || {};
             if (view === 'list') {
                 win.classList.remove('show-chat');
                 win.classList.add('show-list');
-                // load list when entering list view
-                loadConversationList();
+                // load list when entering list view unless caller already loaded
+                if (!opts.skipLoad) loadConversationList();
             } else {
                 win.classList.remove('show-list');
                 win.classList.add('show-chat');
@@ -1001,7 +1002,7 @@
         }
 
         function loadConversationList() {
-            fetch(base + '/api/conversations/public/visitor/' + vid + '/widget/' + id)
+            return fetch(base + '/api/conversations/public/visitor/' + vid + '/widget/' + id)
                 .then(function(r) { return r.json(); })
                 .then(function(res) {
                     if (res.success && res.data && res.data.length > 0) {
@@ -1024,7 +1025,7 @@
                         var listContainer = win.querySelector('.nchat-list-items');
                         listContainer.innerHTML = listHtml;
                         win.classList.add('has-list');
-                        
+
                         // Bind clicks
                         var items = listContainer.querySelectorAll('.nchat-list-item');
                         for (var j = 0; j < items.length; j++) {
@@ -1033,12 +1034,18 @@
                                 openConversation(convId);
                             });
                         }
-                    } else {
-                        win.querySelector('.nchat-list-items').innerHTML = '<div style="padding:20px;text-align:center;color:#999;font-size:13px">' + (lang === 'vi' ? 'Chưa có cuộc hội thoại nào' : 'No conversations yet') + '</div>';
-                        win.classList.remove('has-list');
+                        return true;
                     }
+
+                    win.querySelector('.nchat-list-items').innerHTML = '<div style="padding:20px;text-align:center;color:#999;font-size:13px">' + (lang === 'vi' ? 'Chưa có cuộc hội thoại nào' : 'No conversations yet') + '</div>';
+                    win.classList.remove('has-list');
+                    return false;
                 })
-                .catch(function(err) {});
+                .catch(function() {
+                    win.querySelector('.nchat-list-items').innerHTML = '<div style="padding:20px;text-align:center;color:#999;font-size:13px">' + (lang === 'vi' ? 'Không tải được danh sách hội thoại' : 'Unable to load conversations') + '</div>';
+                    win.classList.remove('has-list');
+                    return false;
+                });
         }
 
         function openConversation(convId) {

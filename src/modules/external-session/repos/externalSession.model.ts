@@ -47,4 +47,4 @@ const externalSessionSchema = new Schema<IExternalSession>(
 
 externalSessionSchema.index({ workspaceId: 1, status: 1 });
 
-export const ExternalSessionModel = mongoose.model<IExternalSession>('ExternalSession', externalSessionSchema);
+export const ExternalSessionModel = (mongoose.models.ExternalSession || mongoose.model<IExternalSession>('ExternalSession', externalSessionSchema)) as mongoose.Model<IExternalSession>;
