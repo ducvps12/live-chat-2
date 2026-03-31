@@ -3,9 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev:next": "next dev --port 3010",
-    "dev:server": "tsx watch src/bootstrap/index.ts",
-    "dev": "concurrently \"npm run dev:next\" \"npm run dev:server\"",
+    "dev": "tsx watch src/bootstrap/index.ts",
     "build": "next build",
     "start": "node --import tsx src/bootstrap/production.ts",
     "start:server": "node --import tsx src/bootstrap/index.ts",
